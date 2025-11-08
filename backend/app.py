@@ -14,6 +14,28 @@ from services.parsing_service import extract_text
 from services.qa_service import generate_initial_questions, generate_deep_dive_question, generate_refill_questions
 import random
 
+def _parse_similarity_level(report_text):
+    """
+    LLM이 생성한 비교 보고서 텍스트에서 'Similarity Level'을 파싱합니다.
+    """
+    # 텍스트에서 'Similarity Level:**' 뒤의 내용을 찾습니다.
+    # (소문자 변환, 공백/줄바꿈 제거)
+    try:
+        match = re.search(r"Similarity Level:\s*(.+)", report_text, re.IGNORECASE)
+        if match:
+            level = match.group(1).strip().lower()
+            if "very high" in level:
+                return "Very High"
+            if "high" in level:
+                return "High"
+            if "moderate" in level:
+                return "Moderate"
+            if "low" in level:
+                return "Low"
+    except Exception:
+        pass
+    return "Unknown" # 파싱 실패
+    
 # ⬇️ 질문 분배를 위한 헬퍼 함수
 def _distribute_questions(questions_pool, count=3):
     """
@@ -53,63 +75,111 @@ CORS(app, resources={r"/api/*": {"origins": ["*.vercel.app", "http://localhost:3
 analysis_results = {}
 analysis_status = {}
 
-# --- 2. 백그라운드 분석 스레드 ---
-def background_analysis(report_id, text, doc_type, original_filename):
-    """(매우 중요) 백그라운드 스레드에서 무거운 작업을 처리"""
-    print(f"[{report_id}] 백그라운드 분석 시작...")
+def background_analysis_step1(report_id, text, doc_type, original_filename):
+    """(1단계) 핵심 분석만 수행하고, 2단계(QA) 스레드를 호출합니다."""
+    
+    print(f"[{report_id}] Step 1 (Analysis) starting...")
+    analysis_status[report_id] = "processing_analysis" # 1. 상태: 분석 중
+    
     try:
-        # 1. 핵심 분석 (LLM 요약 -> S-BERT 검색 -> LLM 1:1 비교)
+        # 1. 핵심 분석 (analysis_service)
         analysis_data = perform_full_analysis_and_comparison(text, original_filename)
         
         if not analysis_data:
             raise Exception("perform_full_analysis_and_comparison returned None")
-        # ⬇️ 5. (수정) qa_service 호출
-        print(f"[{report_id}] 핵심 분석 완료. QA 질문 생성 시작...")
-        submission_summary = analysis_data['submission_summary']
-        similar_summaries = analysis_data['llm_comparison_results'] # llm 비교 결과가 유사 요약본임
+
+        print(f"[{report_id}] Step 1 (Analysis) COMPLETE. Saving partial data.")
+        text_snippet = text[:4000] 
+
+        # 2. (중요) 질문이 *없는* 부분적인(partial) 결과 저장
+        partial_result = {
+            "summary": analysis_data['submission_summary'], 
+            "evaluation": {
+                "structural_similarity_comment": "LLM 정밀 비교 결과를 확인하세요." 
+            },
+            "logicFlow": {},
+            "similarity_details": {
+                "structural_similarity_details": analysis_data['llm_comparison_results']
+            },
+            "text_snippet": text_snippet, # (QA가 나중에 사용할 재료)
+            "initialQuestions": [],   # (아직 비어있음)
+            "questions_pool": [],     # (아직 비어있음)
+            "is_refilling": False
+        }
         
-        # 9개의 질문 풀 생성
-        questions_pool = generate_initial_questions(submission_summary, similar_summaries, text)
+        analysis_results[report_id] = partial_result
+        analysis_status[report_id] = "processing_questions" # 2. 상태: 질문 생성 중
+
+        # 3. 2단계(QA) 백그라운드 스레드를 즉시 호출
+        print(f"[{report_id}] Triggering Step 2 (QA) in background...")
+        qa_thread = threading.Thread(target=background_analysis_step2_qa, args=(report_id,))
+        qa_thread.start()
+
+    except Exception as e:
+        print(f"[{report_id}] Step 1 (Analysis) FAILED: {e}")
+        analysis_status[report_id] = "error"
+        analysis_results[report_id] = {"error": str(e)}
+
+def background_analysis_step2_qa(report_id):
+    """(2단계) QA 질문만 생성해서 기존 결과에 append합니다."""
+    
+    print(f"[{report_id}] Step 2 (QA) thread started...")
+    try:
+        # 1단계에서 저장한 데이터 가져오기
+        report = analysis_results.get(report_id)
+        if not report:
+            raise Exception("Report data not found for QA generation")
+
+        summary = report["summary"]
+        similar = report["similarity_details"]["structural_similarity_details"]
+        snippet = report["text_snippet"]
+        
+        # 1. 모든 후보 보고서를 가져옵니다.
+        all_candidate_reports = report["similarity_details"]["structural_similarity_details"]
+        
+        # 2. 'High' 또는 'Very High'인 보고서만 필터링합니다.
+        high_similarity_reports = []
+        for candidate_report in all_candidate_reports:
+            report_text = candidate_report.get("llm_comparison_report", "")
+            level = _parse_similarity_level(report_text)
+            
+            if level in ["High", "Very High"]:
+                high_similarity_reports.append(candidate_report)
+                
+        print(f"[{report_id}] QA Filter: Found {len(high_similarity_reports)} 'High/Very High' reports.")
+        
+        # 3. 9개의 질문 풀 생성 (qa_service)
+        questions_pool = generate_initial_questions(summary, similar, snippet)
         
         if not questions_pool:
-            print(f"[{report_id}] WARNING: QA 질문 풀 생성 실패. 임시 질문으로 대체합니다.")
+            print(f"[{report_id}] WARNING: QA generation failed. Using dummies.")
             questions_pool = [
                 {"type": "critical", "question": "임시 질문 1: 주장의 근거가 약합니다."},
                 {"type": "perspective", "question": "임시 질문 2: 다른 관점은 없나요?"},
                 {"type": "innovative", "question": "임시 질문 3: 그래서 어떻게 적용하죠?"}
             ]
         
-        # 9개 풀에서 3개 분배 (분배 후 'questions_pool'은 6개가 됨)
+        # 4. 3개 분배
         initial_questions = _distribute_questions(questions_pool, 3)
-        # ⬆️ 5.
-
-
-        # 3. 최종 결과 취합
-        final_result = {
-            "summary": analysis_data['submission_summary'], 
-            "evaluation": {
-                "structural_similarity_comment": "LLM 정밀 비교 결과를 확인하세요." 
-            },
-            "logicFlow": {}, # (임시) 논리 흐름도는 아직 없음
-            "similarity_details": {
-                "structural_similarity_details": analysis_data['llm_comparison_results']
-            },
-            "initialQuestions": initial_questions,
-            "qa_history": [], # ⬅️ 사용자와의 QA 기록 시작
-            "questions_pool": questions_pool # ⬅️ 남은 6개 질문 저장
-        }
         
-        analysis_results[report_id] = final_result
-        analysis_status[report_id] = "completed"
-        print(f"[{report_id}] 분석 완료 및 저장됨. (질문 풀 {len(questions_pool)}개)")
+        # 5. (중요) 기존 report 객체에 질문 데이터 *업데이트*
+        report["initialQuestions"] = initial_questions
+        report["questions_pool"] = questions_pool
+        
+        analysis_status[report_id] = "completed" # 3. 상태: 모든 작업 완료
+        print(f"[{report_id}] Step 2 (QA) COMPLETE. Status set to 'completed'.")
 
     except Exception as e:
-        print(f"[{report_id}] 백그라운드 분석 중 오류 발생: {e}")
-        analysis_status[report_id] = "error"
-        analysis_results[report_id] = {"error": str(e)}
+        print(f"[{report_id}] Step 2 (QA) FAILED: {e}")
+        # (참고) QA가 실패하더라도 분석은 성공했으므로, 
+        # 상태를 'error'로 바꾸는 대신 'completed'로 두어 분석 결과는 볼 수 있게 함
+        analysis_status[report_id] = "completed"
+
 
 
 # --- 3. API 라우트(주소) 정의 ---
+
+
 
 @app.route("/api/analyze", methods=["POST"])
 def analyze_report():
@@ -140,7 +210,7 @@ def analyze_report():
     
     # (매우 중요) 분석을 백그라운드 스레드에서 시작시킴
     thread = threading.Thread(
-        target=background_analysis, 
+        target=background_analysis_step1,
         args=(report_id, text, doc_type, original_filename)
     )
     thread.start()
@@ -149,24 +219,34 @@ def analyze_report():
     return jsonify({"reportId": report_id}), 202
 
 
+# ⬇️⬇️⬇️ 3. (수정) /api/report/<report_id> 엔드포트 ⬇️⬇️⬇️
 @app.route("/api/report/<report_id>", methods=["GET"])
-def get_report_status(report_id):
+def get_report(report_id):
     """
     GET /api/report/<report_id>
-    프론트엔드가 이 주소를 '폴링'하여 분석 상태를 확인
+    분석 상태와 데이터를 반환합니다. (상태 세분화)
     """
-    status = analysis_status.get(report_id, "not_found")
-    
+    status = analysis_status.get(report_id)
+    report_data = analysis_results.get(report_id)
+
+    if not status:
+        return jsonify({"error": "Report not found"}), 404
+
+    if status == "processing_analysis":
+        # 1. 아직 분석 중
+        return jsonify({"status": "processing_analysis", "data": None})
+
+    if status == "processing_questions":
+        # 2. 분석 완료, QA 생성 중 (프론트가 이 데이터를 표시할 수 있음)
+        return jsonify({"status": "processing_questions", "data": report_data})
+
     if status == "completed":
-        data = analysis_results.get(report_id)
-        return jsonify({"status": "completed", "data": data})
-    elif status == "processing":
-        return jsonify({"status": "processing"})
-    elif status == "error":
-        data = analysis_results.get(report_id, {"error": "Unknown error"})
-        return jsonify({"status": "error", "data": data}), 500
-    else:
-        return jsonify({"status": "not_found"}), 404
+        # 3. 모든 작업 완료 (QA 질문 포함)
+        return jsonify({"status": "completed", "data": report_data})
+        
+    if status == "error":
+        # 4. 1단계(분석)에서 오류 발생
+        return jsonify({"status": "error", "data": report_data}), 500
 
 # --- ⬇️ 6. (추가) QA 상호작용을 위한 새 API 엔드포인트 ---
 
