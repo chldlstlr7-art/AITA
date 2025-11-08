@@ -3,8 +3,9 @@ import threading
 import uuid
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
-
+load_dotenv()
 # --- 0. 파싱 및 핵심 서비스 임포트 ---
 # (참고: 0_parsing_service.py는 아직 안 만들었으므로 임시 함수를 둡니다.)
 # (참고: 4_qa_service.py도 임시 함수를 둡니다.)
