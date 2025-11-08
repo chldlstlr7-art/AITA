@@ -1,13 +1,15 @@
-# 1. Flask 서버 구동을 위한 필수 라이브러리
+# Flask 서버용
 flask
 flask-cors
-gunicorn          # Render가 Flask를 프로덕션 환경에서 실행할 때 필수!
+gunicorn
 
-# 2. Colab에서 가져온 의존성 라이브러리
+# AI/데이터 처리용 (Colab)
 pandas
 numpy
 google-generativeai
 sentence-transformers
-scikit-learn      # (sklearn을 설치하는 공식 패키지 이름)
+scikit-learn
 
-# (참고: os, json, time, sys는 Python 기본 내장 라이브러리라 설치 불필요)
+# 텍스트 파싱용 (app.py의 임시 parse_file 함수에 필요)
+python-docx
+pypdf
