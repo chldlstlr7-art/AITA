@@ -206,3 +206,67 @@ def generate_deep_dive_question(original_question, user_answer, submission_summa
     
     print("[Service QA] Successfully generated deep-dive question.")
     return response_json["question"]
+# --------------------------------------------------------------------------------------
+# --- 3-B. 리필용 프롬프트 및 함수 ---
+# --------------------------------------------------------------------------------------
+
+REFILL_QUESTIONS_PROMPT = """
+You are a 'Socratic Mentor' and 'Innovation Strategist'. Your goal is to force the user to "actively" and "critically" rethink their arguments.
+
+You must generate exactly two questions for each of the three categories (6 questions total).
+
+1.  **Critical Thinking Questions (Critical):** Attack logical leaps or weak evidence.
+2.  **Perspective-Shifting Questions (Perspective):** Force the user to see the "opposite" viewpoint.
+3.  **Innovation & Extension Questions (Innovative):** Push the user's idea to its extreme 'what if' scenario.
+
+---
+[INPUT DATA]
+1. [User's Core Summary]: {submission_summary}
+2. [Summaries of Similar/Contrasting Documents]: {similar_summaries}
+3. [Excerpt from User's Original Text]: {submission_text}
+---
+
+[INSTRUCTIONS]
+1. Analyze the [INPUT DATA].
+2. Generate **exactly 2 questions** for each category: 'Critical', 'Perspective', and 'Innovative' (6 questions total).
+3. Questions **must be specific** and **force active thought**.
+
+[OUTPUT FORMAT]
+You MUST respond strictly in the following JSON list format.
+
+[
+  {"type": "critical", "question": "[First critical question]"},
+  {"type": "critical", "question": "[Second critical question]"},
+  {"type": "perspective", "question": "[First perspective question]"},
+  {"type": "perspective", "question": "[Second perspective question]"},
+  {"type": "innovative", "question": "[First innovative question]"},
+  {"type": "innovative", "question": "[Second innovative question]"}
+]
+"""
+
+def generate_refill_questions(submission_summary, similar_summaries, submission_text):
+    """
+    백그라운드 리필용 질문 6개 (2:2:2)를 생성합니다.
+    """
+    print("[Service QA] Generating 6 refill questions...")
+    
+    # 1. LLM 입력을 위해 요약본들을 문자열로 변환
+    summary_str = json.dumps(submission_summary, indent=2, ensure_ascii=False)
+    similar_str = json.dumps(similar_summaries, indent=2, ensure_ascii=False)
+    
+    # 2. 프롬프트 포맷팅
+    prompt = REFILL_QUESTIONS_PROMPT.format(
+        submission_summary=summary_str,
+        similar_summaries=similar_str,
+        submission_text=submission_text # (app.py에서 이미 4000자로 슬라이싱됨)
+    )
+    
+    # 3. LLM 호출 (기존 헬퍼 재사용)
+    questions = _call_llm_json(prompt)
+    
+    if not questions or not isinstance(questions, list) or len(questions) != 6:
+        print(f"[Service QA] FAILED: Did not receive 6 questions in valid JSON list. Got: {questions}")
+        return None
+        
+    print("[Service QA] Successfully generated 6 refill questions.")
+    return questions
