@@ -8,7 +8,7 @@ from werkzeug.utils import secure_filename
 # --- 0. 파싱 및 핵심 서비스 임포트 ---
 # (참고: 0_parsing_service.py는 아직 안 만들었으므로 임시 함수를 둡니다.)
 # (참고: 4_qa_service.py도 임시 함수를 둡니다.)
-from services.3_analysis_service import perform_full_analysis_and_comparison
+from services.step3_analysis_service import perform_full_analysis_and_comparison
 
 # --- 임시 함수들 (나중에 진짜로 대체해야 함) ---
 def parse_file(file):
