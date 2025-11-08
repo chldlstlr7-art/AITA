@@ -87,7 +87,7 @@ def analyze_report():
 
     if not text and file:
         original_filename = secure_filename(file.filename)
-        text = extract_file(file) # parsing_service.py
+        text = extract_text(file) # parsing_service.py
     elif text:
         pass # 텍스트 직접 입력 사용
     else:
