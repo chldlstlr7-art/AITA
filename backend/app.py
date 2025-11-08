@@ -13,27 +13,39 @@ from services.parsing_service import extract_text
 # ⬇️ qa_service 임포트
 from services.qa_service import generate_initial_questions, generate_deep_dive_question, generate_refill_questions
 import random
+import re
 
 def _parse_similarity_level(report_text):
     """
     LLM이 생성한 비교 보고서 텍스트에서 'Similarity Level'을 파싱합니다.
+    (Key는 영어, Value는 한국어/영어 모두 처리)
     """
-    # 텍스트에서 'Similarity Level:**' 뒤의 내용을 찾습니다.
-    # (소문자 변환, 공백/줄바꿈 제거)
     try:
-        match = re.search(r"Similarity Level:\s*(.+)", report_text, re.IGNORECASE)
+        # 1. (최종 수정) Key는 'Similarity Level'로 고정, **(별표)는 옵션
+        #    re.search(r"Similarity Level:.*?\s*(.+)", ...)
+        #    - 'Similarity Level:' : 'Similarity Level:' 글자를 찾음
+        #    - '.*?' : ':' 뒤에 ** 같은 문자가 있든 없든 모두 통과 (Non-Greedy)
+        #    - '\s*' : 공백이 있든 없든 통과
+        #    - '(.+)' : 공백 뒤의 '값' (예: '낮음')을 캡처 (그룹 1)
+        match = re.search(r"Similarity Level:.*?\s*(.+)", report_text, re.IGNORECASE)
+        
         if match:
-            level = match.group(1).strip().lower()
-            if "very high" in level:
+            level = match.group(1).strip().lower() # 캡처된 값 (예: '낮음')
+            
+            # 2. 한국어/영어 값 매핑
+            if "very high" in level or "매우 높음" in level:
                 return "Very High"
-            if "high" in level:
+            if "high" in level or "높음" in level:
                 return "High"
-            if "moderate" in level:
+            if "moderate" in level or "보통" in level:
                 return "Moderate"
-            if "low" in level:
+            if "low" in level or "낮음" in level:
                 return "Low"
-    except Exception:
+            
+    except Exception as e:
+        print(f"[_parse_similarity_level] 파싱 중 에러 발생: {e}")
         pass
+    
     return "Unknown" # 파싱 실패
     
 # ⬇️ 질문 분배를 위한 헬퍼 함수
