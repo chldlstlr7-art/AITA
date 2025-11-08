@@ -13,3 +13,6 @@ scikit-learn
 # 텍스트 파싱용 (app.py의 임시 parse_file 함수에 필요)
 python-docx
 pypdf
+
+# API 키 저장
+python-dotenv
