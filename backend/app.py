@@ -14,7 +14,7 @@ from services.parsing_service import extract_text
 from services.qa_service import generate_initial_questions, generate_deep_dive_question, generate_refill_questions
 import random
 import re
-
+import traceback
 def _parse_similarity_level(report_text):
     """
     LLM이 생성한 비교 보고서 텍스트에서 'Similarity Level'을 파싱합니다.
@@ -116,6 +116,7 @@ def background_analysis_step1(report_id, text, doc_type, original_filename):
             "text_snippet": text_snippet, # (QA가 나중에 사용할 재료)
             "initialQuestions": [],   # (아직 비어있음)
             "questions_pool": [],     # (아직 비어있음)
+            "qa_history": [],
             "is_refilling": False
         }
         
@@ -183,12 +184,18 @@ def background_analysis_step2_qa(report_id):
 
     except Exception as e:
         print(f"[{report_id}] Step 2 (QA) FAILED: {e}")
-        # (참고) QA가 실패하더라도 분석은 성공했으므로, 
-        # 상태를 'error'로 바꾸는 대신 'completed'로 두어 분석 결과는 볼 수 있게 함
+
+        # ⬇️ 2. (추가) 에러의 전체 세부 정보를 터미널에 출력
+        print("\n--- 🚨 Step 2 (QA) FULL TRACEBACK 🚨 ---")
+        traceback.print_exc()
+        print("-------------------------------------------\n")
+        # ⬆️ (추가 끝)
+
         analysis_status[report_id] = "completed"
 
 
-# ⬇️ 5. (추가) 리필 전용 백그라운드 스레드 함수
+# app.py
+
 def background_refill(report_id):
     """
     백그라운드에서 질문 풀을 6개 리필하고 잠금을 해제합니다.
@@ -204,7 +211,7 @@ def background_refill(report_id):
         # 리필에 필요한 재료 (summary, similar, snippet)
         summary = report["summary"]
         similar = report["similarity_details"]["structural_similarity_details"]
-        text_snippet = report.get("text_snippet", "") # (혹시 모를 에러 방지)
+        text_snippet = report.get("text_snippet", "")
         
         # ⭐️ qa_service의 6개 생성 함수 호출
         new_questions = generate_refill_questions(summary, similar, text_snippet)
@@ -222,7 +229,6 @@ def background_refill(report_id):
         # ⭐️ (중요) 성공하든 실패하든, 잠금을 해제합니다.
         report["is_refilling"] = False
         print(f"[{report_id}] Refill lock released.")
-# --- 3. API 라우트(주소) 정의 ---
 
 @app.route("/api/analyze", methods=["POST"])
 def analyze_report():
@@ -293,50 +299,60 @@ def get_report(report_id):
 
 # --- ⬇️ 6. (추가) QA 상호작용을 위한 새 API 엔드포인트 ---
 
+# app.py
+
 @app.route("/api/report/<report_id>/question/next", methods=["POST"])
 def get_next_question(report_id):
     """
     POST /api/report/<report_id>/question/next
     사용자가 '새로고침' 또는 '추가 질문'을 요청할 때 호출됩니다.
+    (최종본: '2개 이하일 때 백그라운드 리필' 로직 포함)
     """
     report = analysis_results.get(report_id)
     if not report or "questions_pool" not in report:
         return jsonify({"error": "Report not found or not completed"}), 404
 
     pool = report["questions_pool"]
-    if not pool:
-        # ⭐️ (중요) 풀이 비었을 때의 리필 로직
-        print(f"[{report_id}] 질문 풀이 비어 리필을 시도합니다.")
-        # (간단한 구현: 여기서는 새 질문 5개를 동기식으로 생성)
-        # (고급 구현: 백그라운드 스레드로 생성 트리거)
-        
-        # (임시로 하드코딩된 5개 리필)
-        new_pool = [
-            {"type": "critical", "question": "리필 질문 1: (백그라운드 생성 필요)"},
-            {"type": "perspective", "question": "리필 질문 2"},
-            {"type": "innovative", "question": "리필 질문 3"},
-            {"type": "critical", "question": "리필 질문 4"},
-            {"type": "perspective", "question": "리필 질문 5"},
-        ]
-        report["questions_pool"] = new_pool
-        pool = new_pool
-        
-        # (참고: 백그라운드 리필 로직은 여기에 구현해야 함)
-        # if len(pool) <= 1:
-        #    trigger_background_refill(report_id, 5) # (별도 스레드 함수 필요)
+    is_refilling = report.get("is_refilling", False) # 상태 잠금 확인
 
-    # 풀에서 하나를 뽑아서 반환
+    if not pool:
+        if is_refilling:
+            # 풀이 비었지만 리필 중일 때
+            return jsonify({"error": "No questions available, refill in progress. Please wait."}), 503
+        else:
+            # 풀이 비었고 리필 중도 아닐 때 (비상 상황)
+            print(f"[{report_id}] Pool is empty and not refilling. Triggering emergency refill.")
+            report["is_refilling"] = True
+            refill_thread = threading.Thread(target=background_refill, args=(report_id,))
+            refill_thread.start()
+            return jsonify({"error": "No questions available, starting emergency refill. Please wait."}), 503
+
+    # ⬇️⬇️⬇️ 여기가 핵심 로직 ⬇️⬇️⬇️
+    # 1. 풀에서 하나를 뽑아서 반환
     next_question = pool.pop(0)
     
+    # 2. (핵심) 남은 질문이 2개 이하이고, *현재 리필 중이 아닐 때*
+    if len(pool) <= 2 and not is_refilling:
+        print(f"[{report_id}] Pool size ({len(pool)}) <= 2. Triggering background refill.")
+        # 즉시 잠금
+        report["is_refilling"] = True
+        
+        # 백그라운드 스레드 시작
+        refill_thread = threading.Thread(target=background_refill, args=(report_id,))
+        refill_thread.start()
+    # ⬆️⬆️⬆️ 핵심 로직 끝 ⬆️⬆️⬆️
+
     # (선택) 뽑은 질문을 QA 기록으로 이동
+    if "qa_history" not in report:
+        report["qa_history"] = []
+
     report["qa_history"].append({
-        "question": next_question["question"],
-        "type": next_question["type"],
+        "question": next_question.get("question", "Failed to parse question"),
+        "type": next_question.get("type", "unknown"),
         "answer": None # 답변 대기
     })
 
     return jsonify(next_question)
-
 
 @app.route("/api/report/<report_id>/question/deep-dive", methods=["POST"])
 def post_deep_dive_question(report_id):

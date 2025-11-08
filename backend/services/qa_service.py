@@ -63,15 +63,15 @@ You must generate exactly three questions for each of the three categories (9 qu
 You MUST respond strictly in the following JSON list format.
 
 [
-  {"type": "critical", "question": "[First critical thinking question]"},
-  {"type": "critical", "question": "[Second critical thinking question]"},
-  {"type": "critical", "question": "[Third critical thinking question]"},
-  {"type": "perspective", "question": "[First perspective-shifting question]"},
-  {"type": "perspective", "question": "[Second perspective-shifting question]"},
-  {"type": "perspective", "question": "[Third perspective-shifting question]"},
-  {"type": "innovative", "question": "[First innovation & extension question]"},
-  {"type": "innovative", "question": "[Second innovation & extension question]"},
-  {"type": "innovative", "question": "[Third innovation & extension question]"}
+  {{"type": "critical", "question": "[First critical thinking question]"}},
+  {{"type": "critical", "question": "[Second critical thinking question]"}},
+  {{"type": "critical", "question": "[Third critical thinking question]"}},
+  {{"type": "perspective", "question": "[First perspective-shifting question]"}},
+  {{"type": "perspective", "question": "[Second perspective-shifting question]"}},
+  {{"type": "perspective", "question": "[Third perspective-shifting question]"}},
+  {{"type": "innovative", "question": "[First innovation & extension question]"}},
+  {{"type": "innovative", "question": "[Second innovation & extension question]"}},
+  {{"type": "innovative", "question": "[Third innovation & extension question]"}}
 ]
 """
 
@@ -102,7 +102,7 @@ Your purpose is to dig deeper into the "exact point" the user just made, forcing
 [OUTPUT FORMAT]
 You MUST respond strictly in the following JSON format.
 
-{"question": "[The single, deep-dive question based on the user's answer]"}
+{{"question": "[The single, deep-dive question based on the user's answer]"}}
 """
 
 # --------------------------------------------------------------------------------------
@@ -234,13 +234,13 @@ You must generate exactly two questions for each of the three categories (6 ques
 [OUTPUT FORMAT]
 You MUST respond strictly in the following JSON list format.
 
-[
-  {"type": "critical", "question": "[First critical question]"},
-  {"type": "critical", "question": "[Second critical question]"},
-  {"type": "perspective", "question": "[First perspective question]"},
-  {"type": "perspective", "question": "[Second perspective question]"},
-  {"type": "innovative", "question": "[First innovative question]"},
-  {"type": "innovative", "question": "[Second innovative question]"}
+[  
+  {{"type": "critical", "question": "[First critical question]"}},
+  {{"type": "critical", "question": "[Second critical question]"}},
+  {{"type": "perspective", "question": "[First perspective question]"}},
+  {{"type": "perspective", "question": "[Second perspective question]"}},
+  {{"type": "innovative", "question": "[First innovative question]"}},
+  {{"type": "innovATIVE", "question": "[Second innovative question]"}}
 ]
 """
 

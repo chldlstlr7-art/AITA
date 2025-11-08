@@ -15,8 +15,8 @@ from time import sleep
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
 # [모델 설정]
-SUMMARY_MODEL_NAME = 'gemini-2.5-pro' # 1단계 요약용
-COMPARISON_MODEL_NAME = 'gemini-2.5-pro' # 3단계 비교용
+SUMMARY_MODEL_NAME = 'gemini-2.5-flash' # 1단계 요약용
+COMPARISON_MODEL_NAME = 'gemini-2.5-flash' # 3단계 비교용
 EMBEDDING_MODEL_NAME = 'paraphrase-multilingual-MiniLM-L12-v2' # 2단계 S-BERT용
 
 # [LLM 클라이언트]
