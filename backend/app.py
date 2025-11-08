@@ -11,7 +11,7 @@ from werkzeug.utils import secure_filename
 from services.analysis_service import perform_full_analysis_and_comparison
 from services.parsing_service import extract_text
 # ⬇️ qa_service 임포트
-from services.qa_service import generate_initial_questions, generate_deep_dive_question
+from services.qa_service import generate_initial_questions, generate_deep_dive_question, generate_refill_questions
 import random
 
 # ⬇️ 질문 분배를 위한 헬퍼 함수
