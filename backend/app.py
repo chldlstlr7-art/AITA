@@ -173,7 +173,7 @@ def background_analysis_step2_qa(report_id):
             ]
         
         # 4. 3개 분배
-        initial_questions_raw = _distribute_questions(questions_pool, 3)
+        initial_questions = _distribute_questions(questions_pool, 3)
         report["questions_pool"] = questions_pool
 
         # qa_history가 1단계에서 생성되었는지 확인 (방어 코드)
@@ -182,7 +182,7 @@ def background_analysis_step2_qa(report_id):
             
         initial_questions_for_client = [] # 클라이언트에게 보낼 리스트
 
-        for q_data in initial_questions_raw:
+        for q_data in initial_questions:
             # 4-1. 고유 ID 생성
             q_id = str(uuid.uuid4())
             
