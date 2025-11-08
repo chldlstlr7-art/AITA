@@ -176,10 +176,41 @@ def background_analysis_step2_qa(report_id):
         analysis_status[report_id] = "completed"
 
 
+# ⬇️ 5. (추가) 리필 전용 백그라운드 스레드 함수
+def background_refill(report_id):
+    """
+    백그라운드에서 질문 풀을 6개 리필하고 잠금을 해제합니다.
+    """
+    report = analysis_results.get(report_id)
+    if not report:
+        print(f"[{report_id}] Refill FAILED: Report not found.")
+        return
 
+    print(f"[{report_id}] Refill thread started...")
+    
+    try:
+        # 리필에 필요한 재료 (summary, similar, snippet)
+        summary = report["summary"]
+        similar = report["similarity_details"]["structural_similarity_details"]
+        text_snippet = report.get("text_snippet", "") # (혹시 모를 에러 방지)
+        
+        # ⭐️ qa_service의 6개 생성 함수 호출
+        new_questions = generate_refill_questions(summary, similar, text_snippet)
+        
+        if new_questions:
+            report["questions_pool"].extend(new_questions)
+            print(f"[{report_id}] Refill complete. New pool size: {len(report['questions_pool'])}")
+        else:
+            print(f"[{report_id}] Refill FAILED: generate_refill_questions returned None")
+            
+    except Exception as e:
+        print(f"[{report_id}] Refill thread error: {e}")
+        
+    finally:
+        # ⭐️ (중요) 성공하든 실패하든, 잠금을 해제합니다.
+        report["is_refilling"] = False
+        print(f"[{report_id}] Refill lock released.")
 # --- 3. API 라우트(주소) 정의 ---
-
-
 
 @app.route("/api/analyze", methods=["POST"])
 def analyze_report():
