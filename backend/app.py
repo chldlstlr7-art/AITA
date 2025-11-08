@@ -9,28 +9,9 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
 from services.analysis_service import perform_full_analysis_and_comparison
+from services.parsing_service import extract_text
 
-# 🔽🔽🔽 디버그 코드 시작 🔽🔽🔽
-print("\n[DEBUG] -----------------------------------------")
-print("[DEBUG] 'services' 파일이 임포트/실행됩니다.")
 
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-if not GEMINI_API_KEY:
-    print("[DEBUG] 🔴 치명적: os.environ.get('GEMINI_API_KEY')가 'None'입니다!")
-    print("[DEBUG] ➡️ 'app.py'에서 load_dotenv()가 먼저 실행되었는지 확인하세요.")
-else:
-    print(f"[DEBUG] ✅ API 키 로드 성공 (마지막 4자리): ...{GEMINI_API_KEY[-4:]}")
-
-print("[DEBUG] -----------------------------------------\n")
-# 🔼🔼🔼 디버그 코드 끝 🔼🔼🔼
-
-# --- 임시 함수들 (나중에 진짜로 대체해야 함) ---
-def parse_file(file):
-    """임시: 지금은 텍스트 파일만 처리. file.read()는 bytes를 반환하므로 decode 필요"""
-    try:
-        return file.read().decode('utf-8')
-    except Exception:
-        return file.read().decode('cp949', errors='ignore')
 
 def get_initial_questions(text, summary):
     """임시: 사고 자극 질문 (하드코딩)"""
@@ -106,7 +87,7 @@ def analyze_report():
 
     if not text and file:
         original_filename = secure_filename(file.filename)
-        text = parse_file(file) # 0_parsing_service.py (임시 함수)
+        text = extract_file(file) # parsing_service.py
     elif text:
         pass # 텍스트 직접 입력 사용
     else:
