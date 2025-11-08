@@ -1,15 +1,31 @@
 import os
 import threading
 import uuid
+from dotenv import load_dotenv
+load_dotenv()
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
-load_dotenv()
+
 # --- 0. 파싱 및 핵심 서비스 임포트 ---
 # (참고: 0_parsing_service.py는 아직 안 만들었으므로 임시 함수를 둡니다.)
 # (참고: 4_qa_service.py도 임시 함수를 둡니다.)
 from services.step3_analysis_service import perform_full_analysis_and_comparison
+
+# 🔽🔽🔽 디버그 코드 시작 🔽🔽🔽
+print("\n[DEBUG] -----------------------------------------")
+print("[DEBUG] 'services' 파일이 임포트/실행됩니다.")
+
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+if not GEMINI_API_KEY:
+    print("[DEBUG] 🔴 치명적: os.environ.get('GEMINI_API_KEY')가 'None'입니다!")
+    print("[DEBUG] ➡️ 'app.py'에서 load_dotenv()가 먼저 실행되었는지 확인하세요.")
+else:
+    print(f"[DEBUG] ✅ API 키 로드 성공 (마지막 4자리): ...{GEMINI_API_KEY[-4:]}")
+
+print("[DEBUG] -----------------------------------------\n")
+# 🔼🔼🔼 디버그 코드 끝 🔼🔼🔼
 
 # --- 임시 함수들 (나중에 진짜로 대체해야 함) ---
 def parse_file(file):

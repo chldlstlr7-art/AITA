@@ -3,7 +3,7 @@ import json
 import pandas as pd
 import numpy as np
 import google.generativeai as genai
-from google.genai import types as genai_types # Pro 모델의 Schema에 필요
+from google.generativeai import types as genai_types # Pro 모델의 Schema에 필요
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from time import sleep
@@ -49,16 +49,18 @@ BASE_DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 DB_FILE_PATH = os.path.join(BASE_DATA_DIR, 'dummy_data_with_embeddings.csv')
 
 # [DB 로드 (단일 파일)]
-db_vectors = None
+db_vectors_thesis = None 
+db_vectors_logic = None  
 db_filenames = None
-analysis_db_dict = None # S-BERT 검색과 LLM 비교 모두 이 파일 하나만 사용
+analysis_db_dict = None
 
 try:
     if os.path.exists(DB_FILE_PATH):
         df_db = pd.read_csv(DB_FILE_PATH)
         
         # 1. S-BERT 검색용 데이터 추출 (step_3 로직)
-        db_vectors = np.array([json.loads(v) for v in df_db['embedding_vector']])
+        db_vectors_thesis = np.array([json.loads(v) for v in df_db['embedding_core_thesis_keyword']])
+        db_vectors_logic = np.array([json.loads(v) for v in df_db['embedding_logical_keyword']])
         db_filenames = df_db['source_file'].tolist()
         
         # 2. LLM 정밀 비교용 데이터 추출 (step_4 로직 - 동일 파일 대상)
@@ -107,18 +109,6 @@ JSON_SYSTEM_PROMPT = (
     "```"
 )
 
-JSON_SCHEMA = genai_types.Schema(
-    type=genai_types.Type.OBJECT,
-    properties={
-        "assignment_type": genai_types.Schema(type=genai_types.Type.STRING),
-        "core_thesis": genai_types.Schema(type=genai_types.Type.STRING),
-        "primary_argument_1": genai_types.Schema(type=genai_types.Type.STRING),
-        "primary_argument_2": genai_types.Schema(type=genai_types.Type.STRING),
-        "logical_structure_flow": genai_types.Schema(type=genai_types.Type.STRING),
-        "key_concepts": genai_types.Schema(type=genai_types.Type.STRING),
-        "conclusion_implication": genai_types.Schema(type=genai_types.Type.STRING),
-    }
-)
 EMBEDDING_KEYS = ['key_concepts'] # (step_3 코드 기반)
 
 # [프롬프트 (3단계 비교용 - step_4 코드 기반)]
@@ -167,14 +157,14 @@ def _analyze_text_with_llm(raw_text):
     """(1단계 분석용) Pro 모델로 텍스트를 JSON 구조로 분석합니다."""
     # (Colab step_3 코드의 analyze_text_with_llm 함수)
     if not llm_client_pro: return None
-    config = genai_types.GenerateContentConfig(
-        response_mime_type="application/json",
-        response_schema=JSON_SCHEMA,
+    config = genai.GenerationConfig(
+        response_mime_type="application/json" 
+        # (참고: JSON 프롬프트가 잘 되어있어서 mime_type만 지정해도 작동합니다)
     )
     prompt_content = JSON_SYSTEM_PROMPT + f"\n\nTarget Text: \n\n{raw_text[:10000]}..."
     for attempt in range(MAX_RETRIES):
         try:
-            response = llm_client_pro.generate_content(contents=[prompt_content], config=config)
+            response = llm_client_pro.generate_content(contents=[prompt_content], generation_config=config)
             if not response.text: raise Exception("Empty response (Pro)")
             return json.loads(response.text)
         except Exception as e:
@@ -220,7 +210,7 @@ def perform_full_analysis_and_comparison(raw_text, original_filename="new_submis
     """
     
     # 0. 모델 및 DB 로드 확인
-    if not llm_client_pro or not embedding_model or db_vectors is None or analysis_db_dict is None:
+    if not llm_client_pro or not embedding_model or db_vectors_thesis is None or db_vectors_logic is None or analysis_db_dict is None:
         print("[Service 3] CRITICAL: Service dependencies (LLM, S-BERT, DB) not loaded.")
         return None
 
@@ -231,25 +221,53 @@ def perform_full_analysis_and_comparison(raw_text, original_filename="new_submis
         print("[Service 3] Step 1 FAILED."); return None
     print("[Service 3] Step 1 Successful.")
 
-    # --- 2단계: (S-BERT) 임베딩 및 유사도 검색 (step_3) ---
-    print("[Service 3] Starting Step 2: S-BERT Similarity Search...")
-    embedding_text = ". ".join([str(submission_analysis_json.get(key, "")) for key in EMBEDDING_KEYS])
-    if not embedding_text:
-        print("[Service 3] Step 2 FAILED (No key_concepts)."); return None
+    # --- 2단계: (S-BERT) 2-Vector 임베딩 및 가중 유사도 검색 ---
+    print("[Service 3] Starting Step 2: S-BERT 2-Vector Search...")
+    
+    # ⭐️ (수정) 2개의 임베딩을 위한 텍스트 생성
+    # (가정: 'core_thesis_keyword'는 'core_thesis'와 'key_concepts'의 조합)
+    text_for_thesis = (
+        str(submission_analysis_json.get('core_thesis', '')) + " " + 
+        str(submission_analysis_json.get('key_concepts', ''))
+    )
+    # (가정: 'logical_keyword'는 'logical_structure_flow'와 'key_concepts'의 조합)
+    text_for_logic = (
+        str(submission_analysis_json.get('logical_structure_flow', '')) + " " + 
+        str(submission_analysis_json.get('key_concepts', ''))
+    )
 
-    submission_vector_np = _get_embedding_vector_st(embedding_text)
-    if submission_vector_np is None:
-        print("[Service 3] Step 2 FAILED (Embedding error)."); return None
+    if not text_for_thesis or not text_for_logic:
+        print("[Service 3] Step 2 FAILED (Not enough data in JSON for embedding)."); return None
 
-    # DB 1 (S-BERT DB)을 상대로 유사도 검색
-    submission_vector_2d = submission_vector_np.reshape(1, -1)
-    similarities = cosine_similarity(submission_vector_2d, db_vectors)[0]
-    similar_indices = np.argsort(similarities)[-10:][::-1] 
+    # ⭐️ (수정) 2개의 벡터 생성
+    submission_vec_thesis = _get_embedding_vector_st(text_for_thesis)
+    submission_vec_logic = _get_embedding_vector_st(text_for_logic)
+    
+    if submission_vec_thesis is None or submission_vec_logic is None:
+        print("[Service 3] Step 2 FAILED (Embedding generation error)."); return None
+
+    # ⭐️ (수정) 2개의 유사도 계산 (가중치 0.5 적용)
+    submission_vec_thesis_2d = submission_vec_thesis.reshape(1, -1)
+    submission_vec_logic_2d = submission_vec_logic.reshape(1, -1)
+    
+    similarities_thesis = cosine_similarity(submission_vec_thesis_2d, db_vectors_thesis)[0]
+    similarities_logic = cosine_similarity(submission_vec_logic_2d, db_vectors_logic)[0]
+    
+    # 가중치 0.5씩 적용하여 총 유사도 계산
+    total_similarities = (0.5 * similarities_thesis) + (0.5 * similarities_logic)
+    
+    # 총 유사도 기준으로 상위 10개 인덱스 추출
+    similar_indices = np.argsort(total_similarities)[-10:][::-1] 
 
     sbert_top_5_candidates = []
     for i in similar_indices:
         if db_filenames[i] == original_filename: continue
-        candidate_info = { "file": db_filenames[i], "sbert_similarity": float(similarities[i]) }
+        candidate_info = { 
+            "file": db_filenames[i], 
+            "sbert_similarity": float(total_similarities[i]), # ⭐️ 가중치 합산된 점수
+            "debug_sim_thesis": float(similarities_thesis[i]), # (참고용)
+            "debug_sim_logic": float(similarities_logic[i])  # (참고용)
+        }
         sbert_top_5_candidates.append(candidate_info)
         if len(sbert_top_5_candidates) >= 5: break
     
@@ -275,7 +293,7 @@ def perform_full_analysis_and_comparison(raw_text, original_filename="new_submis
             continue
             
         candidate_analysis_json = {key: candidate_full_data.get(key, "N/A") for key in JSON_KEYS}
-        candidate_json_str = json.dumps(candidate_json_json, ensure_ascii=False, indent=2)
+        candidate_json_str = json.dumps(candidate_analysis_json, ensure_ascii=False, indent=2)
 
         # LLM (Flash) 비교 호출
         llm_report_text = _compare_json_with_llm(submission_json_str, candidate_json_str)
