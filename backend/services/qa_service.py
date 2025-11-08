@@ -76,35 +76,29 @@ You MUST respond strictly in the following JSON list format.
 """
 
 DEEP_DIVE_QUESTION_PROMPT = """
-You are a sharp 'Cross-Examiner' who finds logical gaps in a user's answer. Do not praise or agree with the user's response.
+You are a sharp 'Cross-Examiner' who finds logical gaps in a user's testimony. You must review the *entire* conversation history to find contradictions or unaddressed points, but your final question must target the *most recent answer*.
 
-Your purpose is to dig deeper into the "exact point" the user just made, forcing them to defend or revise their own logic.
+Do not praise or agree. Your purpose is to dig deeper, forcing the user to defend their logic *in light of their previous statements*.
 
 ---
-[CONVERSATION CONTEXT]
-
-1.  [The Original Question Asked]:
-    {original_question}
-
-2.  [The User's Answer]:
-    {user_answer}
-
-3.  [Reference: User's Core Summary]:
-    {submission_summary}
+[REFERENCE: USER'S CORE SUMMARY]
+{submission_summary}
+---
+[CONVERSATION HISTORY (Oldest to Newest)]
+{conversation_history_string}
 ---
 
 [INSTRUCTIONS]
-1.  Focus ONLY on [The User's Answer].
-2.  Identify a new claim, a logical leap, or an evasion made within that specific answer.
+1.  Analyze the [CONVERSATION HISTORY]. Pay special attention to the *last* Q/A pair.
+2.  Identify a new claim, a logical leap, or an evasion made within that *last answer*, **especially if it contradicts or fails to fully address a point from *earlier* in the history.**
 3.  Generate "one single" follow-up question that targets that specific point.
-4.  The question must directly reference the user's answer: "You just stated that~. If that's true, how do you explain~?"
+4.  The question must directly reference the user's *last* answer, but can use context from the *entire* history. (e.g., "You *initially* claimed X (from Q1), and *now* in your last answer you are stating Y. How do you reconcile these two points?")
 
 [OUTPUT FORMAT]
 You MUST respond strictly in the following JSON format.
 
-{{"question": "[The single, deep-dive question based on the user's answer]"}}
+{{"question": "[The single, deep-dive question based on the full context]"}}
 """
-
 # --------------------------------------------------------------------------------------
 # --- 3. 헬퍼 함수 (LLM 호출) ---
 # --------------------------------------------------------------------------------------
@@ -174,36 +168,40 @@ def generate_initial_questions(submission_summary, similar_summaries, submission
     return questions
 
 
-def generate_deep_dive_question(original_question, user_answer, submission_summary):
+def generate_deep_dive_question(conversation_history, submission_summary):
     """
-    사용자의 답변을 기반으로 심화 질문 1개를 생성합니다.
+    사용자의 답변 *히스토리 전체*를 기반으로 심화 질문 1개를 생성합니다.
     
     Args:
-        original_question (str): 원래 제시되었던 질문
-        user_answer (str): 사용자가 입력한 답변
+        conversation_history (list): [ { "question": "...", "answer": "..." }, ... ]
         submission_summary (dict): 맥락 유지를 위한 원본 요약
         
     Returns:
         str: 심화 질문 1개 or None
     """
-    print("[Service QA] Generating deep-dive question...")
+    print(f"[Service QA] Generating deep-dive question (History length: {len(conversation_history)})...")
 
     summary_str = json.dumps(submission_summary, indent=2, ensure_ascii=False)
 
-    # 1. 프롬프트 포맷팅
+    # 1. (수정) 히스토리 리스트를 프롬프트에 넣을 문자열로 변환
+    history_str = ""
+    for i, qa in enumerate(conversation_history):
+        history_str += f"--- Q{i+1} ---\n{qa.get('question', 'N/A')}\n"
+        history_str += f"--- A{i+1} ---\n{qa.get('answer', 'N/A')}\n\n"
+
+    # 2. 프롬프트 포맷팅
     prompt = DEEP_DIVE_QUESTION_PROMPT.format(
-        original_question=original_question,
-        user_answer=user_answer,
+        conversation_history_string=history_str,
         submission_summary=summary_str
     )
     
-    # 2. LLM 호출
+    # 3. LLM 호출 (기존과 동일)
     response_json = _call_llm_json(prompt)
     
     if not response_json or not isinstance(response_json, dict) or "question" not in response_json:
         print(f"[Service QA] FAILED: Did not receive valid JSON for deep-dive. Got: {response_json}")
         return None
-    
+        
     print("[Service QA] Successfully generated deep-dive question.")
     return response_json["question"]
 # --------------------------------------------------------------------------------------

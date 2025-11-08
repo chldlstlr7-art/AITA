@@ -7,7 +7,7 @@ load_dotenv()
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
-
+import uuid
 from services.analysis_service import perform_full_analysis_and_comparison
 from services.parsing_service import extract_text
 # ⬇️ qa_service 임포트
@@ -173,11 +173,40 @@ def background_analysis_step2_qa(report_id):
             ]
         
         # 4. 3개 분배
-        initial_questions = _distribute_questions(questions_pool, 3)
-        
-        # 5. (중요) 기존 report 객체에 질문 데이터 *업데이트*
-        report["initialQuestions"] = initial_questions
+        initial_questions_raw = _distribute_questions(questions_pool, 3)
         report["questions_pool"] = questions_pool
+
+        # qa_history가 1단계에서 생성되었는지 확인 (방어 코드)
+        if "qa_history" not in report:
+            report["qa_history"] = []
+            
+        initial_questions_for_client = [] # 클라이언트에게 보낼 리스트
+
+        for q_data in initial_questions_raw:
+            # 4-1. 고유 ID 생성
+            q_id = str(uuid.uuid4())
+            
+            # 4-2. qa_history에 (answer: null) 상태로 저장
+            history_entry = {
+                "question_id": q_id,
+                "question": q_data.get("question", "Failed to parse"),
+                "type": q_data.get("type", "unknown"),
+                "answer": None,
+                "parent_question_id": None # 최상위 질문
+            }
+            report["qa_history"].append(history_entry)
+            
+            # 4-3. 클라이언트에게 보낼 리스트에 ID와 함께 추가
+            client_entry = {
+                "question_id": q_id,
+                "question": q_data.get("question", "Failed to parse"),
+                "type": q_data.get("type", "unknown")
+            }
+            initial_questions_for_client.append(client_entry)
+
+        # 5. (수정) 클라이언트용 리스트를 initialQuestions에 저장
+        report["initialQuestions"] = initial_questions_for_client
+        
         
         analysis_status[report_id] = "completed" # 3. 상태: 모든 작업 완료
         print(f"[{report_id}] Step 2 (QA) COMPLETE. Status set to 'completed'.")
@@ -299,7 +328,7 @@ def get_report(report_id):
 
 # --- ⬇️ 6. (추가) QA 상호작용을 위한 새 API 엔드포인트 ---
 
-# app.py
+
 
 @app.route("/api/report/<report_id>/question/next", methods=["POST"])
 def get_next_question(report_id):
@@ -346,50 +375,156 @@ def get_next_question(report_id):
     if "qa_history" not in report:
         report["qa_history"] = []
 
-    report["qa_history"].append({
+
+    # 4. 고유 ID 생성 및 qa_history에 추가
+    question_id = str(uuid.uuid4())
+    
+    # qa_history에 저장할 데이터
+    history_entry = {
+        "question_id": question_id, # ⬅️ 고유 ID 추가
         "question": next_question.get("question", "Failed to parse question"),
         "type": next_question.get("type", "unknown"),
-        "answer": None # 답변 대기
-    })
+        "answer": None, # 답변 대기
+        "parent_question_id": None
+    }
+    report["qa_history"].append(history_entry)
 
-    return jsonify(next_question)
+    # 5. 클라이언트에게 반환할 데이터 (ID 포함)
+    # (주의: history_entry 전체가 아닌, 필요한 정보만 반환)
+    client_response = {
+        "question_id": question_id, # ⬅️ 클라이언트가 이 ID를 받아야 함
+        "question": history_entry["question"],
+        "type": history_entry["type"]
+    }
+
+    return jsonify(client_response)
+
+@app.route("/api/report/<report_id>/answer", methods=["POST"])
+def submit_answer(report_id):
+    """
+    POST /api/report/<report_id>/answer
+    사용자가 일반/심화 질문에 대한 '답변만' 제출할 때 호출됩니다.
+    (이 엔드포인트는 심화 질문을 생성하지 않습니다.)
+    """
+    report = analysis_results.get(report_id)
+    if not report:
+        return jsonify({"error": "Report not found"}), 404
+    
+    data = request.json
+    # ⬇️⬇️⬇️ [수정된 부분] ⬇️⬇️⬇️
+    # 1. 텍스트 대신 'question_id'를 받음
+    question_id = data.get("question_id") 
+    user_answer = data.get("user_answer")
+
+    if not question_id or user_answer is None: 
+        return jsonify({"error": "Missing question_id or user_answer"}), 400
+
+    # user_answer는 빈 문자열일 수 있으므로 None과 비교
+    if not original_question or user_answer is None: 
+        return jsonify({"error": "Missing original_question or user_answer"}), 400
+
+    if "qa_history" not in report:
+        report["qa_history"] = []
+
+    # 2. qa_history에서 'question_id'로 해당 질문을 찾아 답변을 업데이트
+    history_updated = False
+    for item in reversed(report["qa_history"]): # 최근 항목부터 검색
+        if item.get("question_id") == question_id and item.get("answer") is None:
+            item["answer"] = user_answer # 사용자 답변 추가
+            history_updated = True
+            break
+    # (예외 처리) history에 질문이 없는 경우
+    if not history_updated:
+        print(f"[{report_id}] WARNING: submit_answer couldn't find matching question. Appending new.")
+        report["qa_history"].append({
+            "question": original_question,
+            "type": "unknown_submission", # 타입을 알 수 없음
+            "answer": user_answer
+        })
+        
+    print(f"[{report_id}] Answer saved successfully.")
+    return jsonify({"status": "success", "message": "Answer saved successfully"})
 
 @app.route("/api/report/<report_id>/question/deep-dive", methods=["POST"])
 def post_deep_dive_question(report_id):
     """
     POST /api/report/<report_id>/question/deep-dive
-    사용자가 답변을 제출하고 심화 질문을 요청할 때 호출됩니다.
-    
-    JSON Body:
-    {
-        "original_question": "...",
-        "user_answer": "..."
-    }
+    (수정) 'parent_question_id'를 받아, *전체 대화 맥락*을 
+    재귀적으로 탐색하여 심화 질문을 생성
     """
     report = analysis_results.get(report_id)
-    if not report:
-        return jsonify({"error": "Report not found"}), 404
+    if not report or "qa_history" not in report:
+        return jsonify({"error": "Report not found or history is empty"}), 404
         
     data = request.json
-    original_question = data.get("original_question")
-    user_answer = data.get("user_answer")
-    
-    if not original_question or not user_answer:
-        return jsonify({"error": "Missing original_question or user_answer"}), 400
+    parent_question_id = data.get("parent_question_id") # (예: Q1.1의 ID)
+    if not parent_question_id:
+        return jsonify({"error": "Missing parent_question_id to deep-dive from"}), 400
 
-    # (참고) qa_history 업데이트 로직은 여기서 생략
+    # 1. (핵심) 대화 체인 재구성 (Recursive chain traversal)
+    # -----------------------------------------------------------------
+    # 편의를 위해 qa_history를 ID 기반 맵으로 변환
+    history_map = {item['question_id']: item for item in report["qa_history"]}
     
-    # 심화 질문 생성
-    deep_dive_question = generate_deep_dive_question(
-        original_question,
-        user_answer,
-        report["summary"] # 원본 요약본을 맥락으로 전달
+    conversation_history_list = [] # LLM에 전달할 Q/A 쌍 리스트
+    current_id = parent_question_id
+
+    while current_id is not None:
+        if current_id not in history_map:
+            print(f"[{report_id}] CRITICAL: History chain broken. ID {current_id} not found.")
+            break # 체인이 끊기면 탐색 중지
+        
+        parent_qa = history_map[current_id]
+        
+        # 답변이 없는 Q/A 쌍은 맥락에 포함할 수 없음
+        if parent_qa.get("answer") is None:
+            # (예외) 단, 지금 막 답변한 '첫 번째 부모'는 반드시 답변이 있어야 함
+            if current_id == parent_question_id:
+                 return jsonify({"error": f"Parent question ID {parent_question_id} has not been answered yet."}), 400
+            # 그 이전의 부모가 답변이 없으면 탐색 중지
+            break
+
+        # Q/A 쌍을 리스트 *앞쪽*에 추가 (오래된 것이 0번 인덱스가 되도록)
+        conversation_history_list.insert(0, {
+            "question": parent_qa.get("question"),
+            "answer": parent_qa.get("answer")
+        })
+        
+        # 다음 부모로 이동
+        current_id = parent_qa.get("parent_question_id")
+
+    if not conversation_history_list:
+        return jsonify({"error": f"Could not reconstruct valid history for {parent_question_id}."}), 404
+    # -----------------------------------------------------------------
+
+    # 2. (수정) qa_service의 함수에 *전체 히스토리 리스트* 전달
+    deep_dive_question_text = generate_deep_dive_question(
+        conversation_history_list, # ⬅️ [핵심] 전체 맥락 리스트 전달
+        report["summary"] 
     )
     
-    if not deep_dive_question:
-        return jsonify({"error": "Failed to generate deep-dive question"}), 500
+    if not deep_dive_question_text:
+        return jsonify({"error": "Failed to generate deep-dive question"}), 
 
-    return jsonify({"question": deep_dive_question})
+    # 3. (기존 로직) 새 질문을 '연결'하여 저장
+    new_question_id = str(uuid.uuid4())
+    
+    history_entry = {
+        "question_id": new_question_id, 
+        "question": deep_dive_question_text,
+        "type": "deep_dive", 
+        "answer": None,
+        "parent_question_id": parent_question_id # ⬅️ 부모는 *직전*의 ID
+    }
+    report["qa_history"].append(history_entry)
+
+    # 4. (기존 로직) 새 질문 정보 반환
+    client_response = {
+        "question_id": new_question_id,
+        "question": deep_dive_question_text
+    }
+
+    return jsonify(client_response)
     
 # --- 4. (선택 사항) 루트 확인용 ---
 @app.route("/")
