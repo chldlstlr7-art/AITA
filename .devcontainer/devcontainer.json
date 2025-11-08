@@ -1,0 +1,13 @@
+{
+
+  "portsAttributes": {
+    "5000": {
+      "label": "AITA Backend (Flask)",
+      "onAutoForward": "notify",
+      "visibility": "public"
+    }
+  },
+
+  "forwardPorts": [ 5000 ]
+
+}
