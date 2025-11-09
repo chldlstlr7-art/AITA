@@ -17,6 +17,11 @@ from api.student_api import student_bp
 from services.analysis_service import perform_full_analysis_and_comparison
 from services.qa_service import generate_initial_questions, generate_deep_dive_question, generate_refill_questions
 
+# 로그인 인증 기능
+from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager
+from flask_mail import Mail
+
 # --- 1. Flask 앱 설정 ---
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": ["*.vercel.app", "http://localhost:3000"]}})
