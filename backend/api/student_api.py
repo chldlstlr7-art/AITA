@@ -3,14 +3,15 @@ import uuid
 from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
 
-# --- [수정] app.py로부터의 최상위 임포트 제거 ---
-# (이 라인들이 순환 참조를 유발했습니다)
-# from app import analysis_results, analysis_status, background_analysis_step1, background_refill
 
 # --- [유지] services 폴더의 로직 임포트 ---
-# (이것은 app.py를 참조하지 않으므로 안전합니다)
 from services.parsing_service import extract_text
 from services.qa_service import generate_deep_dive_question
+
+
+#메일 임포트
+from flask_jwt_extended import create_access_token
+from flask_mail import Message
 
 # --- 1. '학생용' Blueprint 생성 ---
 student_bp = Blueprint('student_api', __name__)
