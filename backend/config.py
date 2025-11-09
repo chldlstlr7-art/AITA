@@ -29,4 +29,4 @@ class Config:
     
     # (보내는 사람: "AITA 관리자 <aita.service@gmail.com>")
     # (기본값: MAIL_USERNAME과 동일하게 설정)
-    MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER', os.environ.get('MAIL_USERNAME'))
+    MAIL_DEFAULT_SENDER = os.environ.get('SNUAITA301@gmail.com', os.environ.get('MAIL_USERNAME'))

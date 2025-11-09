@@ -12,6 +12,7 @@ import traceback
 
 # --- [신규] API Blueprint 임포트 ---
 from api.student_api import student_bp
+from api.auth_api import auth_bp
 
 # --- [유지] 서비스 로직 임포트 ---
 from services.analysis_service import perform_full_analysis_and_comparison
@@ -22,8 +23,16 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager
 from flask_mail import Mail
 
+from config import Config
+# --- 4. [신규] 확장 객체 초기화 (앱 연결 전) ---
+db = SQLAlchemy()
+mail = Mail()
+jwt = JWTManager()
+
 # --- 1. Flask 앱 설정 ---
 app = Flask(__name__)
+# config.py의 'Config' 클래스에서 설정 로드
+app.config.from_object(Config)
 CORS(app, resources={r"/api/*": {"origins": ["*.vercel.app", "http://localhost:3000"]}})
 
 # --- 2. [중요] 전역 변수 (임시 DB) ---
@@ -31,6 +40,10 @@ CORS(app, resources={r"/api/*": {"origins": ["*.vercel.app", "http://localhost:3
 analysis_results = {}
 analysis_status = {}
 
+#확장 객체 앱에 연결 
+db.init_app(app)
+mail.init_app(app)
+jwt.init_app(app)
 
 # --- 3. [유지] 헬퍼 함수 ---
 def _parse_similarity_level(report_text):
@@ -252,13 +265,19 @@ def background_refill(report_id):
 # --- 5. [신규] API 엔드포인트(Blueprint) 등록 ---
 # '/api/student' 접두사로 학생용 API를 모두 등록합니다.
 app.register_blueprint(student_bp, url_prefix='/api/student')
-
+app.register_blueprint(auth_bp, url_prefix='/api/auth')
 # (나중에 조교용 API를 만들면 여기에 추가)
 # from api.ta_api import ta_bp
 # app.register_blueprint(ta_bp, url_prefix='/api/ta')
 
+# --- 11. (선택) DB 초기화 CLI 명령어 ---
+# (flask shell에서 db.create_all()을 실행하기 위한 헬퍼)
+@app.shell_context_processor
+def make_shell_context():
+    from models import User # models.py에서 User 모델 임포트
+    return {'db': db, 'User': User}
 
-# --- 6. [유지] 루트 확인용 ---
+# --- 10. 루트 확인용 ---
 @app.route("/")
 def hello_world():
     return jsonify({"message": "AITA Backend is running!"})
