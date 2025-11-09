@@ -16,3 +16,9 @@ pypdf
 
 # API 키 저장
 python-dotenv
+
+#메일용
+flask-sqlalchemy
+flask-jwt-extended
+flask-mail
+werkzeug
