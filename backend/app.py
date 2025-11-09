@@ -9,42 +9,38 @@ from flask_cors import CORS
 import random
 import re
 import traceback
-
+import json
 # --- [신규] API Blueprint 임포트 ---
 from api.student_api import student_bp
 from api.auth_api import auth_bp
+from api.ta_api import ta_bp # [신규] TA 블루프린트 임포트
 
 # --- [유지] 서비스 로직 임포트 ---
 from services.analysis_service import perform_full_analysis_and_comparison
 from services.qa_service import generate_initial_questions, generate_deep_dive_question, generate_refill_questions
 
-# 로그인 인증 기능
-from flask_sqlalchemy import SQLAlchemy
-from flask_jwt_extended import JWTManager
-from flask_mail import Mail
 
 from config import Config
-# --- 4. [신규] 확장 객체 초기화 (앱 연결 전) ---
-db = SQLAlchemy()
-mail = Mail()
-jwt = JWTManager()
 
 # --- 1. Flask 앱 설정 ---
 app = Flask(__name__)
 # config.py의 'Config' 클래스에서 설정 로드
 app.config.from_object(Config)
+from extensions import db, mail, jwt
+
 CORS(app, resources={r"/api/*": {"origins": ["*.vercel.app", "http://localhost:3000"]}})
 
-# --- 2. [중요] 전역 변수 (임시 DB) ---
-# (Blueprint에서 이 변수들을 import하여 사용합니다)
-analysis_results = {}
-analysis_status = {}
 
 #확장 객체 앱에 연결 
 db.init_app(app)
 mail.init_app(app)
 jwt.init_app(app)
 
+from models import AnalysisReport
+
+from flask_sqlalchemy import SQLAlchemy
+
+    
 # --- 3. [유지] 헬퍼 함수 ---
 def _parse_similarity_level(report_text):
     """
@@ -104,171 +100,204 @@ def _distribute_questions(questions_pool, count=3):
 # (Blueprint에서 이 함수들을 import하여 사용합니다)
 
 def background_analysis_step1(report_id, text, doc_type, original_filename):
-    """(1단계) 핵심 분석만 수행하고, 2단계(QA) 스레드를 호출합니다."""
+    """(1단계) 핵심 분석 수행. [DB UPDATE]"""
     
-    print(f"[{report_id}] Step 1 (Analysis) starting...")
-    analysis_status[report_id] = "processing_analysis"
-    
-    try:
-        # 1. 핵심 분석 (analysis_service)
-        analysis_data = perform_full_analysis_and_comparison(text, original_filename)
-        
-        if not analysis_data:
-            raise Exception("perform_full_analysis_and_comparison returned None")
+    # ⬇️ [신규] 백그라운드 스레드에서 app context 생성
+    with app.app_context():
+        try:
+            # 1. DB에서 리포트 객체 찾기
+            # (주의: db.session.get()은 Flask-SQLAlchemy 3.x, 구버전은 .query.get())
+            report = db.session.get(AnalysisReport, report_id)
+            if not report:
+                print(f"[{report_id}] Step 1 FAILED: Report ID not found in DB.")
+                return
 
-        print(f"[{report_id}] Step 1 (Analysis) COMPLETE. Saving partial data.")
-        text_snippet = text[:4000] 
+            print(f"[{report_id}] Step 1 (Analysis) starting...")
+            report.status = "processing_analysis"
+            db.session.commit()
 
-        # 2. (중요) 질문이 *없는* 부분적인(partial) 결과 저장
-        partial_result = {
-            "summary": analysis_data['submission_summary'], 
-            "evaluation": {
+            # 2. 핵심 분석 (동일)
+            analysis_data = perform_full_analysis_and_comparison(text, original_filename)
+            
+            if not analysis_data:
+                raise Exception("perform_full_analysis_and_comparison returned None")
+
+            print(f"[{report_id}] Step 1 (Analysis) COMPLETE. Updating DB.")
+            text_snippet = text[:4000] 
+
+            # 3. [DB UPDATE] 딕셔너리 대신 DB 객체 필드 업데이트
+            if 'summary' in analysis_data:
+                report.summary = json.dumps(analysis_data['summary'])
+            else:
+                # 혹은 요약 데이터가 없는 경우를 대비
+                report.summary = json.dumps({"default_summary": "No summary available"})
+            
+            report.evaluation = json.dumps({
                 "structural_similarity_comment": "LLM 정밀 비교 결과를 확인하세요." 
-            },
-            "logicFlow": {},
-            "similarity_details": {
+            })
+            report.logic_flow = json.dumps({}) 
+            report.similarity_details = json.dumps({
                 "structural_similarity_details": analysis_data['llm_comparison_results']
-            },
-            "text_snippet": text_snippet, # (QA가 나중에 사용할 재료)
-            "initialQuestions": [],   # (아직 비어있음)
-            "questions_pool": [],     # (아직 비어있음)
-            "qa_history": [],
-            "is_refilling": False
-        }
-        
-        analysis_results[report_id] = partial_result
-        analysis_status[report_id] = "processing_questions" # 2. 상태: 질문 생성 중
+            })
+            
+            report.text_snippet = text_snippet
+            report.qa_history = json.dumps([])
+            report.questions_pool = json.dumps([])
+            report.is_refilling = False
+            
+            report.status = "processing_questions" # 2. 상태: 질문 생성 중
+            db.session.commit()
 
-        # 3. 2단계(QA) 백그라운드 스레드를 즉시 호출
-        print(f"[{report_id}] Triggering Step 2 (QA) in background...")
-        qa_thread = threading.Thread(target=background_analysis_step2_qa, args=(report_id,))
-        qa_thread.start()
+            # 4. 2단계(QA) 스레드 호출 (동일)
+            print(f"[{report_id}] Triggering Step 2 (QA) in background...")
+            qa_thread = threading.Thread(target=background_analysis_step2_qa, args=(report_id,))
+            qa_thread.start()
 
-    except Exception as e:
-        print(f"[{report_id}] Step 1 (Analysis) FAILED: {e}")
-        analysis_status[report_id] = "error"
-        analysis_results[report_id] = {"error": str(e)}
+        except Exception as e:
+            print(f"[{report_id}] Step 1 (Analysis) FAILED: {e}")
+            db.session.rollback()
+            try:
+                # 에러 상태를 DB에 기록
+                report = db.session.get(AnalysisReport, report_id)
+                if report:
+                    report.status = "error"
+                    report.error_message = str(e)
+                    db.session.commit()
+            except Exception as e_inner:
+                print(f"[{report_id}] CRITICAL: Failed to write error state to DB: {e_inner}")
 
 def background_analysis_step2_qa(report_id):
-    """(2단계) QA 질문만 생성해서 기존 결과에 append합니다."""
+    """(2단계) QA 질문 생성. [DB UPDATE]"""
     
-    print(f"[{report_id}] Step 2 (QA) thread started...")
-    try:
-        # 1단계에서 저장한 데이터 가져오기
-        report = analysis_results.get(report_id)
-        if not report:
-            raise Exception("Report data not found for QA generation")
-
-        summary = report["summary"]
-        similar = report["similarity_details"]["structural_similarity_details"]
-        snippet = report["text_snippet"]
-        
-        # ... (high_similarity_reports 필터링 로직 - 생략 없이 전체 복사) ...
-        all_candidate_reports = report["similarity_details"]["structural_similarity_details"]
-        high_similarity_reports = []
-        for candidate_report in all_candidate_reports:
-            report_text = candidate_report.get("llm_comparison_report", "")
-            level = _parse_similarity_level(report_text)
+    # ⬇️ [신규] 백그라운드 스레드에서 app context 생성
+    with app.app_context():
+        try:
+            # 1. DB에서 리포트 객체 찾기
+            report = db.session.get(AnalysisReport, report_id)
+            if not report:
+                print(f"[{report_id}] Step 2 FAILED: Report ID not found in DB.")
+                return
             
-            if level in ["High", "Very High"]:
-                high_similarity_reports.append(candidate_report)
+            print(f"[{report_id}] Step 2 (QA) thread started...")
+
+            # ⬇️ [핵심 수정] DB에서 읽은 JSON 문자열을 Python 객체로 복원 (역직렬화) ⬇️
+            # summary 필드는 이제 dict 형태여야 합니다.
+            summary_data = json.loads(report.summary) if report.summary else None
+            similarity_details_data = json.loads(report.similarity_details) if report.similarity_details else None
+            
+            # 여기서 빈 리포트 체크 로직을 다시 작성합니다.
+            if not summary_data or not similarity_details_data:
+                 raise Exception("Report data from Step 1 (summary/similarity) not found in DB")
+
+            # 1단계의 데이터 추출
+            summary = summary_data # 이제 dict 형태
+            
+            snippet = report.text_snippet
+            
+            
+            questions_pool = json.loads(report.questions_pool) if report.questions_pool else []
+            current_qa_history = json.loads(report.qa_history) if report.qa_history else []
+
+            # ... (high_similarity_reports 필터링 로직 - 동일) ...
+            all_candidate_reports = similarity_details_data.get("structural_similarity_details", [])
+            high_similarity_reports = []
+            for candidate_report in all_candidate_reports:
+                report_text = candidate_report.get("llm_comparison_report", "")
+                level = _parse_similarity_level(report_text)
                 
-        print(f"[{report_id}] QA Filter: Found {len(high_similarity_reports)} 'High/Very High' reports.")
-        
-        # 3. 9개의 질문 풀 생성 (qa_service)
-        questions_pool = generate_initial_questions(summary, similar, snippet)
-        
-        if not questions_pool:
-            print(f"[{report_id}] WARNING: QA generation failed. Using dummies.")
-            questions_pool = [
-                {"type": "critical", "question": "임시 질문 1: 주장의 근거가 약합니다."},
-                {"type": "perspective", "question": "임시 질문 2: 다른 관점은 없나요?"},
-                {"type": "innovative", "question": "임시 질문 3: 그래서 어떻게 적용하죠?"}
-            ]
-        
-        # 4. 3개 분배
-        initial_questions = _distribute_questions(questions_pool, 3)
-        report["questions_pool"] = questions_pool # 남은 6개 저장
+                if level in ["High", "Very High"]:
+                    high_similarity_reports.append(candidate_report)
+            print(f"[{report_id}] QA Filter: Found {len(high_similarity_reports)} 'High/Very High' reports.")
 
-        if "qa_history" not in report:
-            report["qa_history"] = []
             
-        initial_questions_for_client = [] # 클라이언트에게 보낼 리스트
-
-        for q_data in initial_questions:
-            # 4-1. 고유 ID 생성
-            q_id = str(uuid.uuid4())
+            # 3. 9개의 질문 풀 생성 (동일)
+            # (주의) similar 변수명을 high_similarity_reports로 변경하여 전달
+            questions_pool = generate_initial_questions(summary, high_similarity_reports, snippet)
             
-            # 4-2. qa_history에 (answer: null) 상태로 저장
-            history_entry = {
-                "question_id": q_id,
-                "question": q_data.get("question", "Failed to parse"),
-                "type": q_data.get("type", "unknown"),
-                "answer": None,
-                "parent_question_id": None # 최상위 질문
-            }
-            report["qa_history"].append(history_entry)
+            # ... (dummy data 로직 - 동일) ...
             
-            # 4-3. 클라이언트에게 보낼 리스트에 ID와 함께 추가
-            client_entry = {
-                "question_id": q_id,
-                "question": q_data.get("question", "Failed to parse"),
-                "type": q_data.get("type", "unknown")
-            }
-            initial_questions_for_client.append(client_entry)
+            # 4. 3개 분배 (동일)
+            initial_questions = _distribute_questions(questions_pool, 3)
+            
+            # 5. [DB UPDATE] DB 객체에 저장
+            report.questions_pool = json.dumps(questions_pool) # 남은 6개
+            
+            for q_data in initial_questions:
+                q_id = str(uuid.uuid4())
+                history_entry = {
+                    "question_id": q_id,
+                    "question": q_data.get("question", "Failed to parse"),
+                    "type": q_data.get("type", "unknown"),
+                    "answer": None,
+                    "parent_question_id": None # 최상위 질문
+                }
+                current_qa_history.append(history_entry)
+                
+                # (client_entry는 get_report에서 동적으로 생성되므로 여기선 필요 없음)
+            
+            # 6. [DB UPDATE]
+            report.qa_history = json.dumps(current_qa_history)
+            # (주의: report.initialQuestions = ... 라인 제거됨)
+            report.status = "completed"
+            db.session.commit()
+            
+            print(f"[{report_id}] Step 2 (QA) COMPLETE. Status set to 'completed' in DB.")
 
-        # 5. 클라이언트용 리스트를 initialQuestions에 저장
-        report["initialQuestions"] = initial_questions_for_client
-        
-        analysis_status[report_id] = "completed" # 3. 상태: 모든 작업 완료
-        print(f"[{report_id}] Step 2 (QA) COMPLETE. Status set to 'completed'.")
-
-    except Exception as e:
-        print(f"[{report_id}] Step 2 (QA) FAILED: {e}")
-        print("\n--- 🚨 Step 2 (QA) FULL TRACEBACK 🚨 ---")
-        traceback.print_exc()
-        print("-------------------------------------------\n")
-        analysis_status[report_id] = "completed"
+        except Exception as e:
+            print(f"[{report_id}] Step 2 (QA) FAILED: {e}")
+            traceback.print_exc()
+            db.session.rollback()
+            try:
+                report = db.session.get(AnalysisReport, report_id)
+                if report:
+                    report.status = "error" # 또는 "completed"
+                    report.error_message = f"Step 2 QA FAILED: {e}"
+                    db.session.commit()
+            except Exception as e_inner:
+                print(f"[{report_id}] CRITICAL: Failed to write error state (Step 2) to DB: {e_inner}")
 
 def background_refill(report_id):
-    """
-    백그라운드에서 질문 풀을 6개 리필하고 잠금을 해제합니다.
-    """
-    report = analysis_results.get(report_id)
-    if not report:
-        print(f"[{report_id}] Refill FAILED: Report not found.")
-        return
-
-    print(f"[{report_id}] Refill thread started...")
+    """백그라운드 리필. [DB UPDATE]"""
     
-    try:
-        summary = report["summary"]
-        similar = report["similarity_details"]["structural_similarity_details"]
-        text_snippet = report.get("text_snippet", "")
-        
-        new_questions = generate_refill_questions(summary, similar, text_snippet)
-        
-        if new_questions:
-            report["questions_pool"].extend(new_questions)
-            print(f"[{report_id}] Refill complete. New pool size: {len(report['questions_pool'])}")
-        else:
-            print(f"[{report_id}] Refill FAILED: generate_refill_questions returned None")
-            
-    except Exception as e:
-        print(f"[{report_id}] Refill thread error: {e}")
-        
-    finally:
-        report["is_refilling"] = False
-        print(f"[{report_id}] Refill lock released.")
+    # ⬇️ [신규] 백그라운드 스레드에서 app context 생성
+    with app.app_context():
+        report = db.session.get(AnalysisReport, report_id)
+        if not report:
+            print(f"[{report_id}] Refill FAILED: Report not found in DB.")
+            return
 
+        print(f"[{report_id}] Refill thread started...")
+        
+        try:
+            # 1. DB에서 데이터 가져오기
+            summary = json.loads(report.summary) if report.summary else {}
+            similar = similarity_data.get("structural_similarity_details", [])
+            text_snippet = report.text_snippet
+            new_questions = generate_refill_questions(summary, similar, text_snippet)
+            current_pool = json.loads(report.questions_pool) if report.questions_pool else []
+            
+            if new_questions:
+                current_pool.extend(new_questions)
+                report.questions_pool = current_pool # [DB UPDATE]
+                print(f"[{report_id}] Refill complete. New pool size: {len(current_pool)}")
+            else:
+                print(f"[{report_id}] Refill FAILED: generate_refill_questions returned None")
+                
+        except Exception as e:
+            print(f"[{report_id}] Refill thread error: {e}")
+            
+        finally:
+            # 2. [DB UPDATE] 잠금 해제
+            report.is_refilling = False
+            db.session.commit()
+            print(f"[{report_id}] Refill lock released in DB.")
 
 # --- 5. [신규] API 엔드포인트(Blueprint) 등록 ---
-# '/api/student' 접두사로 학생용 API를 모두 등록합니다.
+
 app.register_blueprint(student_bp, url_prefix='/api/student')
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
-# (나중에 조교용 API를 만들면 여기에 추가)
-# from api.ta_api import ta_bp
-# app.register_blueprint(ta_bp, url_prefix='/api/ta')
+app.register_blueprint(ta_bp, url_prefix='/api/ta')
+
 
 # --- 11. (선택) DB 초기화 CLI 명령어 ---
 # (flask shell에서 db.create_all()을 실행하기 위한 헬퍼)

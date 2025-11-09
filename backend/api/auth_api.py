@@ -6,12 +6,11 @@ import time
 import traceback
 import os # os.environ.get()을 위해 추가
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import create_access_token
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt
 from flask_mail import Message
 
-# (순환 참조 방지) app.py에서 생성된 확장 객체들을 함수 내부에서 임포트
-# from app import db, mail
-# from models import User
+
+from functools import wraps # [신규]
 
 # app.py에서 url_prefix='/api/auth'로 등록될 것이므로, 여기서는 prefix가 없습니다.
 auth_bp = Blueprint('auth_api', __name__)
@@ -27,6 +26,27 @@ def is_valid_snu_email(email):
     # 표준 @snu.ac.kr 이메일 형식 검증
     return re.match(r"^[a-zA-Z0-9._%+-]+@snu\.ac\.kr$", email) is not None
 
+def ta_required():
+    """
+    JWT 토큰의 'role' 클레임이 'ta'인지 확인하는 데코레이터.
+    @jwt_required()가 이미 호출되었다고 가정합니다.
+    """
+    def wrapper(fn):
+        @wraps(fn)
+        @jwt_required() # 1. 유효한 JWT 토큰인지 먼저 확인
+        def decorator(*args, **kwargs):
+            # 2. 토큰에서 전체 클레임(payload) 가져오기
+            claims = get_jwt()
+            
+            # 3. 'role' 클레임 확인
+            if claims.get("role") == "ta":
+                # 4. 'ta'가 맞으면 원래 함수 실행
+                return fn(*args, **kwargs)
+            else:
+                # 5. 'ta'가 아니면 403 Forbidden 반환
+                return jsonify({"error": "조교(TA) 권한이 필요합니다."}), 403
+        return decorator
+    return wrapper
 
 @auth_bp.route('/request-login-code', methods=['POST'])
 def request_login_code():
@@ -35,7 +55,7 @@ def request_login_code():
     사용자의 @snu.ac.kr 이메일을 받아 인증 코드를 발송합니다.
     """
     # (순환 참조 방지) 함수가 호출될 때 app의 객체들을 임포트
-    from app import db, mail
+    from extensions import db, mail
     from models import User
 
     data = request.get_json()
@@ -56,6 +76,7 @@ def request_login_code():
         
         # 2. 인증 코드 생성 및 DB 저장
         otp_code = generate_otp()
+        print(f"--- ⚠️  [TESTING] OTP for {email} is: {otp_code}  ⚠️ ---")
         user.set_verification_code(otp_code) # 해시하여 DB에 저장
         
         db.session.commit()
@@ -98,7 +119,7 @@ def verify_login_code():
     이메일과 인증 코드를 받아 검증하고, 성공 시 JWT 토큰을 발급합니다.
     """
     # (순환 참조 방지) 함수 내부에서 임포트
-    from app import db
+    from extensions import db
     from models import User
     
     data = request.get_json()
@@ -126,7 +147,7 @@ def verify_login_code():
         # (추가 정보) 토큰에 사용자의 ID와 역할(role)을 담음
         additional_claims = {"role": user.role, "email": user.email}
         access_token = create_access_token(
-            identity=user.id, 
+            identity=str(user.id), 
             additional_claims=additional_claims,
             expires_delta=datetime.timedelta(hours=1) # 1시간 유효
         )
