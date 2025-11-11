@@ -98,11 +98,16 @@ def analyze_report():
     
     try:
         new_report = AnalysisReport(
-            user_id=user_id,
-            status="processing", # 초기 상태
-            original_filename=original_filename,
-            text_snippet=text[:4000] # 1단계에서 사용되므로 미리 저장 (선택적)
-        )
+            user_id=user_id,
+            status="processing", # 초기 상태
+            original_filename=original_filename,
+            text_snippet=text[:4000],
+            
+            # --- [신규] 새 임베딩 필드 초기화 ---
+            embedding_keyconcepts_corethesis=None,
+            embedding_keyconcepts_claim=None
+            # --- [신규] ---
+        )
         db.session.add(new_report)
         db.session.commit()
         report_id = new_report.id # DB가 생성한 UUID
@@ -145,8 +150,9 @@ def get_report(report_id):
         summary_data = json.loads(report.summary) if report.summary else {}
         evaluation_data = json.loads(report.evaluation) if report.evaluation else {}
         logic_flow_data = json.loads(report.logic_flow) if report.logic_flow else {}
-        similarity_details_data = json.loads(report.similarity_details) if report.similarity_details else {}
-        qa_history_list = json.loads(report.qa_history) if report.qa_history else []
+        # [수정] similarity_details_data는 이제 리스트입니다.
+        similarity_details_data = json.loads(report.similarity_details) if report.similarity_details else []
+        qa_history_list = json.loads(report.qa_history) if report.qa_history else []
         questions_pool_list = json.loads(report.questions_pool) if report.questions_pool else []
     
     except json.JSONDecodeError as e:
@@ -177,8 +183,8 @@ def get_report(report_id):
         "summary": summary_data,
         "evaluation": evaluation_data,
         "logicFlow": logic_flow_data,
-        "similarity_details": similarity_details_data,
-        "text_snippet": report.text_snippet, # (이건 원래 문자열이므로 그대로 사용)
+        "similarity_details": similarity_details_data, # (이제 리스트)
+        "text_snippet": report.text_snippet, 
         
         "initialQuestions": _get_initial_questions_from_history(qa_history_list), # <-- 파싱된 리스트 전달
         "questions_pool_count": len(questions_pool_list), # <-- 파싱된 리스트의 길이
@@ -363,13 +369,18 @@ def post_deep_dive_question(report_id):
         return jsonify({"error": f"Could not reconstruct valid history for {parent_question_id}."}), 404
 
     # 3. 심화 질문 생성 (서비스 호출)
-    # [주의] report.summary도 DB에 JSON 문자열로 저장되어 있다면 여기서도 파싱 필요.
-    # get_report에서는 파싱하고 있으나, 여기서는 report.summary (문자열)을 그대로 전달하고 있음.
-    # generate_deep_dive_question 함수가 문자열을 처리할 수 있다고 가정하고 일단 유지.
-    deep_dive_question_text = generate_deep_dive_question(
-        conversation_history_list, 
-        report.summary # DB에서 가져온 summary (문자열)
-    )
+    try:
+        summary_data_dict = json.loads(report.summary) if report.summary else {}
+    except json.JSONDecodeError:
+        print(f"[{report_id}] CRITICAL: Deep-dive failed to parse report.summary JSON.")
+        return jsonify({"error": "Corrupted summary data in database"}), 500
+    
+    deep_dive_question_text = generate_deep_dive_question(
+        conversation_history_list, 
+        summary_data_dict # [수정] 딕셔너리 전달
+    )
+    # --- [수정 완료] ---
+
     if not deep_dive_question_text:
         return jsonify({"error": "Failed to generate deep-dive question"}), 500
 
