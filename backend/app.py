@@ -168,8 +168,8 @@ def background_analysis_step1(report_id, text, doc_type, original_filename):
             if 'embedding_claim' in analysis_data:
                 report.embedding_keyconcepts_claim = json.dumps(analysis_data['embedding_claim'])
             report.evaluation = json.dumps({"structural_similarity_comment": "LLM 정밀 비교(6항목 점수) 결과를 확인하세요." })
-            report.logic_flow = json.dumps({}) 
-            
+
+            report.logic_flow = json.dumps({})
             # [수정] similarity_details 저장
             report.similarity_details = json.dumps(
                 analysis_data.get('comparison_results_list', [])
@@ -307,12 +307,19 @@ def background_refill(report_id):
         print(f"[{report_id}] Refill thread started...")
         
         try:
-            # 1. DB에서 데이터 가져오기
-            summary = json.loads(report.summary) if report.summary else {}
-            similar = similarity_data.get("structural_similarity_details", [])
-            text_snippet = report.text_snippet
-            new_questions = generate_refill_questions(summary, similar, text_snippet)
-            current_pool = json.loads(report.questions_pool) if report.questions_pool else []
+            # 1. DB에서 데이터 가져오기
+            summary = json.loads(report.summary) if report.summary else {}
+            
+            # [수정] 버그 수정 및 새 로직 적용
+            similarity_details = json.loads(report.similarity_details) if report.similarity_details else []
+            # [신규] 새 헬퍼 함수 사용 (20점 기준)
+            similar = _filter_high_similarity_reports(similarity_details, threshold=20) 
+            
+            text_snippet = report.text_snippet
+            
+            # [수정] generate_refill_questions도 새 데이터 구조를 처리해야 함
+            new_questions = generate_refill_questions(summary, similar, text_snippet)
+            current_pool = json.loads(report.questions_pool) if report.questions_pool else []
             
             if new_questions:
                 current_pool.extend(new_questions)
