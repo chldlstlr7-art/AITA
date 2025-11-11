@@ -126,76 +126,116 @@ def build_concat_text(key_concepts, main_idea):
 
 def find_similar_documents(submission_id, sub_thesis_vec, sub_claim_vec, top_n=5):
     """
-    [신규/수정] DB의 모든 임베딩과 가중합 비교를 수행하여 상위 N개 후보를 반환합니다.
-    (CSV 로드 -> 실시간 DB 쿼리)
+    [Full Code]
+    항상 실시간 SQL DB (AnalysisReport)를 쿼리합니다.
+    is_test=False인 리포트만 비교 대조군으로 사용합니다.
     """
-    print("[find_similar_documents] DB에서 모든 임베딩 스캔 시작...")
+    
+    # 1. 제출된 벡터를 NumPy 배열로 변환
     try:
-        # 1. DB에서 모든 임베딩이 있는 리포트 조회
-        all_reports = AnalysisReport.query.filter(
-            AnalysisReport.embedding_keyconcepts_corethesis.isnot(None),
-            AnalysisReport.embedding_keyconcepts_claim.isnot(None),
-            AnalysisReport.id != submission_id  # [중요] 자기 자신 제외
-        ).all()
-
-        if not all_reports:
-            print("[find_similar_documents] 비교할 DB 임베딩이 없습니다.")
-            return []
-
-        # 2. NumPy 배열로 변환
         sub_thesis_np = np.array(sub_thesis_vec).reshape(1, -1)
         sub_claim_np = np.array(sub_claim_vec).reshape(1, -1)
+    except Exception as e:
+        print(f"[find_similar_documents] ERROR: 제출된 벡터를 NumPy로 변환 실패: {e}")
+        return []
         
-        db_ids = []
-        db_vectors_thesis = []
-        db_vectors_claim = []
-        db_summaries_json = [] # 비교를 위해 summary JSON도 함께 가져옴
+    db_ids = []
+    db_summaries_json = [] # 비교용 요약본 (JSON 문자열)
+    db_vectors_thesis_list = []
+    db_vectors_claim_list = []
 
+    db_vectors_thesis_np = None
+    db_vectors_claim_np = None
+
+    # --- 2. 항상 실시간 모드 (SQL DB 쿼리) ---
+    print(f"[find_similar_documents] Using Live DB Query (is_test=False, Excluding ID: {submission_id})")
+    try:
+        # [CRITICAL] 'is_test=False'인 리포트만 비교 대조군으로 사용
+        query = AnalysisReport.query.filter(
+            AnalysisReport.embedding_keyconcepts_corethesis.isnot(None),
+            AnalysisReport.embedding_keyconcepts_claim.isnot(None),
+            AnalysisReport.is_test == False
+        )
+        
+        # '자기 자신 제외' 로직
+        if submission_id:
+             query = query.filter(AnalysisReport.id != submission_id)
+        
+        all_reports = query.all()
+
+        if not all_reports:
+            print("[find_similar_documents] 비교할 DB 임베딩이 없습니다. (is_test=False 필터링됨)")
+            return []
+
+        # 3. DB 결과에서 벡터 및 메타데이터 추출
         for report in all_reports:
             try:
                 db_ids.append(report.id)
-                db_vectors_thesis.append(json.loads(report.embedding_keyconcepts_corethesis))
-                db_vectors_claim.append(json.loads(report.embedding_keyconcepts_claim))
                 db_summaries_json.append(report.summary) # JSON 문자열
+                
+                vec_thesis = json.loads(report.embedding_keyconcepts_corethesis)
+                vec_claim = json.loads(report.embedding_keyconcepts_claim)
+                
+                db_vectors_thesis_list.append(vec_thesis)
+                db_vectors_claim_list.append(vec_claim)
+                
             except Exception as e:
                 print(f"[find_similar_documents] Report {report.id} 임베딩/요약 파싱 실패: {e}")
-                
+        
         if not db_ids:
             print("[find_similar_documents] 유효한 DB 임베딩이 없습니다.")
             return []
 
-        db_vectors_thesis_np = np.array(db_vectors_thesis)
-        db_vectors_claim_np = np.array(db_vectors_claim)
-
-        # 3. 유사도 계산 (가중합 0.6:0.4)
-        sim_thesis = cosine_similarity(sub_thesis_np, db_vectors_thesis_np)[0]
-        sim_claim = cosine_similarity(sub_claim_np, db_vectors_claim_np)[0]
-
-        WEIGHT_THESIS = 0.6
-        WEIGHT_CLAIM = 0.4
-        sim_weighted = WEIGHT_THESIS * sim_thesis + WEIGHT_CLAIM * sim_claim
-        
-        # 4. 상위 N개 선정
-        weighted_scores = list(zip(range(len(db_ids)), sim_weighted))
-        sorted_scores = sorted(weighted_scores, key=lambda item: item[1], reverse=True)
-        
-        top_candidates = []
-        for index, score in sorted_scores[:top_n]: 
-            candidate_id = db_ids[index]
-            candidate_summary_json_str = db_summaries_json[index] # JSON 문자열
-            
-            top_candidates.append({
-                "candidate_id": candidate_id,
-                "weighted_similarity": score,
-                "candidate_summary_json_str": candidate_summary_json_str
-            })
-
-        print(f"[find_similar_documents] 상위 {len(top_candidates)}개 후보 반환 완료.")
-        return top_candidates
+        # 4. DB 벡터 리스트를 NumPy 배열로 변환
+        db_vectors_thesis_np = np.array(db_vectors_thesis_list)
+        db_vectors_claim_np = np.array(db_vectors_claim_list)
 
     except Exception as e:
-        print(f"[find_similar_documents] CRITICAL: 유사도 계산 중 오류: {e}")
+        print(f"[find_similar_documents] CRITICAL: Live DB 쿼리 중 오류: {e}")
         return []
+    # --- 쿼리 종료 ---
+
+    if db_vectors_thesis_np is None or db_vectors_claim_np.shape[0] == 0:
+        print("[find_similar_documents] DB 벡터가 준비되지 않았거나 비어있습니다.")
+        return []
+        
+    # 5. 유사도 계산 (가중합 0.6:0.4)
+    sim_thesis = cosine_similarity(sub_thesis_np, db_vectors_thesis_np)[0]
+    sim_claim = cosine_similarity(sub_claim_np, db_vectors_claim_np)[0]
+
+    WEIGHT_THESIS = 0.6
+    WEIGHT_CLAIM = 0.4
+    sim_weighted = WEIGHT_THESIS * sim_thesis + WEIGHT_CLAIM * sim_claim
+    
+    # 6. 상위 N개 선정
+    
+    # (인덱스, 점수) 튜플 리스트 생성
+    weighted_scores = list(enumerate(sim_weighted))
+    # 점수 기준으로 내림차순 정렬
+    sorted_scores = sorted(weighted_scores, key=lambda item: item[1], reverse=True)
+    
+    top_candidates = []
+    # 정렬된 리스트에서 상위 N개 추출
+    for index, score in sorted_scores: 
+        candidate_id = db_ids[index]
+        
+        # [중요] 자기 자신 제외 (DB 쿼리에서 이미 제외했지만, 이중 확인)
+        if candidate_id == submission_id:
+            continue
+            
+        candidate_summary_json_str = db_summaries_json[index] # JSON 문자열
+        
+        top_candidates.append({
+            "candidate_id": candidate_id,
+            "weighted_similarity": score,
+            "candidate_summary_json_str": candidate_summary_json_str # 4단계 비교를 위해 요약본 원본 전달
+        })
+        
+        if len(top_candidates) >= top_n:
+            break # 상위 N개만 선택
+
+    print(f"[find_similar_documents] 상위 {len(top_candidates)}개 후보 반환 완료.")
+    return top_candidates
 
 # ----------------------------------------------------
 # --- 3. 메인 서비스 함수 (app.py에서 호출) ---
