@@ -74,34 +74,43 @@ class User(db.Model):
 # --- [신규] 분석 결과를 저장할 모델 ---
 
 class AnalysisReport(db.Model):
-    __tablename__ = 'analysis_report'
+    """
+    분석 리포트 저장을 위한 DB 모델
+    [업데이트] 2개의 임베딩 필드 추가
+    """
+    __tablename__ = 'analysis_reports'
 
-    # Core Info
-    # [수정] UUID를 기본 키로 사용
+    # --- 기본 식별자 ---
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    status = db.Column(db.String(30), nullable=False, default='processing') # processing, processing_analysis, processing_questions, completed, error
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False) # User 모델이 있다면
     original_filename = db.Column(db.String(255))
-    created_at = db.Column(db.DateTime, server_default=db.func.now())
-    
-    # [신규] User 모델과의 연결 (Foreign Key)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
-    user = db.relationship('User', back_populates='reports')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # Analysis Data (복잡한 데이터는 JSON 타입으로 저장)
-    # (DB가 PostgreSQL이면 db.JSON 대신 JSONB를 권장합니다)
-    summary = db.Column(db.Text, nullable=True)
-    evaluation = db.Column(db.Text, default=json.dumps({}))
-    logic_flow = db.Column(db.Text, default=json.dumps({}))
-    similarity_details = db.Column(db.Text, nullable=True)
-    text_snippet = db.Column(db.Text, nullable=True)
-    
-    # QA Data
-    questions_pool = db.Column(db.Text, default=json.dumps([]))
-    qa_history = db.Column(db.Text, default=json.dumps([]))
-    
-    # State Management
-    is_refilling = db.Column(db.Boolean, default=False)
+    # --- 상태 관리 ---
+    status = db.Column(db.String(50), nullable=False, default='processing') # e.g., processing, processing_analysis, processing_questions, completed, error
     error_message = db.Column(db.Text, nullable=True)
 
+    # --- 원본 및 분석 데이터 (JSON 문자열로 저장) ---
+    text_snippet = db.Column(db.Text) # 원본 텍스트 일부
+    
+    # [수정] 'summary'는 이제 LLM이 생성한 구조 분석 JSON을 저장합니다 (Core_Thesis, Claim 등)
+    summary = db.Column(db.Text, nullable=True)
+    
+    # [수정] 'similarity_details'는 이제 LLM이 생성한 6개 항목 점수 리포트(들)을 JSON 리스트로 저장합니다
+    similarity_details = db.Column(db.Text, nullable=True) 
+
+    # (아래 필드들은 레거시이거나 단순화될 수 있으나, 일단 유지)
+    evaluation = db.Column(db.Text, nullable=True) # (e.g., LLM 정밀 비교 결과를 확인하세요.)
+    logic_flow = db.Column(db.Text, nullable=True) # (e.g., {})
+
+    # --- QA 및 상호작용 데이터 (JSON 문자열로 저장) ---
+    qa_history = db.Column(db.Text, nullable=True) # (e.g., [{"question_id": "...", "question": "...", "answer": "...", "parent_question_id": "..."}, ...])
+    questions_pool = db.Column(db.Text, nullable=True) # (e.g., [{"question": "...", "type": "..."}, ...])
+    is_refilling = db.Column(db.Boolean, default=False)
+
+    # --- [신규] 임베딩 필드 (벡터를 JSON 문자열로 저장) ---
+    embedding_keyconcepts_corethesis = db.Column(db.Text, nullable=True)
+    embedding_keyconcepts_claim = db.Column(db.Text, nullable=True)
+
     def __repr__(self):
-        return f'<AnalysisReport {self.id} (User {self.user_id})>'
+        return f'<AnalysisReport {self.id} (User {self.user_id}) - {self.status}>'
