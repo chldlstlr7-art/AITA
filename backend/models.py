@@ -89,6 +89,9 @@ class AnalysisReport(db.Model):
     # --- 상태 관리 ---
     status = db.Column(db.String(50), nullable=False, default='processing') # e.g., processing, processing_analysis, processing_questions, completed, error
     error_message = db.Column(db.Text, nullable=True)
+    
+    # True이면, DB에는 저장되지만 다른 리포트의 '비교 대조군'으로는 사용되지 않음.
+    is_test = db.Column(db.Boolean, nullable=False, default=False)
 
     # --- 원본 및 분석 데이터 (JSON 문자열로 저장) ---
     text_snippet = db.Column(db.Text) # 원본 텍스트 일부
