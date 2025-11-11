@@ -42,31 +42,60 @@ from flask_sqlalchemy import SQLAlchemy
 
     
 # --- 3. [유지] 헬퍼 함수 ---
-def _parse_similarity_level(report_text):
+def _parse_comparison_scores(report_text):
     """
-    LLM이 생성한 비교 보고서 텍스트에서 'Similarity Level'을 파싱합니다.
+    [신규] LLM이 생성한 비교 보고서 텍스트(6개 항목)에서 점수를 파싱하여 총점을 반환합니다.
     """
+    total_score = 0
     try:
-        match = re.search(r"Similarity Level:.*?\s*(.+)", report_text, re.IGNORECASE)
+        # 정규식: "1. ... Similarity: [Score 1–5]" 형태에서 숫자를 추출
+        # (한글/영문 점수 포맷 모두 대응)
+        matches = re.findall(
+            r":\s*\[?\s*Score\s*(\d)\s*–\s*5\s*\]?|:\s*\[?\s*(\d)\s*[–-]\s*5\s*\]?|Similarity:\s*\[?(\d)[^\]]*\]",
+            report_text,
+            re.IGNORECASE
+        )
         
-        if match:
-            level = match.group(1).strip().lower() # 캡처된 값
-            
-            # 한국어/영어 값 매핑
-            if "very high" in level or "매우 높음" in level:
-                return "Very High"
-            if "high" in level or "높음" in level:
-                return "High"
-            if "moderate" in level or "보통" in level:
-                return "Moderate"
-            if "low" in level or "낮음" in level:
-                return "Low"
+        score_count = 0
+        for match in matches:
+            score_str = next((s for s in match if s), None) # ('', '3', '') -> '3'
+            if score_str:
+                total_score += int(score_str)
+                score_count += 1
+                
+        # 6개 항목이 모두 파싱되었는지 확인 (선택적)
+        if score_count != 6:
+            print(f"[_parse_comparison_scores] WARNING: Parsed {score_count}/6 scores. (Total: {total_score})")
             
     except Exception as e:
-        print(f"[_parse_similarity_level] 파싱 중 에러 발생: {e}")
-        pass
-    
-    return "Unknown" # 파싱 실패
+        print(f"[_parse_comparison_scores] 파싱 중 에러 발생: {e}")
+        pass # 파싱 실패 시 0점 반환
+        
+    return total_score
+
+def _filter_high_similarity_reports(similarity_details_list, threshold=20):
+    """
+    [신규]후보 리포트 리스트(DB저장값)를 받아,
+    총점이 threshold(기본 20점) 이상인 리포트만 필터링합니다.
+    """
+    high_similarity_reports = []
+    if not similarity_details_list:
+        return []
+        
+    # similarity_details_list는 이제 analysis_data['comparison_results_list']
+    # (e.g., [{"candidate_id": "...", "llm_comparison_report": "..."}, ...])
+    for candidate_report in similarity_details_list:
+        report_text = candidate_report.get("llm_comparison_report", "")
+        
+        # 새 파서 호출
+        total_score = _parse_comparison_scores(report_text)
+        
+        candidate_report["plagiarism_score"] = total_score # [신규] 점수 필드 추가
+        
+        if total_score >= threshold:
+            high_similarity_reports.append(candidate_report)
+            
+    return high_similarity_reports
     
 def _distribute_questions(questions_pool, count=3):
     """
@@ -116,29 +145,35 @@ def background_analysis_step1(report_id, text, doc_type, original_filename):
             report.status = "processing_analysis"
             db.session.commit()
 
-            # 2. 핵심 분석 (동일)
-            analysis_data = perform_full_analysis_and_comparison(text, original_filename)
-            
-            if not analysis_data:
-                raise Exception("perform_full_analysis_and_comparison returned None")
-
+            # 2. 핵심 분석 (수정)
+            # [수정] analysis_service는 이제 새 프롬프트와 임베딩 로직을 사용해야 함
+            analysis_data = perform_full_analysis_and_comparison(
+                text, 
+                original_filename, 
+                JSON_SYSTEM_PROMPT,     # [신규] 프롬프트 전달
+                COMPARISON_SYSTEM_PROMPT # [신규] 프롬프트 전달
+            )
             print(f"[{report_id}] Step 1 (Analysis) COMPLETE. Updating DB.")
-            text_snippet = text[:4000] 
+            text_snippet = text[:4000] 
 
             # 3. [DB UPDATE] 딕셔너리 대신 DB 객체 필드 업데이트
-            if 'summary' in analysis_data:
-                report.summary = json.dumps(analysis_data['summary'])
-            else:
-                # 혹은 요약 데이터가 없는 경우를 대비
-                report.summary = json.dumps({"default_summary": "No summary available"})
-            
-            report.evaluation = json.dumps({
-                "structural_similarity_comment": "LLM 정밀 비교 결과를 확인하세요." 
-            })
-            report.logic_flow = json.dumps({}) 
-            report.similarity_details = json.dumps({
-                "structural_similarity_details": analysis_data['llm_comparison_results']
-            })
+            if 'summary_json' in analysis_data:
+                report.summary = json.dumps(analysis_data['summary_json'])
+            else:
+                report.summary = json.dumps({"error": "No summary available"})
+            
+            # [신규] 임베딩 저장
+            if 'embedding_thesis' in analysis_data:
+                report.embedding_keyconcepts_corethesis = json.dumps(analysis_data['embedding_thesis'])
+            if 'embedding_claim' in analysis_data:
+                report.embedding_keyconcepts_claim = json.dumps(analysis_data['embedding_claim'])
+            report.evaluation = json.dumps({"structural_similarity_comment": "LLM 정밀 비교(6항목 점수) 결과를 확인하세요." })
+            report.logic_flow = json.dumps({}) 
+            
+            # [수정] similarity_details 저장
+            report.similarity_details = json.dumps(
+                analysis_data.get('comparison_results_list', [])
+            )
             
             report.text_snippet = text_snippet
             report.qa_history = json.dumps([])
@@ -179,18 +214,17 @@ def background_analysis_step2_qa(report_id):
                 return
             
             print(f"[{report_id}] Step 2 (QA) thread started...")
-
-            # ⬇️ [핵심 수정] DB에서 읽은 JSON 문자열을 Python 객체로 복원 (역직렬화) ⬇️
-            # summary 필드는 이제 dict 형태여야 합니다.
-            summary_data = json.loads(report.summary) if report.summary else None
-            similarity_details_data = json.loads(report.similarity_details) if report.similarity_details else None
+            # [핵심 수정] DB에서 읽은 JSON 문자열을 Python 객체로 복원
+            summary_data = json.loads(report.summary) if report.summary else None
+            # [수정] similarity_details_data는 이제 리스트임
+            similarity_details_data = json.loads(report.similarity_details) if report.similarity_details else None
             
             # 여기서 빈 리포트 체크 로직을 다시 작성합니다.
             if not summary_data or not similarity_details_data:
                  raise Exception("Report data from Step 1 (summary/similarity) not found in DB")
 
             # 1단계의 데이터 추출
-            summary = summary_data # 이제 dict 형태
+            summary = summary_data
             
             snippet = report.text_snippet
             
@@ -199,15 +233,19 @@ def background_analysis_step2_qa(report_id):
             current_qa_history = json.loads(report.qa_history) if report.qa_history else []
 
             # ... (high_similarity_reports 필터링 로직 - 동일) ...
-            all_candidate_reports = similarity_details_data.get("structural_similarity_details", [])
-            high_similarity_reports = []
-            for candidate_report in all_candidate_reports:
-                report_text = candidate_report.get("llm_comparison_report", "")
-                level = _parse_similarity_level(report_text)
-                
-                if level in ["High", "Very High"]:
-                    high_similarity_reports.append(candidate_report)
-            print(f"[{report_id}] QA Filter: Found {len(high_similarity_reports)} 'High/Very High' reports.")
+            all_candidate_reports = similarity_details_data 
+            
+            # [신규] 새 헬퍼 함수 사용 (20점 기준)
+            high_similarity_reports = _filter_high_similarity_reports(all_candidate_reports, threshold=20)
+            
+            print(f"[{report_id}] QA Filter: Found {len(high_similarity_reports)} reports with score >= 20.")
+            # --- [수정 완료] ---
+
+            
+            # 3. 9개의 질문 풀 생성 (동일)
+            # [수정] generate_initial_questions은 이제 summary_data(dict)와 
+            # high_similarity_reports(점수 포함 list)를 처리해야 함
+            questions_pool = generate_initial_questions(summary, high_similarity_reports, snippet)
 
             
             # 3. 9개의 질문 풀 생성 (동일)
