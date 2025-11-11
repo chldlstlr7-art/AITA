@@ -73,6 +73,10 @@ def analyze_report():
     text = request.form.get("text")
     doc_type = request.form.get("docType")
     original_filename = "new_submission.txt" # 기본값
+    # [신규] is_test 플래그 파싱 (DB 저장을 위해)
+    is_test_str = request.form.get("is_test", "false").lower()
+    is_test = is_test_str == 'true'
+    print(f"[Debug] is_test 플래그: {is_test} (원본: '{is_test_str}')")
 
     if not text and file:
         original_filename = secure_filename(file.filename)
@@ -84,6 +88,7 @@ def analyze_report():
     
     if not text or len(text) < 50:
         return jsonify({"error": "Text is too short for analysis"}), 400
+    print(f"[Debug] 비동기 제출 모드 (is_test={is_test}) 실행...")
 
     # 1. JWT 토큰에서 identity (user_id)를 문자열로 가져옴
     token_identity = get_jwt_identity() 
@@ -102,6 +107,7 @@ def analyze_report():
             status="processing", # 초기 상태
             original_filename=original_filename,
             text_snippet=text[:4000],
+            is_test=is_test,
             
             # --- [신규] 새 임베딩 필드 초기화 ---
             embedding_keyconcepts_corethesis=None,
@@ -185,6 +191,7 @@ def get_report(report_id):
         "logicFlow": logic_flow_data,
         "similarity_details": similarity_details_data, # (이제 리스트)
         "text_snippet": report.text_snippet, 
+        "is_test": report.is_test, # [신규] is_test 상태도 전달
         
         "initialQuestions": _get_initial_questions_from_history(qa_history_list), # <-- 파싱된 리스트 전달
         "questions_pool_count": len(questions_pool_list), # <-- 파싱된 리스트의 길이
