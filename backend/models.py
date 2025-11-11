@@ -1,57 +1,78 @@
-import datetime
 import re
 import uuid
 from extensions import db 
 from werkzeug.security import generate_password_hash, check_password_hash
-from sqlalchemy.types import Uuid # UUID 타입을 위해
-from sqlalchemy.dialects.postgresql import JSONB # (선택) PostgreSQL의 경우 JSON보다 효율적
+
+# [수정] datetime, timezone, timedelta를 모두 임포트
+from datetime import datetime, timezone, timedelta 
+
 import json
+
+# --- 1. User 모델 (AnalysisReport보다 먼저 정의) ---
+
 class User(db.Model):
     """
     사용자 모델 (DB 테이블)
     @snu.ac.kr 이메일 인증 및 역할(학생/조교) 관리를 담당합니다.
     """
-    # [수정] AnalysisReport의 'user.id'와 맞추기 위해 'users' -> 'user'
-    __tablename__ = 'user' 
+    # [수정 1] 'users' (복수)로 Foreign Key와 일치
+    __tablename__ = 'users' 
     
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=False, index=True)
     
-    # 'student' 또는 'ta' (조교)
+    # [신규] 비밀번호 해시 저장
+    password_hash = db.Column(db.String(256), nullable=True) # 비밀번호(선택)
+    
     role = db.Column(db.String(10), nullable=False, default='student')
     
     # --- 인증 코드 관련 ---
     verification_code_hash = db.Column(db.String(128), nullable=True)
-    code_expiry = db.Column(db.DateTime, nullable=True)
+    code_expiry = db.Column(db.DateTime, nullable=True) # Naive UTC 시간이 저장됨
     
     # --- 상태 ---
     is_verified = db.Column(db.Boolean, default=False, nullable=False)
-    # [수정] DB의 기본 시간 함수를 사용하는 것을 권장
     created_at = db.Column(db.DateTime, server_default=db.func.now()) 
     last_login = db.Column(db.DateTime, onupdate=db.func.now(), nullable=True)
 
-    # --- [신규] 1:N 관계 설정 ---
-    # User가 삭제되면, 연관된 Report도 모두 삭제 (cascade)
+    # --- 관계 설정 ---
     reports = db.relationship('AnalysisReport', back_populates='user', lazy=True, cascade="all, delete-orphan")
-    # --- [신규] ---
 
     def __init__(self, email, role='student'):
-        # [수정] 정규표현식으로 더 정확하게 검증 (기존 제안 반영)
         if not re.match(r"^[a-zA-Z0-9._%+-]+@snu\.ac\.kr$", email.lower()):
             raise ValueError("유효한 @snu.ac.kr 이메일이 아닙니다.")
         self.email = email.lower()
         self.role = role
-        self.is_verified = False # 기본값은 미인증
+        self.is_verified = False
+
+    def set_password(self, password):
+        """[신규] 비밀번호를 해시하여 저장합니다."""
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        """[신규] 비밀번호가 맞는지 확인합니다."""
+        if not self.password_hash:
+            return False
+        return check_password_hash(self.password_hash, password)
 
     def set_verification_code(self, code):
-        """인증 코드를 해시하여 DB에 저장 (UTC 기준)"""
-        # (10분 유효기간)
-        self.code_expiry = datetime.datetime.utcnow() + datetime.timedelta(minutes=1000)
+        """인증 코드를 해시하여 DB에 저장 (Naive UTC 기준)"""
+        
+        # [수정 4] 유효 시간을 10분으로 수정
+        expires = datetime.now(timezone.utc) + timedelta(minutes=10) 
+        
+        # [수정 1] Naive 객체로 변환하여 저장 (DB 호환성)
+        self.code_expiry = expires.replace(tzinfo=None) 
         self.verification_code_hash = generate_password_hash(code)
 
     def check_verification_code(self, code):
-        """제출된 코드가 유효한지 (기간 만료 + 값 일치) 확인 (UTC 기준)"""
-        if self.code_expiry is None or datetime.datetime.utcnow() > self.code_expiry:
+        """제출된 코드가 유효한지 (기간 만료 + 값 일치) 확인 (Naive UTC 기준)"""
+        if self.code_expiry is None:
+            return False
+            
+        # [수정 2] Naive 객체(현재시간)와 Naive 객체(만료시간)를 비교
+        current_time_naive_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        if current_time_naive_utc > self.code_expiry:
             # 기간 만료
             return False
         
@@ -65,13 +86,15 @@ class User(db.Model):
         self.is_verified = True
         self.verification_code_hash = None
         self.code_expiry = None
-        self.last_login = datetime.datetime.now(datetime.timezone.utc)
+        
+        # [수정 3] Naive 객체로 변환하여 저장
+        self.last_login = datetime.now(timezone.utc).replace(tzinfo=None) 
 
     def __repr__(self):
         return f'<User {self.email} (Role: {self.role})>'
 
 
-# --- [신규] 분석 결과를 저장할 모델 ---
+# --- 2. AnalysisReport 모델 ---
 
 class AnalysisReport(db.Model):
     """
@@ -82,38 +105,35 @@ class AnalysisReport(db.Model):
 
     # --- 기본 식별자 ---
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False) # User 모델이 있다면
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False) 
     original_filename = db.Column(db.String(255))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # [수정 4] Naive UTC 시간을 기본값으로 사용
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
     # --- 상태 관리 ---
-    status = db.Column(db.String(50), nullable=False, default='processing') # e.g., processing, processing_analysis, processing_questions, completed, error
+    status = db.Column(db.String(50), nullable=False, default='processing')
     error_message = db.Column(db.Text, nullable=True)
-    
-    # True이면, DB에는 저장되지만 다른 리포트의 '비교 대조군'으로는 사용되지 않음.
     is_test = db.Column(db.Boolean, nullable=False, default=False)
 
     # --- 원본 및 분석 데이터 (JSON 문자열로 저장) ---
-    text_snippet = db.Column(db.Text) # 원본 텍스트 일부
-    
-    # [수정] 'summary'는 이제 LLM이 생성한 구조 분석 JSON을 저장합니다 (Core_Thesis, Claim 등)
+    text_snippet = db.Column(db.Text)
     summary = db.Column(db.Text, nullable=True)
-    
-    # [수정] 'similarity_details'는 이제 LLM이 생성한 6개 항목 점수 리포트(들)을 JSON 리스트로 저장합니다
     similarity_details = db.Column(db.Text, nullable=True) 
-
-    # (아래 필드들은 레거시이거나 단순화될 수 있으나, 일단 유지)
-    evaluation = db.Column(db.Text, nullable=True) # (e.g., LLM 정밀 비교 결과를 확인하세요.)
-    logic_flow = db.Column(db.Text, nullable=True) # (e.g., {})
+    evaluation = db.Column(db.Text, nullable=True)
+    logic_flow = db.Column(db.Text, nullable=True)
 
     # --- QA 및 상호작용 데이터 (JSON 문자열로 저장) ---
-    qa_history = db.Column(db.Text, nullable=True) # (e.g., [{"question_id": "...", "question": "...", "answer": "...", "parent_question_id": "..."}, ...])
-    questions_pool = db.Column(db.Text, nullable=True) # (e.g., [{"question": "...", "type": "..."}, ...])
+    qa_history = db.Column(db.Text, nullable=True)
+    questions_pool = db.Column(db.Text, nullable=True)
     is_refilling = db.Column(db.Boolean, default=False)
 
     # --- [신규] 임베딩 필드 (벡터를 JSON 문자열로 저장) ---
     embedding_keyconcepts_corethesis = db.Column(db.Text, nullable=True)
     embedding_keyconcepts_claim = db.Column(db.Text, nullable=True)
+
+    # --- [수정] 'back_populates'를 위한 역관계 설정 ---
+    user = db.relationship('User', back_populates='reports')
 
     def __repr__(self):
         return f'<AnalysisReport {self.id} (User {self.user_id}) - {self.status}>'

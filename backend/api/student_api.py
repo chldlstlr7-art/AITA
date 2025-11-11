@@ -11,7 +11,7 @@ from services.qa_service import generate_deep_dive_question
 
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
-
+from config import JSON_SYSTEM_PROMPT, COMPARISON_SYSTEM_PROMPT
 from extensions import db
 from models import AnalysisReport
 # --- 1. '학생용' Blueprint 생성 ---
@@ -103,17 +103,17 @@ def analyze_report():
     
     try:
         new_report = AnalysisReport(
-            user_id=user_id,
-            status="processing", # 초기 상태
-            original_filename=original_filename,
-            text_snippet=text[:4000],
+            user_id=user_id,
+            status="processing", # 초기 상태
+            original_filename=original_filename,
+            text_snippet=text[:4000],
             is_test=is_test,
             
             # --- [신규] 새 임베딩 필드 초기화 ---
             embedding_keyconcepts_corethesis=None,
             embedding_keyconcepts_claim=None
             # --- [신규] ---
-        )
+        )
         db.session.add(new_report)
         db.session.commit()
         report_id = new_report.id # DB가 생성한 UUID
@@ -124,7 +124,14 @@ def analyze_report():
     
     thread = threading.Thread(
         target=background_analysis_step1,
-        args=(report_id, text, doc_type, original_filename)
+        args=(
+            report_id, 
+            text, 
+            doc_type, 
+            original_filename,
+            JSON_SYSTEM_PROMPT,        # [신규] 5번째 인자
+            COMPARISON_SYSTEM_PROMPT   # [신규] 6번째 인자
+        )
     )
     thread.start()
     
@@ -157,8 +164,8 @@ def get_report(report_id):
         evaluation_data = json.loads(report.evaluation) if report.evaluation else {}
         logic_flow_data = json.loads(report.logic_flow) if report.logic_flow else {}
         # [수정] similarity_details_data는 이제 리스트입니다.
-        similarity_details_data = json.loads(report.similarity_details) if report.similarity_details else []
-        qa_history_list = json.loads(report.qa_history) if report.qa_history else []
+        similarity_details_data = json.loads(report.similarity_details) if report.similarity_details else []
+        qa_history_list = json.loads(report.qa_history) if report.qa_history else []
         questions_pool_list = json.loads(report.questions_pool) if report.questions_pool else []
     
     except json.JSONDecodeError as e:
@@ -378,14 +385,14 @@ def post_deep_dive_question(report_id):
     # 3. 심화 질문 생성 (서비스 호출)
     try:
         summary_data_dict = json.loads(report.summary) if report.summary else {}
-    except json.JSONDecodeError:
+    except json.JSONDecodeError:
         print(f"[{report_id}] CRITICAL: Deep-dive failed to parse report.summary JSON.")
         return jsonify({"error": "Corrupted summary data in database"}), 500
     
-    deep_dive_question_text = generate_deep_dive_question(
-        conversation_history_list, 
-        summary_data_dict # [수정] 딕셔너리 전달
-    )
+    deep_dive_question_text = generate_deep_dive_question(
+        conversation_history_list,
+        summary_data_dict # [수정] 딕셔너리 전달
+    )
     # --- [수정 완료] ---
 
     if not deep_dive_question_text:

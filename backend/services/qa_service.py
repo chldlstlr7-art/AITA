@@ -139,7 +139,7 @@ def generate_initial_questions(summary_dict, high_similarity_reports_list, snipp
     [제출 리포트 원본 일부]
     {snippet}
 
-    출력은 반드시 [{"question": "질문 내용...", "type": "critical"}, ...] 형식의 JSON 리스트여야 합니다.
+    출력은 반드시 [{{"question": "질문 내용...", "type": "critical"}}, ...] 형식의 JSON 리스트여야 합니다.
     """
     
     # 4. LLM 호출
@@ -220,7 +220,7 @@ def generate_refill_questions(summary_dict, similar_reports_list, text_snippet):
     {summary_text}
     (유사성 정보: {plagiarism_info})
     
-    출력은 반드시 [{"question": "질문 내용...", "type": "critical"}, {"question": "...", "type": "critical"}, {"question": "...", "type": "perspective"}, {"question": "...", "type": "perspective"}, {"question": "...", "type": "innovative"}, {"question": "...", "type": "innovative"}] 형식의 JSON 리스트여야 합니다.
+    출력은 반드시 [{{"question": "질문 내용...", "type": "critical"}}, {{"question": "...", "type": "critical"}}, {{"question": "...", "type": "perspective"}}, {{"question": "...", "type": "perspective"}}, {{"question": "...", "type": "innovative"}}, {{"question": "...", "type": "innovative"}}] 형식의 JSON 리스트여야 합니다.
     """
     
     # 3. LLM 호출 (기존 헬퍼 재사용)

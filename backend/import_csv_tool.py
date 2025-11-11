@@ -5,33 +5,36 @@ import uuid
 from tqdm import tqdm
 
 # --- [중요] Flask App 컨텍스트 로드 ---
-# 이 스크립트가 app.py, models.py 등과 통신할 수 있게 함
 from app import app, db
 from models import AnalysisReport, User # User 모델도 임포트
-from werkzeug.security import generate_password_hash
+# [수정] generate_password_hash는 models.py에 없으므로 여기서도 필요 없음
 
 # --- [설정] ---
-# 이 스크립트와 동일한 위치에 CSV 파일이 있다고 가정합니다.
 CSV_FILE_PATH = 'final_with_embeddings (3).csv' 
 # --- [설정] ---
 
 def create_system_user():
     """'system_importer' 사용자를 확인하고, 없으면 생성합니다."""
-    # (주의: user_id=1을 사용하거나, 안전하게 생성합니다)
-    system_user = User.query.filter_by(username='system_importer').first()
+    
+    # [수정] User 모델의 '@snu.ac.kr' 검증을 통과할 수 있는 이메일로 변경
+    SYSTEM_EMAIL = 'system_importer@snu.ac.kr' 
+    system_user = User.query.filter_by(email=SYSTEM_EMAIL).first()
+    
     if system_user:
-        print(f"   -> 'system_importer' 사용자 (ID: {system_user.id})를 사용합니다.")
+        print(f"   -> 'system_importer' 사용자 (Email: {SYSTEM_EMAIL}, ID: {system_user.id})를 사용합니다.")
         return system_user
 
     print(f"   -> 'system_importer' 사용자를 새로 생성합니다.")
-    # 기본 User 모델의 제약조건(not null)을 모두 충족해야 함
+    
+    # [수정] models.py의 __init__(self, email, role) 시그니처에 맞게 생성
     new_user = User(
-        username='system_importer',
-        email='system@local.com',
-        # 'password123'을 해시 (로그인에 사용되진 않음)
-        password_hash=generate_password_hash('password123'), 
-        role='ta' # (임의 지정)
+        email=SYSTEM_EMAIL,
+        role='student' # (임의 지정)
     )
+    
+    # (참고: 이 사용자는 CSV 임포트용이며, 
+    # models.py의 로직에 따라 is_verified=False 상태로 생성됩니다.)
+    
     db.session.add(new_user)
     try:
         db.session.commit()
@@ -48,8 +51,6 @@ def import_csv_to_db():
     CSV 파일의 데이터를 읽어 AnalysisReport 테이블로 임포트합니다.
     """
     print("--- 1회용 CSV 임포트 스크립트 시작 ---")
-    
-    # 0. S-BERT 모델은 필요 없음 (이미 임베딩이 CSV에 있음)
         
     # 1. 기존 CSV 파일 읽기
     if not os.path.exists(CSV_FILE_PATH):
@@ -152,7 +153,4 @@ def import_csv_to_db():
 
 if __name__ == "__main__":
     # 이 스크립트를 직접 실행할 때 (e.g., python import_csv_tool.py)
-    # Flask-SQLAlchemy가 `app`을 필요로 하므로, `app.app_context()` 내에서 실행
-    
-    # (app.app_context()는 함수 내부에서 이미 사용 중이므로 바로 호출)
     import_csv_to_db()
