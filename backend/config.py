@@ -39,8 +39,10 @@ JSON_SYSTEM_PROMPT = (
     "You **must** write all output in **full, natural-language sentences** in Korean. "
     "Do NOT use keyword lists or fragmented phrases. "
     "Your goal is to create a semantically rich, specific, and unique analysis that reflects the logical and rhetorical structure of the document.\n\n"
+
     "Follow the logical-structural evaluation framework below. "
     "Each field should be written as a complete and concrete explanation, not as a short label.\n\n"
+
     "Field Definitions:\n"
     "1. **Core Thesis** – Describe the central issue or thesis of the text. "
     "(e.g., 'This essay argues that digital dependency among teenagers weakens self-control.')\n"
@@ -49,28 +51,37 @@ JSON_SYSTEM_PROMPT = (
     "3. **Claim** – Write the most essential argument of the text as a complete, specific sentence.\n"
     "4. **Reasoning** – State the number of main reasons, summarize each one, and classify their types "
     "(e.g., statistical evidence, example, value-based reasoning, or authority citation). Write in at least one full paragraph.\n"
-    "5. **Flow Pattern** – Analyze the logical flow of the given text in sequence, such as: "
-    "Problem Statement: “~~”, “~~” → Claim: “~~” → Supporting Evidence: “~~”, “~~” → "
-    "Counterargument and Rebuttal: “~~” → Conclusion: “~~~”.\n"
+
+    # --- [수정된 부분] ---
+    "5. **Flow Pattern** – Analyze the text’s logical flow. Your output for this field **must** be a single **JSON object** containing two keys: \"nodes\" and \"edges\".\n"
+    "   - \"nodes\" (JSON object): A dictionary where keys are node IDs (e.g., \"A1\", \"B1\") and values are strings summarizing the logical step in Korean (e.g., \"[단계]: [요약 문장]\").\n"
+    "   - \"edges\" (JSON array): An array of 2-element arrays representing the directed logical flow (e.g., [[\"A1\", \"B1\"], [\"B1\", \"C1\"]]).\n"
+    "   - Do NOT include any extra explanation or commentary.\n"
+    "   - verify the category of each nodes and fill it in [단계]. (ex. 문제1, 문제2, 핵심 주장, 근거1, 해결, 결론, etc.)\n\n"
+    # --- [수정 완료] (Python 코드 예시 제거) ---
+
     "6. **Conclusion Framing** – Explain how the conclusion is structured (summary, recommendation, or value emphasis) and its rhetorical focus.\n"
     "7. **key_concepts** – Extract 5–7 unique, topic-specific keywords or proper nouns that represent the text’s key ideas, separated by commas. "
     "(e.g., 'digital dependency, self-control, technology culture, social isolation, resilience')\n\n"
+
     "You must output strictly in the following JSON format (in Korean):\n\n"
     "```json\n"
     "{\n"
-    "  \"assignment_type\": \"[e.g., Argumentative Essay, Editorial, Research Proposal]\",\n"
-    "  \"Core_Thesis\": \"[A full Korean sentence describing the central thesis or issue]\",\n"
-    "  \"Problem_Framing\": \"[Explanation of how the introduction defines or interprets the topic, in Korean]\",\n"
-    "  \"Claim\": \"[The most essential argument, written in a complete Korean sentence]\",\n"
-    "  \"Reasoning\": \"[Number of reasons, summaries, and classifications, written in Korean]\",\n"
-    "  \"Flow_Pattern\": \"[Explanation of logical flow sequence, in Korean]\",\n"
-    "  \"Conclusion_Framing\": \"[Explanation of the conclusion type and focus, in Korean]\",\n"
-    "  \"key_concepts\": \"[5–7 specific keywords, comma-separated, in Korean]\"\n"
+    "  \"assignment_type\": \"[예: 논설문, 사설, 연구계획서 등]\",\n"
+    "  \"Core_Thesis\": \"[핵심 논지의 전체 문장 요약]\",\n"
+    "  \"Problem_Framing\": \"[주제 정의 및 도입부 설명]\",\n"
+    "  \"Claim\": \"[핵심 주장 문장]\",\n"
+    "  \"Reasoning\": \"[주요 근거 요약 및 유형 설명]\",\n"
+    "  \"Flow_Pattern\": {\n"
+    "      \"nodes\": {\"A1\": \"[단계]: [요약]\", \"B1\": \"[단계]: [요약]\"},\n"
+    "      \"edges\": [[\"A1\", \"B1\"]]\n"
+    "  },\n"
+    "  \"Conclusion_Framing\": \"[결론 구조 및 강조점 설명]\",\n"
+    "  \"key_concepts\": \"[핵심 개념 5~7개, 쉼표로 구분]\"\n"
     "}\n"
     "```\n\n"
     "Answer in Korean."
 )
-
 # 2. 후보 문서 간 비교 프롬프트
 COMPARISON_SYSTEM_PROMPT = (
 "You are an expert evaluator comparing two structured analysis reports (JSON format) derived from academic essays. "

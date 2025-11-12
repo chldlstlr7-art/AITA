@@ -48,6 +48,7 @@ from api.ta_api import ta_bp # [신규] TA 블루프린트 임포트
 def _parse_comparison_scores(report_text):
     """
     [신규] LLM이 생성한 비교 보고서 텍스트에서 6개 항목의 점수를 파싱합니다.
+    [수정] LLM의 다양한 마크다운 형식을 처리하기 위해 개별 항목을 순회하는 방식으로 변경
     """
     scores = {
         "Core Thesis": 0,
@@ -58,35 +59,41 @@ def _parse_comparison_scores(report_text):
         "Conclusion Framing": 0,
     }
     total_score = 0
+    parsed_count = 0
+
+    # [수정] key_mapping을 순회하며 각 항목을 개별적으로 검색
+    key_mapping = {
+        "Core Thesis": "Core Thesis",
+        "Problem Framing": "Problem Framing",
+        "Claim": "Claim",
+        "Reasoning": "Reasoning",
+        "Flow Pattern": "Flow Pattern",
+        "Conclusion Framing": "Conclusion Framing",
+    }
     
     try:
-        # [수정] LLM의 응답이 마크다운(**)을 포함하는 경우(예: 1. **Core Thesis**...)와
-        # 마크다운이 없는 경우(예: 1. Core Thesis...) 모두를 처리하도록 정규식 수정
-        # 또한 하이픈(-)과 엔대시(–)를 모두 허용
-        score_pattern = re.compile(
-            r"\d+\.\s*(?:\*\*)?(.*?)(?:\*\*)?\s*Similarity:\s*(\d)\s*[–-]",  # 마크다운(**) 및 대시(-) 지원
-            re.IGNORECASE
-        )
-        matches = score_pattern.findall(report_text)
-        
-        key_mapping = {
-            "core thesis": "Core Thesis",
-            "problem framing": "Problem Framing",
-            "claim": "Claim",
-            "reasoning": "Reasoning",
-            "flow pattern": "Flow Pattern",
-            "conclusion framing": "Conclusion Framing",
-        }
-
-        parsed_count = 0 # (디버깅용)
-        for key, score_str in matches:
-            normalized_key = key.strip().lower()
-            if normalized_key in key_mapping:
-                mapped_key = key_mapping[normalized_key]
-                score = int(score_str)
+        for key_name, mapped_key in key_mapping.items():
+            # [수정] 항목 이름(예: "Core Thesis")과 "Similarity:" 문자열을 찾고,
+            # 그 사이에 있는 점수(\d)를 추출합니다.
+            # re.DOTALL: .이 줄바꿈 문자(\n)도 포함하도록 함
+            # re.IGNORECASE: 대소문자 무시
+            # (?:...): 캡처하지 않는 그룹
+            # .*?: 비탐욕적(non-greedy)으로 모든 문자 일치 (마크다운 포함)
+            
+            # [*** 여기를 수정했습니다 ***]
+            # :** 5– 형태를 처리하기 위해 (?:\*\*)? 뒤에 \s*를 추가
+            pattern = rf"{re.escape(key_name)}.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]"
+            
+            match = re.search(pattern, report_text, re.IGNORECASE | re.DOTALL)
+            
+            if match:
+                score = int(match.group(1))
                 scores[mapped_key] = score
                 parsed_count += 1
-        
+            else:
+                # [디버깅] 파싱 실패 시 어떤 키가 실패했는지 로깅
+                print(f"[_parse_comparison_scores] DEBUG: Failed to parse score for key: '{key_name}'")
+
         if parsed_count < 6:
             print(f"[_parse_comparison_scores] WARNING: Parsed {parsed_count}/6 scores. (Total: {sum(scores.values())})")
         else:
@@ -110,29 +117,28 @@ def _parse_comparison_scores(report_text):
     
     return total_score, scores
 
-def _filter_high_similarity_reports(similarity_details_list, threshold=20):
+def _filter_high_similarity_reports(comparison_results_list):
     """
-    [신규]후보 리포트 리스트(DB저장값)를 받아,
-    총점이 threshold(기본 20점) 이상인 리포트만 필터링합니다.
+    [신규] 비교 결과 리스트를 받아, '총점 20점' 이상인 항목만 필터링합니다.
     """
     high_similarity_reports = []
-    if not similarity_details_list:
-        return []
+    
+    threshold = 20 # 50점 만점 중 20점
+    
+    for result in comparison_results_list:
+        report_text = result.get("llm_comparison_report", "")
         
-    # similarity_details_list는 이제 analysis_data['comparison_results_list']
-    # (e.g., [{"candidate_id": "...", "llm_comparison_report": "..."}, ...])
-    for candidate_report in similarity_details_list:
-        report_text = candidate_report.get("llm_comparison_report", "")
-        
-        # 새 파서 호출
-        total_score = _parse_comparison_scores(report_text)
-        
-        candidate_report["plagiarism_score"] = total_score # [신규] 점수 필드 추가
+        # [수정] _parse_comparison_scores가 (total_score, scores_dict) 튜플을 반환하므로
+        #       두 개의 변수로 나누어 받습니다.
+        total_score, scores_dict = _parse_comparison_scores(report_text)
         
         if total_score >= threshold:
-            high_similarity_reports.append(candidate_report)
+            result['plagiarism_score'] = total_score # 이제 total_score는 정수(int)입니다.
+            result['scores_detail'] = scores_dict   # (선택) 세부 점수 추가
+            high_similarity_reports.append(result)
             
     return high_similarity_reports
+
     
 def _distribute_questions(questions_pool, count=3):
     """
