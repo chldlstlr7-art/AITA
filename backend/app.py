@@ -26,7 +26,10 @@ app = Flask(__name__)
 app.config.from_object(Config)
 from extensions import db, mail, jwt
 
-CORS(app, resources={r"/api/*": {"origins": ["*.vercel.app", "http://localhost:3000"]}})
+CORS(app, resources={
+    r"/api/*": {"origins": ["*.vercel.app", "http://localhost:3000", "http://localhost:5173"]},
+    r"/": {"origins": "http://localhost:5173"} # 루트 경로(/)에 대한 5173 포트 허용
+})
 
 
 #확장 객체 앱에 연결 
