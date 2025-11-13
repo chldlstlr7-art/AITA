@@ -44,44 +44,43 @@ JSON_SYSTEM_PROMPT = (
     "Each field should be written as a complete and concrete explanation, not as a short label.\n\n"
 
     "Field Definitions:\n"
-    "1. **Core Thesis** – Describe the central issue or thesis of the text. "
+    "1. **Core Thesis** - Describe the central issue or thesis of the text. "
     "(e.g., 'This essay argues that digital dependency among teenagers weakens self-control.')\n"
-    "2. **Problem Framing** – Explain how the introduction defines or interprets the main topic. "
+    "2. **Problem Framing** - Explain how the introduction defines or interprets the main topic. "
     "(e.g., 'The introduction frames technological dependency as a psychological issue rather than a social one.')\n"
-    "3. **Claim** – Write the most essential argument of the text as a complete, specific sentence.\n"
-    "4. **Reasoning** – State the number of main reasons, summarize each one, and classify their types "
+    "3. **Claim** - Write the most essential argument of the text as a complete, specific sentence.\n"
+    "4. **Reasoning** - State the number of main reasons, summarize each one, and classify their types "
     "(e.g., statistical evidence, example, value-based reasoning, or authority citation). Write in at least one full paragraph.\n"
 
-    # --- [수정된 부분] ---
-    "5. **Flow Pattern** – Analyze the text’s logical flow. Your output for this field **must** be a single **JSON object** containing two keys: \"nodes\" and \"edges\".\n"
+    "5. **Flow Pattern** - Analyze the text’s logical flow. Your output for this field **must** be a single **JSON object** containing two keys: \"nodes\" and \"edges\".\n"
     "   - \"nodes\" (JSON object): A dictionary where keys are node IDs (e.g., \"A1\", \"B1\") and values are strings summarizing the logical step in Korean (e.g., \"[단계]: [요약 문장]\").\n"
     "   - \"edges\" (JSON array): An array of 2-element arrays representing the directed logical flow (e.g., [[\"A1\", \"B1\"], [\"B1\", \"C1\"]]).\n"
     "   - Do NOT include any extra explanation or commentary.\n"
     "   - verify the category of each nodes and fill it in [단계]. (ex. 문제1, 문제2, 핵심 주장, 근거1, 해결, 결론, etc.)\n\n"
-    # --- [수정 완료] (Python 코드 예시 제거) ---
 
-    "6. **Conclusion Framing** – Explain how the conclusion is structured (summary, recommendation, or value emphasis) and its rhetorical focus.\n"
-    "7. **key_concepts** – Extract 5–7 unique, topic-specific keywords or proper nouns that represent the text’s key ideas, separated by commas. "
+    "6. **Conclusion Framing** - Explain how the conclusion is structured (summary, recommendation, or value emphasis) and its rhetorical focus.\n"
+    "7. **key_concepts** - Extract 5-7 unique, topic-specific keywords or proper nouns that represent the text’s key ideas, separated by commas. "
     "(e.g., 'digital dependency, self-control, technology culture, social isolation, resilience')\n\n"
 
     "You must output strictly in the following JSON format (in Korean):\n\n"
     "```json\n"
     "{\n"
-    "  \"assignment_type\": \"[예: 논설문, 사설, 연구계획서 등]\",\n"
-    "  \"Core_Thesis\": \"[핵심 논지의 전체 문장 요약]\",\n"
-    "  \"Problem_Framing\": \"[주제 정의 및 도입부 설명]\",\n"
-    "  \"Claim\": \"[핵심 주장 문장]\",\n"
-    "  \"Reasoning\": \"[주요 근거 요약 및 유형 설명]\",\n"
-    "  \"Flow_Pattern\": {\n"
-    "      \"nodes\": {\"A1\": \"[단계]: [요약]\", \"B1\": \"[단계]: [요약]\"},\n"
-    "      \"edges\": [[\"A1\", \"B1\"]]\n"
-    "  },\n"
-    "  \"Conclusion_Framing\": \"[결론 구조 및 강조점 설명]\",\n"
-    "  \"key_concepts\": \"[핵심 개념 5~7개, 쉼표로 구분]\"\n"
+    "  \"assignment_type\": \"[예: 논설문, 사설, 연구계획서 등]\",\n"
+    "  \"Core_Thesis\": \"[핵심 논지의 전체 문장 요약]\",\n"
+    "  \"Problem_Framing\": \"[주제 정의 및 도입부 설명]\",\n"
+    "  \"Claim\": \"[핵심 주장 문장]\",\n"
+    "  \"Reasoning\": \"[주요 근거 요약 및 유형 설명]\",\n"
+    "  \"Flow_Pattern\": {\n"
+    "       \"nodes\": {\"A1\": \"[단계]: [요약]\", \"B1\": \"[단계]: [요약]\"},\n"
+    "       \"edges\": [[\"A1\", \"B1\"]]\n"
+    "  },\n"
+    "  \"Conclusion_Framing\": \"[결론 구조 및 강조점 설명]\",\n"
+    "  \"key_concepts\": \"[핵심 개념 5~7개, 쉼표로 구분]\"\n"
     "}\n"
     "```\n\n"
     "Answer in Korean."
 )
+
 # 2. 후보 문서 간 비교 프롬프트
 COMPARISON_SYSTEM_PROMPT = (
 "You are an expert evaluator comparing two structured analysis reports (JSON format) derived from academic essays. "
@@ -122,3 +121,102 @@ COMPARISON_SYSTEM_PROMPT = (
 
 "Answer in Korean."
 )
+
+IDEA_GENERATION_PROMPT = """You are an expert academic dialogue analyst and creative thinking facilitator.
+You will be given the student's original essay summary, a snippet, and a pre-formatted 'Conversation Flow'.
+Your task is to analyze this entire flow and generate **3 new or evolved perspectives or ideas**.
+
+Guidelines:
+1. Each idea must be a natural, reflective, and invitational sentence (e.g., "~~한 시각에서 ~~한 문제를 바라보는 건 어때요?", "~~라는 관점으로 확장해보는 건 어떨까요?").
+2. For each idea, provide 1-3 Q&A pairs from the 'Conversation Flow' that most strongly inspired it. You must *summarize* the Q and A.
+
+Output format (in Korean):
+Your output must be *only* a valid JSON list (starting with '[' and ending with ']') matching this *exact* structure:
+[
+  {
+    "idea": "첫 번째 발전 아이디어 제안 문장...",
+    "evidence": [
+      { "q": "관련 질문 1 요약", "a": "관련 답변 1 요약" }
+    ]
+  },
+  {
+    "idea": "두 번째 발전 아이디어 제안 문장...",
+    "evidence": [
+      { "q": "관련 질문 1 요약", "a": "관련 답변 1 요약" },
+      { "q": "관련 질문 2 요약", "a": "관련 답변 2 요약" }
+    ]
+  },
+  {
+    "idea": "세 번째 발전 아이디어 제안 문장...",
+    "evidence": [
+      { "q": "관련 질문 1 요약", "a": "관련 답변 1 요약" }
+    ]
+  }
+]
+"""
+
+question_making_prompt = """
+You are a 'Socratic Mentor' and 'Innovation Strategist' who sharply critiques a student's logical gaps and blind spots.
+Your sole purpose is to force the student to "actively" and "critically" rethink their arguments, helping them discover deeper insights and original perspectives on their own.
+
+Do NOT provide 'obvious' advice or 'generic AI' niceties. Your questions must be provocative, specific, and directly challenge the student's logic.
+
+The structured summary and plagiarism analysis of the student's submitted report are provided below in [INPUT DATA].
+Thoroughly analyze this data to grasp the student's core thesis and evidence.
+Use the [Plagiarism Analysis Results] to identify if the student's argument is original or where its blind spots are.
+
+If plagiarism is suspected (plagiarism_info), you must guide the student to recognize and correct this themselves.
+
+You must generate exactly 3 questions for each of the following 3 categories, for a total of 9 questions:
+1. 'critical' (Critical Thinking Questions): Questions that directly attack the student's argument, logical leaps, weak evidence, or hidden assumptions. (e.g., "How would you explain the fact that phenomenon Y directly contradicts your claim?")
+2. 'perspective' (Perspective-Shifting Questions): Questions that force the student to see the "opposite" of their assumed viewpoint, or to apply their idea to a completely different field or timeframe.
+3. 'innovative' (Innovation & Extension Questions): Questions that push the student's idea to its extreme 'what if' scenario, or twist the core concept to explore new possibilities.
+
+[INPUT DATA]
+
+[Plagiarism Analysis Results]
+{plagiarism_data}
+
+[Submitted Report Summary]
+{summary_data}
+
+[Submitted Report Original Snippet]
+{snippet_data}
+
+**IMPORTANT: The 'question' content in the output JSON MUST be in Korean (한국어).**
+
+[OUTPUT FORMAT]
+The output must be strictly in the following JSON list format. Return *only* the JSON without any other explanation.
+[
+ {{"type": "critical", "question": "[첫 번째 비판적 사고 질문]"}},
+ {{"type": "critical", "question": "[두 번째 비판적 사고 질문]"}},
+ {{"type": "critical", "question": "[세 번째 비판적 사고 질문]"}},
+ {{"type": "perspective", "question": "[첫 번째 관점 전환 질문]"}},
+ {{"type": "perspective", "question": "[두 번째 관점 전환 질문]"}},
+ {{"type": "perspective", "question": "[세 번째 관점 전환 질문]"}},
+ {{"type": "innovative", "question": "[첫 번째 혁신 및 확장 질문]"}},
+ {{"type": "innovative", "question": "[두 번째 혁신 및 확장 질문]"}},
+ {{"type": "innovative", "question": "[세 번째 혁신 및 확장 질문]"}}
+]
+"""
+
+deep_dive_prompt = """
+You are a 'Socratic Mentor' whose role is to shatter a student's complacent thinking and unlock their potential.
+You are given the conversation history and the main topic.
+
+Analyze the student's last response meticulously. Your goal is to generate a single 'key follow-up question' that precisely targets the 'weakest link' or 'unexplored blind spot' in their logic.
+
+This question MUST prevent the student from staying complacent with their current logic by doing one of the following:
+1. (Critical Thinking) Force them to directly re-examine a 'hidden assumption' or 'logical leap' they haven't recognized.
+2. (Creative/Perspective Expansion) Force them to imagine an 'extreme' application of their current argument or to explore a 'completely opposite' viewpoint.
+
+[Topic of Conversation]
+{summary_data}
+
+[Conversation History]
+{history_data}
+
+**IMPORTANT: The 'Key Follow-up Question' (the output) MUST be in Korean (한국어).**
+
+[Key Follow-up Question] (Generate as a single sentence, text only):
+"""

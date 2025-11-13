@@ -250,14 +250,48 @@ def perform_full_analysis_and_comparison(report_id, text, original_filename, jso
     if not llm_client_analysis or not embedding_model:
         print("[Service Analysis] CRITICAL: Service dependencies (LLM, S-BERT) not loaded.")
         raise Exception("LLM or Embedding model not loaded.")
+    try:
+        print(f"[{report_id}] Starting full analysis and comparison...")
+        
+        # --- 1단계: LLM 분석 및 요약 ---
+        print(f"[{report_id}] 1. LLM 분석 시작...")
+        print("--- [디버깅 정보 출력] ---")
+        print(f"1. report_id: {report_id}")
+        print(f"2. raw_text (Text 내용 시작): {text}...") # 텍스트의 앞 50자만 출력하여 너무 길어지는 것을 방지
+        print(f"3. system_prompt (프롬프트 내용 시작): {json_prompt_template}...") # 프롬프트의 앞 50자만 출력
+        print("--------------------------")
+        submission_analysis_json = _llm_call_analysis(
+            raw_text=text,
+            system_prompt=json_prompt_template
+        )
+        if not submission_analysis_json:
+            raise Exception("LLM_ANALYSIS_FAILED: 분석 결과가 없습니다.")
+        print(f"[{report_id}] 1. LLM 분석 성공.")   
+    
+    except Exception as e:
+        print(f"[{report_id}] 🚨 5. [FATAL] LLM 분석 중 심각한 오류 발생!")
+        print(f"[{report_id}] 🚨 오류 내용: {str(e)}")
+        traceback.print_exc() # <-- [필수] 콘솔에 정확한 오류 위치(스택 트레이스) 출력
 
-    # --- 1단계: (LLM) 텍스트 분석 (config.py의 JSON_SYSTEM_PROMPT 사용) ---
-    print(f"[{report_id}] 1. LLM 분석 시작...")
-    submission_analysis_json = _llm_call_analysis(text, json_prompt_template)
-    if not submission_analysis_json:
-        print(f"[{report_id}] 1. LLM 분석 실패."); 
-        raise Exception("LLM_ANALYSIS_FAILED: 1단계 분석에 실패했습니다.")
-    print(f"[{report_id}] 1. LLM 분석 성공.")
+        # (DB 세션 롤백)
+        db.session.rollback()
+
+        # (프론트엔드가 무한 로딩에 빠지지 않도록 상태를 'error'로 업데이트)
+        try:
+            if report: # report 객체가 존재하면
+                report.status = 'error'
+                report.error_message = str(e)[:1000] # 오류 메시지 저장
+                db.session.commit()
+                print(f"[{report_id}] 6. DB 상태 'error'로 업데이트 완료.")
+            else:
+                print(f"[{report_id}] 6. [Error] Report 객체가 없어 DB 상태 업데이트 실패.")
+        except Exception as db_err:
+            # (DB 연결 자체가 끊겼을 최악의 경우)
+            print(f"[{report_id}] 🚨 7. [FATAL] 'error' 상태 업데이트마저 실패: {db_err}")
+            db.session.rollback()
+
+
+    
     
     # --- 2단계: 2개의 임베딩 생성 (신규 0.6:0.4 로직) ---
     print(f"[{report_id}] 2. 임베딩 생성 시작...")

@@ -8,7 +8,7 @@ from werkzeug.utils import secure_filename
 # --- [유지] services 폴더의 로직 임포트 ---
 from services.parsing_service import extract_text
 from services.qa_service import generate_deep_dive_question
-
+from services.advancement_service import generate_advancement_ideas
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from config import JSON_SYSTEM_PROMPT, COMPARISON_SYSTEM_PROMPT
@@ -419,3 +419,36 @@ def post_deep_dive_question(report_id):
     }
 
     return jsonify(client_response)
+
+@student_bp.route('/report/<report_id>/advancement', methods=['GET'])
+@jwt_required()
+def get_advancement_ideas(report_id):
+    # ... (사용자 인증 및 report 객체 로드) ...
+    report = db.session.get(AnalysisReport, report_id)
+    # ... (report 소유권 확인) ...
+
+    try:
+        summary_dict = json.loads(report.summary)
+        qa_history_list = json.loads(report.qa_history)
+        snippet = report.text_snippet
+
+        # 새로운 서비스 호출 (이제 ideas_json은 Python List 객체)
+        ideas_json = generate_advancement_ideas(
+            summary_dict,
+            snippet,
+            qa_history_list
+        )
+
+        if not ideas_json:
+            return jsonify({"error": "Failed to generate advancement ideas"}), 500
+
+        # [수정] DB에 저장 시: Python 객체 -> JSON 문자열로 변환
+        report.advancement_ideas = json.dumps(ideas_json) 
+        db.session.commit()
+
+        # [수정] 프론트엔드에 반환 시: Python 객체를 바로 jsonify
+        # (Flask가 자동으로 'application/json' 헤더와 함께 문자열로 변환해줌)
+        return jsonify(ideas_json), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500

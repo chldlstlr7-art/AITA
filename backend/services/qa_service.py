@@ -3,7 +3,7 @@ import json
 import google.generativeai as genai
 from time import sleep
 import random # (Mock 데이터용 - 실제로는 LLM이 반환)
-
+from config import question_making_prompt, deep_dive_prompt
 # --------------------------------------------------------------------------------------
 # --- 1. 전역 설정 및 모델 로드 (Flask 앱 시작 시 1회 실행) ---
 # --------------------------------------------------------------------------------------
@@ -120,27 +120,11 @@ def generate_initial_questions(summary_dict, high_similarity_reports_list, snipp
     """
 
     # 3. LLM 프롬프트 (동적 생성)
-    prompt = f"""
-    You are a 'Socratic Mentor' helping a student analyze their essay.
-    학생이 제출한 리포트의 구조적 요약본과 표절 분석 결과가 아래에 제공됩니다.
-    학생의 창의적 사고를 유도하고, 표절이 의심되는 경우(plagiarism_info) 이를 스스로 인지하고 수정할 수 있도록 돕는 9개의 '열린 질문'을 생성해주세요.
-    
-    질문은 다음 3가지 유형을 반드시 3개씩, 총 9개를 생성해야 합니다:
-    1. 'critical' (주장, 근거, 논리의 타당성이나 약점을 파고드는 비판적 사고 질문)
-    2. 'perspective' (주제에 대한 다른 관점, 반론, 또는 독자의 수용성을 고려하는 질문)
-    3. 'innovative' (요약된 내용을 바탕으로 새로운 아이디어, 해결책, 또는 대안을 탐색하는 창의적 사고 질문)
-
-    [표절 분석 결과]
-    {plagiarism_info}
-
-    [제출 리포트 요약]
-    {summary_text}
-
-    [제출 리포트 원본 일부]
-    {snippet}
-
-    출력은 반드시 [{{"question": "질문 내용...", "type": "critical"}}, ...] 형식의 JSON 리스트여야 합니다.
-    """
+    prompt = question_making_prompt.format(
+        plagiarism_data=plagiarism_info,
+        summary_data=summary_text,
+        snippet_data=snippet
+    )
     
     # 4. LLM 호출
     questions = _call_llm_json(prompt)
@@ -169,19 +153,10 @@ def generate_deep_dive_question(conversation_history_list, summary_dict):
     summary_text = f"이 대화는 학생의 리포트(핵심 주장: {summary_dict.get('Claim', 'N/A')})에 기반하고 있습니다."
 
     # 3. LLM 프롬프트
-    prompt = f"""
-    학생과 튜터(AI) 간의 대화 기록이 주어집니다.
-    학생의 마지막 답변을 바탕으로, 학생의 생각을 더 깊게 탐색할 수 있는 한 개의 '심화 질문'을 생성해주세요.
-    이 질문은 학생이 자신의 논리를 더 정교하게 만들거나 새로운 관점을 고려하도록 유도해야 합니다.
-    
-    [대화의 주제]
-    {summary_text}
-
-    [지금까지의 대화 기록]
-    {history_text}
-    
-    [심화 질문] (한 문장으로 생성, 텍스트만 응답):
-    """
+    prompt = deep_dive_prompt.format(
+        summary_data=summary_text,
+        history_data=history_text
+    )
     
     # 4. LLM 호출 (JSON이 아닌 Text 응답)
     question_text = _call_llm_text(prompt)
