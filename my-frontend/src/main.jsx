@@ -13,15 +13,14 @@ import '@fontsource/roboto/400.css';
 import '@fontsource/roboto/500.css';
 import '@fontsource/roboto/700.css';
 
-// [삭제] MantineProvider 및 CSS 제거
-
 // [삭제] index.css는 더 이상 사용하지 않습니다.
-// import './index.css' 
 
 import App from './App.jsx'
 import HomePage from './pages/HomePage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import RegisterPage from './pages/RegisterPage.jsx' 
+// 3. [신규] 리포트 상세 페이지 임포트
+import ReportPage from './pages/ReportPage.jsx';
 
 const router = createBrowserRouter([
   {
@@ -31,13 +30,16 @@ const router = createBrowserRouter([
       { path: "/", element: <HomePage /> },
       { path: "/login", element: <LoginPage /> },
       { path: "/register", element: <RegisterPage /> },
+      // 4. [신규] 리포트 상세 페이지 라우트
+      // (예: /report/a1b2c3d4-...)
+      { path: "/report/:reportId", element: <ReportPage /> },
     ],
   },
 ]);
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    {/* 3. [신규] <CssBaseline />을 맨 위에 둡니다. */}
+    {/* 5. [신규] <CssBaseline />을 맨 위에 둡니다. */}
     <CssBaseline />
     <RouterProvider router={router} />
   </React.StrictMode>

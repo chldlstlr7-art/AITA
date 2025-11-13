@@ -2,3 +2,6 @@
 # Secrets
 .env
 backend/.env
+
+venv/
+.venv/
