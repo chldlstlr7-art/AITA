@@ -7,29 +7,30 @@ import {
   CircularProgress,
   Alert, 
   Backdrop,
-  Paper // [신규] 2단계 로딩을 위한 Paper
+  Paper,
+  Fade,
+  Button
 } from '@mui/material';
+import { AutoAwesome } from '@mui/icons-material';
 import ReportDisplay from '../components/ReportDisplay.jsx';
-// 1. [신규] Q&A 컴포넌트 임포트 (곧 만듭니다)
+import AdvancementIdeas from '../components/AdvancementIdeas.jsx';
 import QAChat from '../components/QAChat.jsx';
 
-const POLLING_INTERVAL = 3000; // 3초
+const POLLING_INTERVAL = 3000;
 
 function ReportPage() {
   const { reportId } = useParams(); 
   const [reportData, setReportData] = useState(null);
-  // [수정] 초기 상태를 'processing_analysis'로 명확하게 변경
   const [status, setStatus] = useState('processing_analysis'); 
   const [error, setError] = useState('');
-  
-  // 2. [신규] 2단계 로딩 메시지
   const [loadingMessage, setLoadingMessage] = useState('AI가 리포트를 분석 중입니다... (1/2단계)');
+  const [step2Complete, setStep2Complete] = useState(false);
+  const [showAdvancement, setShowAdvancement] = useState(false);
 
   useEffect(() => {
     let timerId = null;
 
     const pollReport = async () => {
-      // (status가 'completed'나 'error'가 되면 더 이상 폴링하지 않음)
       if (status === 'completed' || status === 'error') { 
         return; 
       }
@@ -38,28 +39,22 @@ function ReportPage() {
         const response = await getReportStatus(reportId);
         
         if (response.status === 'completed') {
-          // 3. [최종 완료]
-          console.log("폴링 최종 완료:", response.data);
           setReportData(response.data);
           setStatus('completed');
+          setStep2Complete(true);
           
         } else if (response.status === 'processing_analysis') {
-          // 4. [1단계 진행 중] (데이터 없음)
           setLoadingMessage('AI가 리포트를 분석 중입니다... (1/2단계)');
           setStatus('processing_analysis');
           timerId = setTimeout(pollReport, POLLING_INTERVAL); 
           
         } else if (response.status === 'processing_questions') {
-          // 5. [핵심 수정!] 1단계 완료, 2단계(QA) 진행 중
-          console.log("1단계 완료, 2단계(QA) 시작:", response.data);
-          // 1단계(분석) 데이터만 먼저 화면에 렌더링하기 위해 data 저장
           setReportData(response.data); 
           setLoadingMessage('분석 완료! AI가 질문을 생성 중입니다... (2/2단계)');
           setStatus('processing_questions');
           timerId = setTimeout(pollReport, POLLING_INTERVAL); 
           
         } else if (response.status === 'error') {
-          // 6. [실패]
           setError(response.data.error || '분석 중 알 수 없는 오류가 발생했습니다.');
           setStatus('error');
         }
@@ -70,20 +65,31 @@ function ReportPage() {
       }
     };
 
-    pollReport(); // 7. 최초 1회 폴링 시작
+    pollReport(); 
 
-    return () => { // 8. (Cleanup)
+    return () => { 
       if (timerId) {
         clearTimeout(timerId);
       }
     };
 
-  }, [reportId, status]); // 9. [수정] status가 바뀔 때마다 이 effect를 재검토합니다.
+  }, [reportId, status]);
 
-  // --- 렌더링 로직 ---
+  // 🆕 수정: 하나의 질문이라도 답변이 있으면 true 반환
+  const hasAnyAnswer = () => {
+    if (!reportData || !reportData.qa_history) return false;
+    
+    // 답변이 있는 질문이 하나라도 있으면 true
+    return reportData.qa_history.some(qa => 
+      qa.answer !== null && 
+      qa.answer.trim() !== ''
+    );
+  };
 
-  // 10. [수정] 1단계 로딩과 에러 처리
-  // (아직 1단계 데이터(reportData)가 도착하지 않았거나, 에러가 났을 때)
+  const handleShowAdvancement = () => {
+    setShowAdvancement(true);
+  };
+
   if (status === 'error') {
     return (
       <Alert severity="error" sx={{ mt: 4 }}>
@@ -93,7 +99,6 @@ function ReportPage() {
     );
   }
 
-  // 11. [수정] 1단계 로딩 중일 때 (데이터가 아예 없음)
   if (status === 'processing_analysis' || !reportData) {
     return (
       <Backdrop
@@ -106,14 +111,13 @@ function ReportPage() {
     );
   }
 
-  // 12. [핵심 수정!] 1단계 데이터가 도착했을 때 (2단계 진행 중 or 최종 완료)
   return (
     <Box>
       <Typography variant="h4" gutterBottom>
         리포트 분석
       </Typography>
       
-      {/* 1단계 결과(summary, similarity)는 즉시 렌더링 */}
+      {/* 1단계 결과 */}
       <ReportDisplay data={reportData} />
 
       {/* 2단계(Q&A) 섹션 */}
@@ -122,7 +126,6 @@ function ReportPage() {
           AI 대화형 Q&A
         </Typography>
         
-        {/* 2단계가 아직 진행 중이면 '부분 로딩'을 표시 */}
         {status === 'processing_questions' && (
           <Paper elevation={2} sx={{ p: 3, display: 'flex', alignItems: 'center', backgroundColor: '#f9f9f9' }}>
             <CircularProgress size={24} sx={{ mr: 2 }} />
@@ -132,7 +135,6 @@ function ReportPage() {
           </Paper>
         )}
         
-        {/* 2단계가 최종 완료되면 Q&A 컴포넌트를 렌더링 */}
         {status === 'completed' && (
           <QAChat 
             reportId={reportId}
@@ -143,6 +145,57 @@ function ReportPage() {
           />
         )}
       </Box>
+
+      {/* 🆕 수정: 하나의 질문이라도 답변하면 버튼 표시 */}
+      {step2Complete && hasAnyAnswer() && !showAdvancement && (
+        <Fade in timeout={800}>
+          <Box sx={{ mt: 5, textAlign: 'center' }}>
+            <Paper 
+              elevation={3} 
+              sx={{ 
+                p: 4, 
+                background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)',
+                borderRadius: 2
+              }}
+            >
+              <Typography variant="h5" gutterBottom sx={{ fontWeight: 700 }}>
+                💡 대화가 진행되었습니다!
+              </Typography>
+              <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+                AI가 대화 내용을 바탕으로 리포트 개선 아이디어를 생성할 수 있습니다.
+              </Typography>
+              <Button
+                variant="contained"
+                size="large"
+                startIcon={<AutoAwesome />}
+                onClick={handleShowAdvancement}
+                sx={{
+                  py: 1.5,
+                  px: 4,
+                  fontSize: '1.1rem',
+                  fontWeight: 700,
+                  background: 'linear-gradient(45deg, #0f0f70 30%, #2e2eb8 90%)',
+                  boxShadow: '0 3px 5px 2px rgba(15, 15, 112, .3)',
+                  '&:hover': {
+                    background: 'linear-gradient(45deg, #0a0a50 30%, #1e1e88 90%)',
+                  }
+                }}
+              >
+                발전 아이디어 생성하기
+              </Button>
+            </Paper>
+          </Box>
+        </Fade>
+      )}
+
+      {/* 발전 아이디어 섹션 */}
+      {showAdvancement && (
+        <Fade in timeout={1000}>
+          <Box sx={{ mt: 5 }}>
+            <AdvancementIdeas reportId={reportId} />
+          </Box>
+        </Fade>
+      )}
     </Box>
   );
 }

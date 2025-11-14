@@ -3,6 +3,7 @@ flask
 flask-cors
 gunicorn
 
+
 # AI/데이터 처리용 (Colab)
 pandas
 numpy
@@ -18,6 +19,7 @@ pypdf
 python-dotenv
 
 #메일용
+Flask-Migrate
 flask-sqlalchemy
 flask-jwt-extended
 flask-mail

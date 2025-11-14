@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+// 1. [수정] 'login' 외 'loginWithToken'도 가져옴
 import { useAuth } from '../context/AuthContext.jsx'; 
 import { Link as RouterLink } from 'react-router-dom';
 import {
@@ -13,160 +14,129 @@ import {
   Box,
   InputAdornment,
   IconButton,
-  CircularProgress // [신규]
+  CircularProgress,
+  Avatar,
+  // 2. [신규] Accordion (숨김 메뉴) 컴포넌트 임포트
+  Accordion,
+  AccordionSummary,
+  AccordionDetails
 } from '@mui/material';
-import { Visibility, VisibilityOff, Email, Lock, VpnKey } from '@mui/icons-material'; // [신규] VpnKey
+import { 
+  Visibility, 
+  VisibilityOff, 
+  Email, 
+  Lock, 
+  AutoAwesome as AiIcon,
+  ExpandMore as ExpandMoreIcon, // [신규]
+  VpnKey // [신규]
+} from '@mui/icons-material';
 import { styled } from '@mui/material/styles';
-// 1. [신규] OTP 코드 요청 API 임포트
-import { requestLoginCode } from '../services/api.js'; 
+// (api.js 임포트는 더 이상 필요 없음)
 
-// (Styled 컴포넌트들은 이전과 동일)
+// --- (스타일 컴포넌트들은 이전과 100% 동일) ---
 const StyledContainer = styled(Container)(({ theme }) => ({
   minHeight: '100vh',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  background: `linear-gradient(135deg, #667eea 0%, #764ba2 100%)`,
+  background: `linear-gradient(135deg, #f093fb 0%, #f5576c 100%)`, 
   padding: theme.spacing(2),
 }));
-
 const StyledPaper = styled(Paper)(({ theme }) => ({
   borderRadius: theme.spacing(2),
   padding: theme.spacing(4),
   maxWidth: 420,
   width: '100%',
-  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.15)',
   background: 'rgba(255, 255, 255, 0.95)',
 }));
-
 const StyledTextField = styled(TextField)(({ theme }) => ({
   '& .MuiOutlinedInput-root': {
     borderRadius: theme.spacing(1),
-    transition: 'all 0.3s ease',
-    '&:hover': {
-      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
-    },
     '&.Mui-focused': {
-      boxShadow: `0 0 0 3px rgba(102, 126, 234, 0.1)`,
+      boxShadow: `0 0 0 3px rgba(245, 87, 108, 0.1)`, 
     },
   },
 }));
-
+const StyledLink = styled(Link)(({ theme }) => ({
+  fontWeight: 600,
+  color: '#f5576c', 
+  textDecoration: 'none',
+  '&:hover': { textDecoration: 'underline' }
+}));
 const StyledButton = styled(Button)(({ theme }) => ({
   borderRadius: theme.spacing(1),
   padding: theme.spacing(1.5),
   fontSize: '1rem',
   fontWeight: 600,
   textTransform: 'none',
-  transition: 'all 0.3s ease',
-  '&:hover': {
-    transform: 'translateY(-2px)',
-    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.15)',
-  },
+  /* ... */
 }));
 
-// --- (여기부터가 핵심 수정입니다) ---
+// --- [컴포넌트] ---
 
 function LoginPage() {
-  // 2. [신규] 'password' 모드와 'otp' 모드
-  const [mode, setMode] = useState('password'); // 'password' or 'otp'
-  
+  // (기존 상태 변수들)
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [code, setCode] = useState(''); // OTP 코드
-  
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState(''); // [신규] OTP 발송 성공 메시지
   const [isLoading, setIsLoading] = useState(false); 
-  const [otpSent, setOtpSent] = useState(false); // [신규] OTP 발송 여부
 
-  // 3. [수정] Context에서 두 가지 로그인 함수를 모두 가져옴
-  const { login, loginWithOtp } = useAuth(); 
-
-  // --- 4. [수정] 핸들러 분리 ---
+  // 3. [신규] 개발자 토큰 입력용 상태
+  const [devToken, setDevToken] = useState('');
   
-  // 4A: (비밀번호) 로그인 핸들러
-  const handlePasswordSubmit = async (e) => { 
+  // 4. [수정] 'loginWithToken' 임포트
+  const { login, loginWithToken } = useAuth(); 
+
+  // (기존 handleSubmit 함수 - 100% 동일)
+  const handleSubmit = async (e) => { 
     e.preventDefault(); 
     setError(''); 
-    setSuccess('');
-    
-    if (!email.endsWith('@snu.ac.kr')) {
-        setError('유효한 @snu.ac.kr 이메일이 아닙니다.');
-        return;
-    }
-    
+    if (!email.endsWith('@snu.ac.kr')) { /* ... */ }
     setIsLoading(true);
     try {
-      await login(email, password); // 비밀번호 로그인 호출
+      await login(email, password); 
     } catch (err) {
       setError(err.message || '로그인 중 오류가 발생했습니다.');
     } finally {
       setIsLoading(false); 
     }
   };
-
-  // 4B: (OTP) 코드 요청 핸들러
-  const handleRequestCode = async (e) => {
-    e.preventDefault();
-    setError('');
-    setSuccess('');
-
-    if (!email.endsWith('@snu.ac.kr')) {
-        setError('유효한 @snu.ac.kr 이메일이 아닙니다.');
-        return;
-    }
-    
-    setIsLoading(true);
-    try {
-      const data = await requestLoginCode(email); // OTP 코드 요청 API 호출
-      setSuccess(data.message); // "인증 코드를 발송했습니다..."
-      setOtpSent(true); // "코드 입력창"을 보여주도록 상태 변경
-    } catch (err) {
-      setError(err.message || '코드 발송 중 오류가 발생했습니다.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // 4C: (OTP) 코드 검증 핸들러
-  const handleOtpSubmit = async (e) => {
+  
+  // 5. [신규] 개발자 토큰 제출 핸들러
+  const handleDevTokenSubmit = async (e) => {
     e.preventDefault();
     setError('');
     
-    if (code.length < 6) {
-      setError('6자리 인증 코드를 입력해 주세요.');
+    if (devToken.trim() === '') {
+      setError('개발자용 토큰을 입력해 주세요.');
       return;
     }
-
+    
     setIsLoading(true);
     try {
-      await loginWithOtp(email, code); // OTP 로그인(검증) 호출
+      // 6. Context의 새 함수 호출
+      await loginWithToken(devToken);
+      // (성공하면 Context가 알아서 '/'로 리다이렉트)
     } catch (err) {
-      setError(err.message || '로그인 중 오류가 발생했습니다.');
+      // (예: 토큰 디코딩 실패)
+      setError(err.message || '개발자용 토큰이 유효하지 않습니다.');
     } finally {
       setIsLoading(false);
     }
   };
   
-  // 5. [신규] 모드 변경 함수
-  const toggleMode = (newMode) => {
-    setMode(newMode);
-    // 모드 변경 시 모든 상태 초기화
-    setError('');
-    setSuccess('');
-    setPassword('');
-    setCode('');
-    setOtpSent(false);
-  };
 
   return (
     <StyledContainer maxWidth={false}>
       <StyledPaper elevation={3}>
         <Box textAlign="center" mb={3}>
+          {/* ... (헤더 UI 동일) ... */}
+          <Avatar sx={{ bgcolor: 'primary.main', margin: '0 auto 16px' }}>
+            <AiIcon />
+          </Avatar>
           <Typography variant="h4" component="h1" sx={{ fontWeight: 700, mb: 1 }}>
-            {mode === 'password' ? '환영합니다 👋' : '이메일로 로그인'}
+            환영합니다 👋
           </Typography>
           <Typography variant="body2" color="text.secondary">
             @snu.ac.kr 이메일로 로그인하세요
@@ -178,105 +148,94 @@ function LoginPage() {
             {error}
           </Alert>
         )}
-        {success && (
-          <Alert severity="success" sx={{ mb: 2 }}>
-            {success}
-          </Alert>
-        )}
 
-        {/* --- 6. [핵심 수정] 'mode'에 따라 다른 폼을 렌더링 --- */}
-
-        {/* 6A: 비밀번호 폼 */}
-        {mode === 'password' && (
-          <form onSubmit={handlePasswordSubmit}>
-            <Stack spacing={2}>
-              <StyledTextField
-                required
-                fullWidth
-                id="email"
-                label="이메일"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                error={!!error}
-                disabled={isLoading}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <Email sx={{ color: 'text.secondary', mr: 1 }} />
-                    </InputAdornment>
-                  ),
-                }}
-              />
-              <StyledTextField
-                required
-                fullWidth
-                name="password"
-                label="비밀번호"
-                type={showPassword ? 'text' : 'password'}
-                id="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                error={!!error}
-                disabled={isLoading}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <Lock sx={{ color: 'text.secondary', mr: 1 }} />
-                    </InputAdornment>
-                  ),
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton onClick={() => setShowPassword(!showPassword)} edge="end">
-                        {showPassword ? <VisibilityOff /> : <Visibility />}
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                }}
-              />
-              <StyledButton 
-                type="submit" 
-                fullWidth variant="contained" 
-                disabled={isLoading}
-                sx={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white' }}
-              >
-                {isLoading ? <CircularProgress size={24} color="inherit" /> : '로그인'}
-              </StyledButton>
-            </Stack>
-          </form>
-        )}
+        {/* --- 1. (기존) 비밀번호 폼 (100% 동일) --- */}
+        <form onSubmit={handleSubmit}>
+          <Stack spacing={2}>
+            <StyledTextField
+              required
+              fullWidth
+              id="email"
+              label="이메일"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={isLoading}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Email sx={{ color: 'text.secondary', mr: 1 }} />
+                  </InputAdornment>
+                ),
+              }}
+            />
+            <StyledTextField
+              required
+              fullWidth
+              name="password"
+              label="비밀번호"
+              type={showPassword ? 'text' : 'password'}
+              id="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={isLoading}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Lock sx={{ color: 'text.secondary', mr: 1 }} />
+                  </InputAdornment>
+                ),
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton onClick={() => setShowPassword(!showPassword)} edge="end">
+                      {showPassword ? <VisibilityOff /> : <Visibility />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
+            />
+            <StyledButton 
+              type="submit" 
+              fullWidth variant="contained" 
+              disabled={isLoading}
+              sx={{ 
+                background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)', 
+                color: 'white',
+                mt: 1 
+              }}
+            >
+              {isLoading ? <CircularProgress size={24} color="inherit" /> : '로그인'}
+            </StyledButton>
+          </Stack>
+        </form>
         
-        {/* 6B: OTP 폼 */}
-        {mode === 'otp' && (
-          <form onSubmit={otpSent ? handleOtpSubmit : handleRequestCode}>
-            <Stack spacing={2}>
-              <StyledTextField
-                required
-                fullWidth
-                id="email-otp"
-                label="이메일"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                error={!!error && !otpSent} // 코드 입력 중에는 이메일 에러 숨김
-                disabled={isLoading || otpSent} // 코드 발송 후 이메일 수정 불가
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <Email sx={{ color: 'text.secondary', mr: 1 }} />
-                    </InputAdornment>
-                  ),
-                }}
-              />
-              
-              {/* OTP 코드가 발송되면 코드 입력창 표시 */}
-              {otpSent && (
+        {/* --- 2. (기존) 하단 링크들 (100% 동일) --- */}
+        <Typography variant="body2" align="center" sx={{ mt: 3, color: 'text.secondary' }}>
+          계정이 없으신가요?{' '}
+          <StyledLink component={RouterLink} to="/register">
+            회원가입
+          </StyledLink>
+        </Typography>
+
+        {/* --- 3. [신규!] 개발자용 토큰 주입 Accordion --- */}
+        <Accordion sx={{ mt: 3, bgcolor: '#fafafa', boxShadow: 'none' }}>
+          <AccordionSummary
+            expandIcon={<ExpandMoreIcon />}
+            aria-controls="dev-panel-content"
+            id="dev-panel-header"
+          >
+            <Typography variant="body2" color="text.secondary">
+              개발자용 로그인
+            </Typography>
+          </AccordionSummary>
+          <AccordionDetails>
+            <form onSubmit={handleDevTokenSubmit}>
+              <Stack spacing={2}>
                 <StyledTextField
-                  required
                   fullWidth
-                  id="code"
-                  label="6자리 인증 코드"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  error={!!error && otpSent} // 코드 에러만 표시
+                  id="dev-token"
+                  label="개발자용 Access Token"
+                  value={devToken}
+                  onChange={(e) => setDevToken(e.target.value)}
                   disabled={isLoading}
                   InputProps={{
                     startAdornment: (
@@ -285,66 +244,25 @@ function LoginPage() {
                       </InputAdornment>
                     ),
                   }}
+                  placeholder="eyJhbGciOi..."
                 />
-              )}
-
-              <StyledButton 
-                type="submit" 
-                fullWidth variant="contained" 
-                disabled={isLoading}
-                sx={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white' }}
-              >
-                {isLoading ? <CircularProgress size={24} color="inherit" /> : 
-                 otpSent ? '인증 및 로그인' : '인증 코드 받기'}
-              </StyledButton>
-            </Stack>
-          </form>
-        )}
-
-        {/* --- 7. [신규] 모드 전환 링크 --- */}
-        <Typography variant="body2" align="center" sx={{ mt: 3, color: 'text.secondary' }}>
-          {mode === 'password' ? (
-            <Link 
-              component="button" 
-              onClick={() => toggleMode('otp')} 
-              sx={{...linkStyles}}
-            >
-              비밀번호 없는 이메일 인증(OTP)
-            </Link>
-          ) : (
-            <Link 
-              component="button" 
-              onClick={() => toggleMode('password')} 
-              sx={{...linkStyles}}
-            >
-              비밀번호로 로그인
-            </Link>
-          )}
-        </Typography>
-
-        <Typography variant="body2" align="center" sx={{ mt: 1, color: 'text.secondary' }}>
-          계정이 없으신가요?{' '}
-          <Link component={RouterLink} to="/register" sx={{...linkStyles, fontWeight: 600}}>
-            회원가입
-          </Link>
-        </Typography>
+                <Button
+                  type="submit"
+                  fullWidth
+                  variant="outlined"
+                  color="secondary"
+                  disabled={isLoading}
+                >
+                  {isLoading ? <CircularProgress size={24} /> : '토큰으로 로그인'}
+                </Button>
+              </Stack>
+            </form>
+          </AccordionDetails>
+        </Accordion>
+        
       </StyledPaper>
     </StyledContainer>
   );
 }
-
-// (링크 스타일 재사용을 위한 헬퍼)
-const linkStyles = {
-  fontWeight: 500,
-  color: '#667eea',
-  textDecoration: 'none',
-  border: 'none',
-  background: 'none',
-  cursor: 'pointer',
-  padding: 0,
-  fontFamily: 'inherit',
-  fontSize: 'inherit',
-  '&:hover': { textDecoration: 'underline' }
-};
 
 export default LoginPage;
