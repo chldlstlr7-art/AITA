@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -49,6 +49,10 @@ function AdvancementIdeas({ reportId }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [expandedIds, setExpandedIds] = useState(new Set());
+  
+  // 🆕 중복 요청 방지용 ref
+  const hasFetchedRef = useRef(false);
+  const currentReportIdRef = useRef(null);
 
   const fetchIdeas = async () => {
     if (!reportId) {
@@ -79,8 +83,22 @@ function AdvancementIdeas({ reportId }) {
     }
   };
 
+  // 🆕 useEffect 중복 실행 방지
   useEffect(() => {
-    fetchIdeas();
+    // reportId가 변경되었거나 처음 로드하는 경우에만 실행
+    if (reportId && (currentReportIdRef.current !== reportId || !hasFetchedRef.current)) {
+      console.log('[AdvancementIdeas] useEffect 실행 - reportId:', reportId);
+      
+      hasFetchedRef.current = true;
+      currentReportIdRef.current = reportId;
+      
+      fetchIdeas();
+    }
+
+    // Cleanup 함수 (컴포넌트 언마운트 시)
+    return () => {
+      console.log('[AdvancementIdeas] Cleanup');
+    };
   }, [reportId]);
 
   const toggleExpand = (index) => {
@@ -128,7 +146,10 @@ function AdvancementIdeas({ reportId }) {
             color="inherit" 
             size="small" 
             startIcon={<Refresh />}
-            onClick={fetchIdeas}
+            onClick={() => {
+              hasFetchedRef.current = false; // 재시도 시 다시 fetch 허용
+              fetchIdeas();
+            }}
           >
             재시도
           </Button>

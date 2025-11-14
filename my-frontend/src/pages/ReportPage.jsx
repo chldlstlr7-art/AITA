@@ -9,14 +9,75 @@ import {
   Backdrop,
   Paper,
   Fade,
-  Button
+  Button,
+  Container,
+  Stack,
+  Avatar,
+  Divider
 } from '@mui/material';
-import { AutoAwesome } from '@mui/icons-material';
+import { 
+  AutoAwesome, 
+  Assessment, 
+  ChatBubbleOutline,
+  TipsAndUpdates 
+} from '@mui/icons-material';
+import { styled, alpha } from '@mui/material/styles';
 import ReportDisplay from '../components/ReportDisplay.jsx';
 import AdvancementIdeas from '../components/AdvancementIdeas.jsx';
 import QAChat from '../components/QAChat.jsx';
 
 const POLLING_INTERVAL = 3000;
+
+// ==================== Styled Components ====================
+
+const PageHeader = styled(Box)(({ theme }) => ({
+  background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+  borderRadius: theme.spacing(3),
+  padding: theme.spacing(4),
+  marginBottom: theme.spacing(4),
+  boxShadow: `0 8px 32px ${alpha(theme.palette.primary.main, 0.25)}`,
+  position: 'relative',
+  overflow: 'hidden',
+  '&::before': {
+    content: '""',
+    position: 'absolute',
+    top: -50,
+    right: -50,
+    width: 200,
+    height: 200,
+    background: `radial-gradient(circle, ${alpha(theme.palette.common.white, 0.1)} 0%, transparent 70%)`,
+    borderRadius: '50%',
+  },
+}));
+
+const SectionHeader = styled(Box)(({ theme }) => ({
+  background: `linear-gradient(135deg, ${alpha(theme.palette.secondary.main, 0.1)} 0%, ${alpha(theme.palette.primary.main, 0.05)} 100%)`,
+  borderRadius: theme.spacing(2),
+  padding: theme.spacing(3),
+  marginBottom: theme.spacing(3),
+  border: `2px solid ${alpha(theme.palette.primary.main, 0.1)}`,
+  boxShadow: `0 4px 20px ${alpha(theme.palette.primary.main, 0.08)}`,
+  position: 'relative',
+  overflow: 'hidden',
+  '&::after': {
+    content: '""',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    background: `linear-gradient(90deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+  },
+}));
+
+const IconWrapper = styled(Avatar)(({ theme }) => ({
+  width: 56,
+  height: 56,
+  background: `linear-gradient(135deg, ${theme.palette.primary.light} 0%, ${theme.palette.primary.main} 100%)`,
+  boxShadow: `0 4px 14px ${alpha(theme.palette.primary.main, 0.3)}`,
+}));
+
+// ==================== Main Component ====================
 
 function ReportPage() {
   const { reportId } = useParams(); 
@@ -75,27 +136,18 @@ function ReportPage() {
 
   }, [reportId, status]);
 
-  // 🆕 수정: 하나의 질문이라도 답변이 있으면 true 반환
-  const hasAnyAnswer = () => {
-    if (!reportData || !reportData.qa_history) return false;
-    
-    // 답변이 있는 질문이 하나라도 있으면 true
-    return reportData.qa_history.some(qa => 
-      qa.answer !== null && 
-      qa.answer.trim() !== ''
-    );
-  };
-
   const handleShowAdvancement = () => {
     setShowAdvancement(true);
   };
 
   if (status === 'error') {
     return (
-      <Alert severity="error" sx={{ mt: 4 }}>
-        <Typography>분석 리포트를 불러오는 데 실패했습니다.</Typography>
-        <Typography variant="body2">{error}</Typography>
-      </Alert>
+      <Container maxWidth="lg" sx={{ mt: 4 }}>
+        <Alert severity="error">
+          <Typography variant="h6">분석 리포트를 불러오는 데 실패했습니다.</Typography>
+          <Typography variant="body2">{error}</Typography>
+        </Alert>
+      </Container>
     );
   }
 
@@ -105,31 +157,99 @@ function ReportPage() {
         sx={{ color: '#fff', zIndex: (theme) => theme.zIndex.drawer + 1 }}
         open={true}
       >
-        <CircularProgress color="inherit" />
-        <Typography sx={{ ml: 2 }}>{loadingMessage}</Typography>
+        <Stack alignItems="center" spacing={2}>
+          <CircularProgress color="inherit" size={60} />
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>
+            {loadingMessage}
+          </Typography>
+        </Stack>
       </Backdrop>
     );
   }
 
   return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        리포트 분석
-      </Typography>
+    <Container maxWidth="lg">
+      {/* 🆕 개선된 페이지 헤더 */}
+      <PageHeader>
+        <Stack direction="row" spacing={3} alignItems="center">
+          <IconWrapper>
+            <Assessment sx={{ fontSize: 32, color: 'white' }} />
+          </IconWrapper>
+          <Box sx={{ flex: 1, position: 'relative', zIndex: 1 }}>
+            <Typography 
+              variant="h3" 
+              sx={{ 
+                fontWeight: 900, 
+                color: 'white',
+                textShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                mb: 0.5
+              }}
+            >
+              📊 리포트 분석
+            </Typography>
+            <Typography 
+              variant="body1" 
+              sx={{ 
+                color: alpha('#fff', 0.9),
+                fontWeight: 500
+              }}
+            >
+              AI가 생성한 종합 분석 리포트를 확인하세요
+            </Typography>
+          </Box>
+        </Stack>
+      </PageHeader>
       
       {/* 1단계 결과 */}
       <ReportDisplay data={reportData} />
 
-      {/* 2단계(Q&A) 섹션 */}
-      <Box mt={4}>
-        <Typography variant="h5" component="h2" gutterBottom>
-          AI 대화형 Q&A
-        </Typography>
+      {/* 🆕 개선된 Q&A 섹션 헤더 */}
+      <Box mt={6}>
+        <SectionHeader>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <IconWrapper sx={{ width: 48, height: 48 }}>
+              <ChatBubbleOutline sx={{ fontSize: 28, color: 'white' }} />
+            </IconWrapper>
+            <Box sx={{ flex: 1 }}>
+              <Typography 
+                variant="h4" 
+                sx={{ 
+                  fontWeight: 800,
+                  background: (theme) => `linear-gradient(90deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+                  backgroundClip: 'text',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  mb: 0.5
+                }}
+              >
+                💬 AI 대화형 Q&A
+              </Typography>
+              <Typography 
+                variant="body2" 
+                color="text.secondary"
+                sx={{ fontWeight: 500 }}
+              >
+                AI와 대화하며 리포트를 심화 분석하세요 • 최대 9개 대화창 지원
+              </Typography>
+            </Box>
+          </Stack>
+        </SectionHeader>
         
         {status === 'processing_questions' && (
-          <Paper elevation={2} sx={{ p: 3, display: 'flex', alignItems: 'center', backgroundColor: '#f9f9f9' }}>
-            <CircularProgress size={24} sx={{ mr: 2 }} />
-            <Typography variant="body1" color="text.secondary">
+          <Paper 
+            elevation={3} 
+            sx={{ 
+              p: 4, 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              background: (theme) => `linear-gradient(135deg, ${alpha(theme.palette.secondary.main, 0.05)} 0%, ${alpha(theme.palette.primary.main, 0.05)} 100%)`,
+              border: (theme) => `1px solid ${alpha(theme.palette.primary.main, 0.1)}`,
+              borderRadius: 3
+            }}
+          >
+            <CircularProgress size={28} sx={{ mr: 2 }} />
+            <Typography variant="h6" color="text.secondary" sx={{ fontWeight: 600 }}>
               {loadingMessage}
             </Typography>
           </Paper>
@@ -146,43 +266,97 @@ function ReportPage() {
         )}
       </Box>
 
-      {/* 🆕 수정: 하나의 질문이라도 답변하면 버튼 표시 */}
-      {step2Complete && hasAnyAnswer() && !showAdvancement && (
+      {/* 발전 아이디어 생성 버튼 */}
+      {step2Complete && !showAdvancement && (
         <Fade in timeout={800}>
-          <Box sx={{ mt: 5, textAlign: 'center' }}>
+          <Box sx={{ mt: 6, mb: 4 }}>
             <Paper 
-              elevation={3} 
+              elevation={4} 
               sx={{ 
-                p: 4, 
-                background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)',
-                borderRadius: 2
+                p: 5, 
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                borderRadius: 3,
+                position: 'relative',
+                overflow: 'hidden',
+                '&::before': {
+                  content: '""',
+                  position: 'absolute',
+                  top: -100,
+                  right: -100,
+                  width: 300,
+                  height: 300,
+                  background: 'radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%)',
+                  borderRadius: '50%',
+                }
               }}
             >
-              <Typography variant="h5" gutterBottom sx={{ fontWeight: 700 }}>
-                💡 대화가 진행되었습니다!
-              </Typography>
-              <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-                AI가 대화 내용을 바탕으로 리포트 개선 아이디어를 생성할 수 있습니다.
-              </Typography>
-              <Button
-                variant="contained"
-                size="large"
-                startIcon={<AutoAwesome />}
-                onClick={handleShowAdvancement}
-                sx={{
-                  py: 1.5,
-                  px: 4,
-                  fontSize: '1.1rem',
-                  fontWeight: 700,
-                  background: 'linear-gradient(45deg, #0f0f70 30%, #2e2eb8 90%)',
-                  boxShadow: '0 3px 5px 2px rgba(15, 15, 112, .3)',
-                  '&:hover': {
-                    background: 'linear-gradient(45deg, #0a0a50 30%, #1e1e88 90%)',
-                  }
-                }}
-              >
-                발전 아이디어 생성하기
-              </Button>
+              <Stack spacing={3} alignItems="center" sx={{ position: 'relative', zIndex: 1 }}>
+                <Avatar
+                  sx={{
+                    width: 80,
+                    height: 80,
+                    background: 'rgba(255,255,255,0.2)',
+                    backdropFilter: 'blur(10px)',
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.1)',
+                  }}
+                >
+                  <TipsAndUpdates sx={{ fontSize: 48, color: 'white' }} />
+                </Avatar>
+                
+                <Box textAlign="center">
+                  <Typography 
+                    variant="h4" 
+                    gutterBottom 
+                    sx={{ 
+                      fontWeight: 900, 
+                      color: 'white',
+                      textShadow: '0 2px 8px rgba(0,0,0,0.2)'
+                    }}
+                  >
+                    💡 Q&A 준비가 완료되었습니다!
+                  </Typography>
+                  <Typography 
+                    variant="h6" 
+                    sx={{ 
+                      color: 'rgba(255,255,255,0.95)',
+                      fontWeight: 500,
+                      maxWidth: 600,
+                      mx: 'auto',
+                      lineHeight: 1.6
+                    }}
+                  >
+                    대화 내용과 리포트를 바탕으로 AI가 개선 아이디어를 생성할 수 있습니다.
+                    <br />
+                    질문에 답변하지 않아도 기본 분석으로 아이디어를 제공합니다.
+                  </Typography>
+                </Box>
+
+                <Button
+                  variant="contained"
+                  size="large"
+                  startIcon={<AutoAwesome />}
+                  onClick={handleShowAdvancement}
+                  sx={{
+                    py: 2,
+                    px: 6,
+                    fontSize: '1.2rem',
+                    fontWeight: 800,
+                    background: 'white',
+                    color: '#667eea',
+                    borderRadius: 2,
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+                    textTransform: 'none',
+                    '&:hover': {
+                      background: 'rgba(255,255,255,0.95)',
+                      transform: 'translateY(-2px)',
+                      boxShadow: '0 12px 32px rgba(0,0,0,0.3)',
+                    },
+                    transition: 'all 0.3s ease',
+                  }}
+                >
+                  발전 아이디어 생성하기
+                </Button>
+              </Stack>
             </Paper>
           </Box>
         </Fade>
@@ -191,12 +365,12 @@ function ReportPage() {
       {/* 발전 아이디어 섹션 */}
       {showAdvancement && (
         <Fade in timeout={1000}>
-          <Box sx={{ mt: 5 }}>
+          <Box sx={{ mt: 6, mb: 6 }}>
             <AdvancementIdeas reportId={reportId} />
           </Box>
         </Fade>
       )}
-    </Box>
+    </Container>
   );
 }
 
