@@ -63,7 +63,7 @@ def get_all_reports_overview():
 
 # ---
 
-@ta_bp.route('/report/<int:report_id>', methods=['GET'])
+@ta_bp.route('/report/<report_id>', methods=['GET'])
 @ta_required()
 def get_detailed_report(report_id):
     """
