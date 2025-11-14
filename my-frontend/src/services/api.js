@@ -1,5 +1,5 @@
 import axios from 'axios';
-const API_URL = 'https://cautious-doodle-q75wx75gv596hx57r-5000.app.github.dev';
+const API_URL = import.meta.env.VITE_API_URL;
 
 const apiClient = axios.create({
   baseURL: API_URL,
