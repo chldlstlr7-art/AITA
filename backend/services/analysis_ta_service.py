@@ -4,7 +4,7 @@
 import os
 import json
 import re
-import numpy as np
+import numpy as np 
 import google.generativeai as genai
 import traceback
 from sentence_transformers import SentenceTransformer
