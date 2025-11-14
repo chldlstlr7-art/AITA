@@ -99,7 +99,7 @@ class User(db.Model):
 class AnalysisReport(db.Model):
     """
     분석 리포트 저장을 위한 DB 모델
-    [업데이트] 2개의 임베딩 필드 추가
+
     """
     __tablename__ = 'analysis_reports'
 
@@ -136,6 +136,15 @@ class AnalysisReport(db.Model):
     # --- [신규] 임베딩 필드 (벡터를 JSON 문자열로 저장) ---
     embedding_keyconcepts_corethesis = db.Column(db.Text, nullable=True)
     embedding_keyconcepts_claim = db.Column(db.Text, nullable=True)
+
+    # --- [신규] TA 오버뷰용 '최고 유사도' 요약 필드 ---
+    high_similarity_candidates = db.Column(db.Text, nullable=True)
+
+    # --- [기존] TA 오버뷰용 '최고 유사도' 요약 필드 (더 이상 사용되지 않음) ---
+    # (대시보드 로딩 성능 최적화를 위함)
+    # top_similarity_score = db.Column(db.Float, nullable=True, index=True)
+    # top_similar_report_id = db.Column(db.String(36), nullable=True)
+    # top_similar_filename = db.Column(db.String(255), nullable=True)
 
     # --- [수정] 'back_populates'를 위한 역관계 설정 ---
     user = db.relationship('User', back_populates='reports')

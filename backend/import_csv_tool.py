@@ -130,7 +130,8 @@ def import_csv_to_db():
                     qa_history=json.dumps([]),
                     questions_pool=json.dumps([]),
                     is_refilling=False,
-                    advancement_ideas=json.dumps([])
+                    advancement_ideas=json.dumps([]),
+                    high_similarity_candidates = json.dumps([])
                 )
                 new_reports_for_sql.append(report_obj)
             

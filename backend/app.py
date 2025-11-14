@@ -16,10 +16,12 @@ from services.qa_service import generate_initial_questions, generate_deep_dive_q
 
 from config import Config, JSON_SYSTEM_PROMPT, COMPARISON_SYSTEM_PROMPT
 from flask_sqlalchemy import SQLAlchemy
+
+
 # --- 1. Flask 앱 설정 ---
 app = Flask(__name__)
 app.config.from_object(Config)
-
+from flask_migrate import Migrate
 # --- 2. [핵심 수정!] 확장(extensions) 임포트 ---
 from extensions import db, mail, jwt
 
@@ -38,7 +40,7 @@ CORS(app,
 db.init_app(app)
 mail.init_app(app)
 jwt.init_app(app) # ⬅️ CORS보다 늦게 초기화
-
+migrate = Migrate(app, db)
 from models import User, AnalysisReport
 
 # --- 5. 백그라운드 함수 정의 (순서 중요) ---
@@ -104,35 +106,74 @@ def _distribute_questions(questions_pool, count=3):
     return initial_set
 
 def background_analysis_step1(report_id, text, doc_type, original_filename, json_prompt_template, comparison_prompt_template):
-    # ... (이하 모든 background_... 함수 내용은 제공해주신 원본과 동일) ...
     analysis_data = None
     summary_dict = {}
     similarity_details_list = []
     snippet = text[:4000]
+    
     with app.app_context():
         try:
             report = db.session.get(AnalysisReport, report_id)
-            if not report: return
+            if not report: 
+                print(f"[{report_id}] Step 1 ABORT: Report not found.")
+                return
+
             report.status = "processing_analysis"
             db.session.commit()
+            
+            # 1. 분석 서비스 호출 (기존과 동일)
             analysis_data = perform_full_analysis_and_comparison(
                 report_id, text, original_filename, 
                 json_prompt_template, comparison_prompt_template
             )
-            if not analysis_data: raise Exception("perform_... returned None")
+            
+            if not analysis_data: 
+                raise Exception("perform_full_analysis_and_comparison returned None")
+
             summary_dict = analysis_data.get('summary_json', {})
             embedding_thesis_list = analysis_data.get('embedding_thesis', [])
             embedding_claim_list = analysis_data.get('embedding_claim', [])
+            
+            # 2. 모든 비교 결과 리스트 (상세보기용)
             similarity_details_list = analysis_data.get('comparison_results_list', [])
+
+            # --- [핵심 수정] 20점 이상 후보군 필터링 및 요약 ---
+            
+            # 3. 20점 이상인 결과만 필터링 (필터 함수가 점수 계산 및 추가)
+            high_similarity_list = _filter_high_similarity_reports(similarity_details_list)
+            
+            # 4. TA 대시보드 저장을 위한 경량화된 요약 리스트 생성
+            candidates_for_storage = []
+            for item in high_similarity_list:
+                # services/analysis_service가 반환하는 키가 'report_id'와 'original_filename'이라고 가정
+                candidate = {
+                    "id": item.get("report_id"), 
+                    "filename": item.get("original_filename"),
+                    "total_score": item.get("plagiarism_score"), # _filter_... 함수에서 추가된 값
+                    "itemized_scores": item.get("scores_detail") # _filter_... 함수에서 추가된 값
+                }
+                candidates_for_storage.append(candidate)
+            
+            # 5. DB에 저장
             report.summary = json.dumps(summary_dict)
             report.embedding_keyconcepts_corethesis = json.dumps(embedding_thesis_list)
             report.embedding_keyconcepts_claim = json.dumps(embedding_claim_list)
+            
+            # [수정] 'similarity_details'는 모든 비교 결과를 저장 (상세보기용)
             report.similarity_details = json.dumps(similarity_details_list)
+            
+            # [신규] 'high_similarity_candidates'에 20점 이상 요약본 저장 (TA 대시보드용)
+            report.high_similarity_candidates = json.dumps(candidates_for_storage)
+
             report.qa_history = json.dumps([])
             report.questions_pool = json.dumps([])
             report.is_refilling = False
             report.status = "processing_questions"
+            
             db.session.commit()
+            
+            print(f"[{report_id}] Step 1 (Analysis) SUCCESS. Found {len(candidates_for_storage)} high-similarity candidates.")
+
         except Exception as e:
             print(f"[{report_id}] Step 1 (Analysis) FAILED: {e}")
             traceback.print_exc()
@@ -141,11 +182,13 @@ def background_analysis_step1(report_id, text, doc_type, original_filename, json
                 report = db.session.get(AnalysisReport, report_id)
                 if report:
                     report.status = "error"
-                    report.error_message = str(e)
+                    report.error_message = f"Step 1 FAILED: {str(e)}"
                     db.session.commit()
             except Exception as e_inner:
                 print(f"[{report_id}] CRITICAL: Failed to write error state to DB: {e_inner}")
-            return
+            return # 실패 시 2단계(QA) 스레드를 시작하지 않음
+
+    # 6. 2단계(QA) 스레드 시작 (기존과 동일)
     qa_thread = threading.Thread(
         target=background_analysis_step2_qa, 
         args=(report_id, summary_dict, similarity_details_list, snippet)
@@ -203,7 +246,7 @@ def background_refill(report_id):
         try:
             summary = json.loads(report.summary) if report.summary else {}
             similarity_details = json.loads(report.similarity_details) if report.similarity_details else []
-            similar = _filter_high_similarity_reports(similarity_details, threshold=20) 
+            similar = _filter_high_similarity_reports(similarity_details) 
             text_snippet = report.text_snippet
             new_questions = generate_refill_questions(summary, similar, text_snippet)
             current_pool = json.loads(report.questions_pool) if report.questions_pool else []
