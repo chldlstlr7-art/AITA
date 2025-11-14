@@ -128,6 +128,11 @@ class AnalysisReport(db.Model):
     questions_pool = db.Column(db.Text, nullable=True)
     is_refilling = db.Column(db.Boolean, default=False)
 
+    # --- advancement_ideas 필드 추가 ---
+    
+    advancement_ideas = db.Column(db.Text, nullable=True)
+
+
     # --- [신규] 임베딩 필드 (벡터를 JSON 문자열로 저장) ---
     embedding_keyconcepts_corethesis = db.Column(db.Text, nullable=True)
     embedding_keyconcepts_claim = db.Column(db.Text, nullable=True)

@@ -129,6 +129,8 @@ def import_csv_to_db():
                     logic_flow=json.dumps({}),
                     qa_history=json.dumps([]),
                     questions_pool=json.dumps([]),
+                    is_refilling=False,
+                    advancement_ideas=json.dumps([])
                 )
                 new_reports_for_sql.append(report_obj)
             

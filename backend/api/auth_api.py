@@ -109,7 +109,7 @@ def login_with_password():
     data = request.json
     email = data.get("email", "").lower()
     password = data.get("password")
-
+    
     if not email or not password:
         return jsonify({"error": "이메일과 비밀번호를 입력해야 합니다."}), 400
 

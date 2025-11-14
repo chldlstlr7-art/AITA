@@ -204,7 +204,9 @@ def get_report(report_id):
         "questions_pool_count": len(questions_pool_list), # <-- 파싱된 리스트의 길이
         "qa_history": qa_history_list, # <-- 파싱된 리스트 전달
         
-        "is_refilling": report.is_refilling
+        "is_refilling": report.is_refilling,
+        "advancement_ideas" : report.advancement_ideas
+
     }
     
     # status와 함께 최종 데이터를 반환합니다.
