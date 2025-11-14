@@ -54,8 +54,8 @@ JSON_SYSTEM_PROMPT = (
 
     "5. **Flow Pattern** - Analyze the text’s logical flow. Your output for this field **must** be a single **JSON object** containing two keys: \"nodes\" and \"edges\".\n"
     "   - \"nodes\" (JSON object): A dictionary where keys are node IDs (e.g., \"A1\", \"B1\") and values are strings summarizing the logical step in Korean (e.g., \"[단계]: [요약 문장]\").\n"
+    "   - Crucially, the summary ([요약]) must only state the core content of that logical step. It must not include ordinal or transitional phrases (e.g., 'Firstly,' 'As the first reason,' '첫 번째로,' '첫번째 근거로')\n"
     "   - \"edges\" (JSON array): An array of 2-element arrays representing the directed logical flow (e.g., [[\"A1\", \"B1\"], [\"B1\", \"C1\"]]).\n"
-    "   - Do NOT include any extra explanation or commentary.\n"
     "   - verify the category of each nodes and fill it in [단계]. (ex. 문제1, 문제2, 핵심 주장, 근거1, 해결, 결론, etc.)\n\n"
 
     "6. **Conclusion Framing** - Explain how the conclusion is structured (summary, recommendation, or value emphasis) and its rhetorical focus.\n"
@@ -71,7 +71,7 @@ JSON_SYSTEM_PROMPT = (
     "  \"Claim\": \"[핵심 주장 문장]\",\n"
     "  \"Reasoning\": \"[주요 근거 요약 및 유형 설명]\",\n"
     "  \"Flow_Pattern\": {\n"
-    "       \"nodes\": {\"A1\": \"[단계]: [요약]\", \"B1\": \"[단계]: [요약]\"},\n"
+    "       \"nodes\": {\"A1\": \"[단계]\n [요약]\", \"B1\": \"[단계]\n [요약]\"},\n"
     "       \"edges\": [[\"A1\", \"B1\"]]\n"
     "  },\n"
     "  \"Conclusion_Framing\": \"[결론 구조 및 강조점 설명]\",\n"

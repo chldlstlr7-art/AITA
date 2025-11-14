@@ -10,7 +10,7 @@ import random
 import re
 import traceback
 import json
-
+ 
 from services.analysis_service import perform_full_analysis_and_comparison
 from services.qa_service import generate_initial_questions, generate_deep_dive_question, generate_refill_questions
 
@@ -147,8 +147,8 @@ def background_analysis_step1(report_id, text, doc_type, original_filename, json
             for item in high_similarity_list:
                 # services/analysis_service가 반환하는 키가 'report_id'와 'original_filename'이라고 가정
                 candidate = {
-                    "id": item.get("report_id"), 
-                    "filename": item.get("original_filename"),
+                    "candidate_id": item.get("candidate_id"), 
+                    "filename": item.get("candidate_filename"),
                     "total_score": item.get("plagiarism_score"), # _filter_... 함수에서 추가된 값
                     "itemized_scores": item.get("scores_detail") # _filter_... 함수에서 추가된 값
                 }

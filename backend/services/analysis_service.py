@@ -143,6 +143,7 @@ def find_similar_documents(submission_id, sub_thesis_vec, sub_claim_vec, top_n=5
     db_summaries_json = [] # 비교용 요약본 (JSON 문자열)
     db_vectors_thesis_list = []
     db_vectors_claim_list = []
+    db_original_filenames = []
 
     db_vectors_thesis_np = None
     db_vectors_claim_np = None
@@ -172,7 +173,7 @@ def find_similar_documents(submission_id, sub_thesis_vec, sub_claim_vec, top_n=5
             try:
                 db_ids.append(report.id)
                 db_summaries_json.append(report.summary) # JSON 문자열
-                
+                db_original_filenames.append(report.original_filename)
                 vec_thesis = json.loads(report.embedding_keyconcepts_corethesis)
                 vec_claim = json.loads(report.embedding_keyconcepts_claim)
                 
@@ -224,11 +225,13 @@ def find_similar_documents(submission_id, sub_thesis_vec, sub_claim_vec, top_n=5
             continue
             
         candidate_summary_json_str = db_summaries_json[index] # JSON 문자열
+        candidate_filename = db_original_filenames[index] # (필요시 사용 가능)
         
         top_candidates.append({
             "candidate_id": candidate_id,
             "weighted_similarity": score,
-            "candidate_summary_json_str": candidate_summary_json_str # 4단계 비교를 위해 요약본 원본 전달
+            "candidate_summary_json_str": candidate_summary_json_str, # 4단계 비교를 위해 요약본 원본 전달
+            "candidate_filename": candidate_filename
         })
         
         if len(top_candidates) >= top_n:
@@ -334,7 +337,7 @@ def perform_full_analysis_and_comparison(report_id, text, original_filename, jso
         try:
             candidate_id = candidate["candidate_id"]
             candidate_summary_str = candidate["candidate_summary_json_str"] # DB의 JSON 문자열
-            
+            candidate_filename = candidate["candidate_filename"]
             print(f"  -> Comparing with: {candidate_id}")
             
             # LLM 비교 호출
@@ -347,6 +350,7 @@ def perform_full_analysis_and_comparison(report_id, text, original_filename, jso
             if comparison_report_text:
                 comparison_results_list.append({
                     "candidate_id": candidate_id,
+                    "candidate_filename" : candidate_filename,
                     "weighted_similarity": candidate['weighted_similarity'],
                     "llm_comparison_report": comparison_report_text # (6개 점수가 포함된 텍스트)
                 })

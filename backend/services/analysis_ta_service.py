@@ -4,7 +4,7 @@
 import os
 import json
 import re
-import numpy as np
+import numpy as np 
 import google.generativeai as genai
 import traceback
 from sentence_transformers import SentenceTransformer
@@ -13,7 +13,7 @@ from time import sleep
 
 # [중요] Flask 앱 컨텍스트(db)가 필요합니다.
 from extensions import db
-from models import AnalysisReport
+from models import AnalysisReport, User
 
 # --------------------------------------------------------------------------------------
 # --- 1. 전역 설정 및 모델 로드 (Flask 앱 시작 시 1회 실행) ---

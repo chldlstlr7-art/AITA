@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>그래프 JSON 테스트</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        textarea {
+            width: 90%;
+            height: 150px;
+            margin-bottom: 10px;
+            font-family: monospace;
+        }
+        button {
+            padding: 10px 15px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        #graphDiv {
+            width: 1300px;
+            height: 1000px;
+            border: 1px solid #ccc;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>API 응답(JSON) 붙여넣기</h2>
+    <p>.../flow-graph 엔드포인트에서 반환된 JSON 문자열을 그대로 붙여넣으세요.</p>
+    
+    <textarea id="jsonInput" placeholder="여기에 API 응답 JSON 문자열을 붙여넣으세요..."></textarea>
+    
+    <button onclick="drawGraph()">그래프 그리기</button>
+
+    <div id="graphDiv"></div>
+
+    <script>
+        function drawGraph() {
+            const jsonString = document.getElementById('jsonInput').value;
+            const graphDiv = document.getElementById('graphDiv');
+
+            if (!jsonString) {
+                alert('JSON 문자열을 붙여넣어 주세요.');
+                return;
+            }
+
+            try {
+                // 1. 붙여넣은 JSON "문자열"을 JavaScript "객체"로 파싱합니다.
+                // 이 객체는 { data: [...], layout: {...} } 형태여야 합니다.
+                const graphData = JSON.parse(jsonString);
+
+                // 2. Plotly.js로 그래프를 그립니다.
+                Plotly.newPlot(
+                    graphDiv,
+                    graphData.data,      // 파싱된 객체의 data 키
+                    graphData.layout,    // 파싱된 객체의 layout 키
+                    { displayModeBar: true } // 툴바 표시 (확대/축소 등)
+                );
+            
+            } catch (e) {
+                // JSON 파싱 실패 시
+                alert('JSON 형식이 잘못되었습니다. API 응답을 그대로 복사했는지 확인하세요.\n\n오류: ' + e.message);
+                console.error("JSON 파싱 오류:", e, jsonString);
+            }
+        }
+    </script>
+
+</body>
+</html>

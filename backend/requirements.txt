@@ -25,3 +25,5 @@ flask-jwt-extended
 flask-mail
 werkzeug
 tqdm
+
+plotly
