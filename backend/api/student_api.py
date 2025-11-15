@@ -108,7 +108,7 @@ def analyze_report():
             user_id=user_id,
             status="processing", # 초기 상태
             original_filename=original_filename,
-            text_snippet=text[:4000],
+            text_snippet=text[:10000],
             is_test=is_test,
             
             # --- [신규] 새 임베딩 필드 초기화 ---

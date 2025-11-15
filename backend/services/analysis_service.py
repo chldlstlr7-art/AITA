@@ -124,7 +124,7 @@ def build_concat_text(key_concepts, main_idea):
     """[신규] 임베딩을 위한 텍스트 조합 (0.6:0.4 로직 기반)"""
     return f"주요 개념: {key_concepts}\n핵심 아이디어: {main_idea}"
 
-def find_similar_documents(submission_id, sub_thesis_vec, sub_claim_vec, top_n=5):
+def find_similar_documents(submission_id, sub_thesis_vec, sub_claim_vec, top_n=3):
     """
     [Full Code]
     항상 실시간 SQL DB (AnalysisReport)를 쿼리합니다.

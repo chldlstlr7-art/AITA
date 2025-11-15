@@ -7,7 +7,8 @@ import re
 import numpy as np 
 import google.generativeai as genai
 import traceback
-from sentence_transformers import SentenceTransformer
+
+
 from sklearn.metrics.pairwise import cosine_similarity
 from time import sleep
 
@@ -491,5 +492,6 @@ class AnalysisTAService:
             "summary_data": json.loads(report.summary) if report.summary else None,
             # 12. [필드명 수정] comparison_results -> similarity_details
             "comparison_data": json.loads(report.similarity_details) if report.similarity_details else None,
-            "error_message": report.error_message
+            "error_message": report.error_message,
+            "auto_score_details": report.auto_score_details
         }

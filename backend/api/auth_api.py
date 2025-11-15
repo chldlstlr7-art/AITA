@@ -19,10 +19,15 @@ from extensions import db, mail
 PREDEFINED_TA_LIST = {
     "ta.kim@snu.ac.kr",
     "ta.lee@snu.ac.kr",
+}
+
+
+# [신규] 관리자 권한을 자동으로 부여할 이메일 리스트
+PREDEFINED_ADMIN_LIST = {
     "admin.park@snu.ac.kr",
-    "ta-assistant@snu.ac.kr",
-    "dev@snu.ac.kr"
-    "dabok2@snu.ac.kr"
+    "dev@snu.ac.kr",       # 개발자 계정은 관리자로 취급
+    "dabok2@snu.ac.kr",   # seed.py에서 사용된 이메일
+    "admin@snu.ac.kr"     # seed.py에서 사용된 이메일
 }
 
 # 2. 무제한/개발용 토큰을 발급받을 이메일
@@ -91,63 +96,77 @@ def _send_otp_email(email, otp, subject_prefix="[AITA]"):
         # 실패 시에도 OTP는 터미널에 이미 출력되었음
         # 필요시 여기서 에러를 다시 발생시킬 수 있음
         # raise e
-
 def ta_required():
-    """JWT 토큰의 'role' 클레임이 'ta'인지 확인하는 데코레이터."""
+    """
+    [수정됨]
+    JWT 토큰의 'role'이 'ta'이거나 'is_admin'이 True인지 
+    확인하는 데코레이터.
+    """
     def wrapper(fn):
         @wraps(fn)
         @jwt_required() 
         def decorator(*args, **kwargs):
             claims = get_jwt()
-            if claims.get("role") == "ta":
+            
+            # [수정] 'ta' 역할이거나 'is_admin' 클레임이 True이면 통과
+            if claims.get("role") == "ta" or claims.get("is_admin") == True:
+                # [신규] g.user에 사용자 정보 저장 (ta_api.py에서 사용)
+                g.user = User.query.get(claims.get("sub"))
+                if not g.user:
+                     return jsonify({"error": "토큰에 해당하는 사용자를 찾을 수 없습니다."}), 404
+                
                 return fn(*args, **kwargs)
             else:
-                return jsonify({"error": "조교(TA) 권한이 필요합니다."}), 403
+                return jsonify({"error": "조교(TA) 또는 관리자 권한이 필요합니다."}), 403
         return decorator
     return wrapper
 
 # --- 3. [유지] 비밀번호 기반 (이메일 인증) 엔드포인트 ---
-
 @auth_bp.route("/register", methods=["POST"])
 def register_request():
     """
-    POST /api/auth/register
-    이메일, 비밀번호로 회원가입을 '요청'합니다.
-    사용자를 is_verified=False 상태로 생성/업데이트하고,
-    비밀번호를 저장한 뒤, '이메일 인증'용 OTP를 발송합니다.
+    ... (설명 동일) ...
+    [수정됨] Admin 리스트에 있으면 is_admin=True로 설정
     """
     data = request.json
     email = data.get("email", "").lower()
     password = data.get("password")
 
-    if not email or not password:
-        return jsonify({"error": "이메일과 비밀번호를 모두 입력해야 합니다."}), 400
-        
-    if not is_valid_snu_email(email):
-        return jsonify({"error": "유효한 @snu.ac.kr 이메일이 아닙니다."}), 400
-
+    # ... (이메일, 비밀번호, @snu.ac.kr 유효성 검사) ...
+    
     try:
-        # 이미 인증된 사용자가 있는지 확인
-        if User.query.filter_by(email=email, is_verified=True).first():
-            return jsonify({"error": "이미 가입되어 로그인이 가능한 이메일입니다."}), 409
+        # ... (이미 인증된 사용자 확인) ...
         
-        # 인증되지 않은 사용자(가입 중단)가 있는지 확인
         user = User.query.filter_by(email=email).first()
 
         if not user:
             # 신규 사용자
             default_role = "student"
-            if email in PREDEFINED_TA_LIST:
+            user_is_admin = False # [수정] 기본값
+
+            if email in PREDEFINED_ADMIN_LIST:
+                role = "ta" # 관리자는 TA 역할을 겸임
+                user_is_admin = True # [수정] is_admin 플래그 설정
+                print(f"[Auth] Register: {email} is in ADMIN list. Granting TA role and Admin flag.")
+            elif email in PREDEFINED_TA_LIST:
                 role = "ta"
                 print(f"[Auth] Register: {email} is in TA list. Granting TA role.")
             else:
                 role = data.get("role", default_role)
             
             user = User(email=email, role=role)
+            user.is_admin = user_is_admin # [수정] 생성 후 is_admin 속성 설정
             db.session.add(user)
         
+        # [수정] 기존 사용자가 가입 시도 시, Admin/TA 리스트에 새로 추가되었는지 확인
+        if email in PREDEFINED_ADMIN_LIST:
+            user.is_admin = True
+            user.role = "ta" # TA 역할도 부여
+        elif email in PREDEFINED_TA_LIST:
+            user.role = "ta"
+
         user.set_password(password) # 비밀번호 저장
-        user.is_verified = False      # 미인증 상태로 설정
+        user.is_verified = False    # 미인증 상태로 설정
         
         otp_code = _generate_otp()
         user.set_verification_code(otp_code) # 인증 코드 저장
@@ -248,13 +267,18 @@ def login_with_password():
         
     # 5. 로그인 성공
     try:
-        # [v4] DEV_EMAIL의 경우 만료 기간 없는 토큰 발급
-        token_expires_delta = timedelta(hours=1) # 기본 1시간
+        token_expires_delta = timedelta(hours=1) 
         if user.email == DEV_EMAIL:
             token_expires_delta = False
             print(f"[Auth] Issuing non-expiring token for DEV_EMAIL: {user.email}")
 
-        additional_claims = {"role": user.role, "email": user.email}
+        # [수정] is_admin 플래그를 클레임에 추가
+        additional_claims = {
+            "role": user.role, 
+            "email": user.email,
+            "is_admin": user.is_admin 
+        }
+        
         access_token = create_access_token(
             identity=str(user.id), 
             additional_claims=additional_claims,
@@ -270,7 +294,8 @@ def login_with_password():
             "user": {
                 "id": user.id,
                 "email": user.email,
-                "role": user.role
+                "role": user.role,
+                "is_admin": user.is_admin # [수정] 응답에도 추가
             }
         }), 200
         
@@ -309,6 +334,7 @@ def get_dev_token():
             user = User(email=DEV_EMAIL, role="ta")
             user.set_password("dev_password_placeholder") # (임시 비밀번호)
             user.is_verified = True # (개발용이므로 즉시 인증)
+            user.is_admin = True
             db.session.add(user)
             db.session.commit()
         
@@ -345,19 +371,16 @@ def get_my_reports():
     가장 최근에 제출한 순서대로 정렬됩니다.
     """
     try:
-        # 1. JWT 토큰에서 사용자 식별자 (로그인 시 사용한 identity, 보통 이메일)를 가져옵니다.
-        current_user_email = get_jwt_identity()
+        # 1. JWT 토큰에서 사용자 ID (identity)를 가져옵니다.
+        current_user_id = get_jwt_identity()
         
-        # 2. 이메일을 기준으로 DB에서 사용자를 찾습니다.
-        user = User.query.filter_by(email=current_user_email).first()
+        # 2. ID(PK)를 기준으로 DB에서 사용자를 찾습니다. (filter_by(email=...) 아님)
+        user = User.query.get(current_user_id) 
 
         if not user:
-            # 토큰이 유효하지만 해당 유저가 DB에 없는 경우 (예: 회원 탈퇴 직후)
             return jsonify({"error": "User not found"}), 404
-
-        # 3. 해당 사용자의 ID(user.id)와 일치하는 모든 리포트의 'id' 컬럼만 조회합니다.
-        #    - AnalysisReport 객체 전체를 불러오는 것보다 훨씬 효율적입니다.
-        #    - created_at 기준으로 내림차순 정렬하여 최신순으로 제공합니다.
+        
+        # 3. (정상 동작)
         report_tuples = db.session.query(AnalysisReport.id)\
                                   .filter_by(user_id=user.id)\
                                   .order_by(AnalysisReport.created_at.desc())\

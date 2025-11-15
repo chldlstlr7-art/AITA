@@ -44,7 +44,6 @@ migrate = Migrate(app, db)
 from models import User, AnalysisReport
 
 # --- 5. 백그라운드 함수 정의 (순서 중요) ---
-# (사용자님이 보내주신 최신 _parse_... 로직은 그대로 유지했습니다)
 def _parse_comparison_scores(report_text):
     scores = {
         "Core Thesis": 0, "Problem Framing": 0, "Claim": 0,
