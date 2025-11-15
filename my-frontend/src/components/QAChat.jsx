@@ -357,7 +357,7 @@ function QAChat({
               대화형 Q&A
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              각 질문별로 AI와 이어서 대화하세요 — 심화질문은 기존 대화창에 이어집니다.
+              질문 답변 후 심화 질문을 생성해 더욱 창의적인 아이디어를 얻으세요!
             </Typography>
           </Box>
         </Stack>
