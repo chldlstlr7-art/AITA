@@ -1,10 +1,10 @@
 import axios from 'axios';
 
-const API_URL = 'https://cautious-doodle-q75wx75gv596hx57r-5000.app.github.dev';
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+// 뭔지 몰라서 주석 - 인식 const API_URL = 'https://cautious-doodle-q75wx75gv596hx57r-5000.app.github.dev';
+const API_BASE_URL = import.meta.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 const apiClient = axios.create({
-  baseURL: API_URL,
+  baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
