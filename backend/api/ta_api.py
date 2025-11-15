@@ -360,29 +360,39 @@ def trigger_auto_grading(report_id):
     """
     POST /api/ta/reports/<report_id>/auto-grade
     TA가 특정 리포트에 대해 'AI 자동 채점'을 실행하도록 요청합니다.
-    (시간이 걸릴 수 있으므로 비동기 처리가 권장됩니다.)
+    (수정: app.py의 중앙 서비스 로더를 사용하도록 변경)
     """
+    
+    # 1. app.py에서 초기화된 grading_service를 가져옵니다.
+    grading_service = current_app.grading_service
+    
     if not grading_service:
         return jsonify({"error": "자동 채점 서비스가 초기화되지 않았습니다."}), 503
 
-    # [중요] LLM 채점은 시간이 10~30초 이상 걸릴 수 있습니다.
-    # HTTP 요청(Flask)에서 직접 처리하면 '타임아웃'이 발생합니다.
-    # 반드시 `analyze-batch`처럼 백그라운드 스레드나 Celery/RQ로 실행해야 합니다.
-    
+    # 2. 백그라운드 스레드에 넘겨줄 app 컨텍스트를 가져옵니다.
     app = current_app._get_current_object()
 
     def background_grading_task(app_context, report_id_to_grade):
         """백그라운드 스레드에서 자동 채점 실행"""
+        # 3. 스레드 내부에서 app_context를 사용하여 다시 service를 로드해야 합니다.
         with app_context.app_context():
             try:
                 print(f"[AutoGrade Task] Report {report_id_to_grade} 자동 채점 시작...")
-                grading_service.run_auto_grading(report_id_to_grade)
+                
+                # 스레드 내에서 current_app 프록시를 통해 서비스에 접근
+                service = current_app.grading_service 
+                if not service:
+                    print(f"[AutoGrade Task] FAILED: 스레드 내에서 서비스를 찾을 수 없습니다.")
+                    return
+
+                service.run_auto_grading(report_id_to_grade)
                 print(f"[AutoGrade Task] Report {report_id_to_grade} 자동 채점 완료.")
+            
             except Exception as e:
                 print(f"[AutoGrade Task] CRITICAL ERROR: 백그라운드 작업 실패: {e}")
                 traceback.print_exc() # 터미널에 상세 오류 출력
 
-    # 스레드 생성 및 시작
+    # 4. 스레드 생성 및 시작
     thread = threading.Thread(
         target=background_grading_task,
         args=(app, report_id)
@@ -390,7 +400,7 @@ def trigger_auto_grading(report_id):
     thread.daemon = True
     thread.start()
 
-    # API는 즉시 응답 (202 Accepted)
+    # 5. [수정] API는 즉시 202 응답을 반환합니다. (이것이 누락되었음)
     return jsonify({
         "message": f"Report {report_id}에 대한 자동 채점 작업을 백그라운드에서 시작했습니다."
     }), 202

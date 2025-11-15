@@ -7,7 +7,7 @@ import re
 import numpy as np 
 import google.generativeai as genai
 import traceback
-
+from sentence_transformers import SentenceTransformer
 
 from sklearn.metrics.pairwise import cosine_similarity
 from time import sleep

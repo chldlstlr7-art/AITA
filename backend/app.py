@@ -13,7 +13,9 @@ import json
  
 from services.analysis_service import perform_full_analysis_and_comparison
 from services.qa_service import generate_initial_questions, generate_deep_dive_question, generate_refill_questions
-
+from services.analysis_ta_service import AnalysisTAService 
+from services.grading_service import GradingService
+from services.course_management_service import CourseManagementService
 from config import Config, JSON_SYSTEM_PROMPT, COMPARISON_SYSTEM_PROMPT
 from flask_sqlalchemy import SQLAlchemy
 
@@ -42,6 +44,24 @@ mail.init_app(app)
 jwt.init_app(app) # ⬅️ CORS보다 늦게 초기화
 migrate = Migrate(app, db)
 from models import User, AnalysisReport
+
+# --- 5. [신규] 중앙 서비스 초기화 ---
+# app.py에서 한번만 생성하여 앱 컨텍스트(app 객체)에 바인딩합니다.
+try:
+    # app 객체에 서비스 인스턴스를 속성으로 추가합니다.
+    app.analysis_ta_service = AnalysisTAService(
+        json_prompt_template=JSON_SYSTEM_PROMPT,
+        comparison_prompt_template=COMPARISON_SYSTEM_PROMPT
+    )
+    app.course_service = CourseManagementService()
+    app.grading_service = GradingService()
+    print("[App] 모든 서비스가 성공적으로 초기화되었습니다.")
+except Exception as e:
+    print(f"[App] CRITICAL: 서비스 초기화 실패: {e}")
+    # 서비스 로딩 실패 시 None으로 설정 (API에서 체크 가능)
+    app.analysis_ta_service = None
+    app.course_service = None
+    app.grading_service = None
 
 # --- 5. 백그라운드 함수 정의 (순서 중요) ---
 def _parse_comparison_scores(report_text):

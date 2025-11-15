@@ -5,7 +5,7 @@ from extensions import db
 from models import Course, Assignment, User, AnalysisReport
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
-
+from sqlalchemy.orm import joinedload
 class CourseManagementService:
 
     def create_course(self, data, assistant_user):
@@ -210,6 +210,63 @@ class CourseManagementService:
             "average_score": average_score
         }
 
+    def get_student_dashboard_details(self, student_id):
+        """
+        특정 학생의 상세 정보(수강 과목, 제출 리포트)를 조회합니다.
+        """
+        # 1. 학생 정보 조회
+        student = User.query.get(student_id)
+        
+        if not student:
+            raise ValueError("학생을 찾을 수 없습니다.")
+        if student.role != 'student':
+            raise ValueError("해당 사용자는 학생이 아닙니다.")
+            
+        student_info = {
+            "id": student.id,
+            "email": student.email,
+            "username": student.username
+        }
+
+        # 2. 수강 과목 목록 조회
+        # (User.courses_enrolled 관계 사용)
+        enrolled_courses = student.courses_enrolled.order_by(Course.course_name).all()
+        courses_list = [
+            {
+                "id": course.id,
+                "course_name": course.course_name,
+                "course_code": course.course_code
+            } for course in enrolled_courses
+        ]
+
+        # 3. 제출 리포트 목록 조회
+        # (N+1 쿼리 방지를 위해 assignment 정보 'joinedload' 사용)
+        student_reports = AnalysisReport.query.filter_by(user_id=student_id)\
+            .options(joinedload(AnalysisReport.assignment))\
+            .order_by(AnalysisReport.created_at.desc())\
+            .all()
+            
+        reports_list = []
+        for report in student_reports:
+            assignment_name = "N/A"
+            if report.assignment:
+                assignment_name = report.assignment.assignment_name
+                
+            reports_list.append({
+                "id": report.id,
+                "report_title": report.report_title,
+                "status": report.status,
+                "created_at": report.created_at.isoformat() if report.created_at else None,
+                "assignment_id": report.assignment_id,
+                "assignment_name": assignment_name
+            })
+
+        # 4. 최종 데이터 조합
+        return {
+            "student": student_info,
+            "enrolled_courses": courses_list,
+            "submitted_reports": reports_list
+        }
     # --- Helper Functions (오류 처리용) ---
     
     def _get_course(self, course_id):

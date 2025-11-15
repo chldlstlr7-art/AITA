@@ -10,42 +10,58 @@ from services.parsing_service import extract_text
 from services.qa_service import generate_deep_dive_question
 from services.advancement_service import generate_advancement_ideas
 from services import flow_graph_services
+from services.course_management_service import CourseManagementService
+
 
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from config import JSON_SYSTEM_PROMPT, COMPARISON_SYSTEM_PROMPT
 from extensions import db
-from models import AnalysisReport
+from models import AnalysisReport, User
 # --- 1. '학생용' Blueprint 생성 ---
 student_bp = Blueprint('student_api', __name__)
 
+try:
+    course_service = CourseManagementService()
+    print("[Student API] CourseManagementService 초기화 완료.")
+except Exception as e:
+    print(f"[Student API] CRITICAL: CourseManagementService 초기화 실패: {e}")
+    course_service = None
+
 # --- [수정] 헬퍼 함수: get_report_or_404 ---
-def get_report_or_404(report_id, user_id):
+def get_report_or_404(report_id, user_id_from_token):
     """
-    DB에서 리포트를 조회하고, 소유권을 확인합니다.
-    없거나 소유자가 다르면 (None, 404_response)를 반환합니다.
+    DB에서 리포트를 조회하고, 소유권 또는 TA/Admin 권한을 확인합니다.
+    없거나 권한이 없으면 (None, 404/403_response)를 반환합니다.
     """
-    # 1. JWT user_id를 정수로 변환 (토큰 identity는 문자열이기 때문)
+    
+    # 1. 토큰의 user_id로 현재 사용자 정보 조회
     try:
-        token_user_id = int(user_id)  # ⬅️ 여기가 핵심 수정 부분
-    except ValueError:
-        # 혹시 토큰의 identity가 숫자가 아닌 이상한 값일 경우
+        token_user_id = int(user_id_from_token)
+    except (ValueError, TypeError):
         return None, (jsonify({"error": "Invalid User ID in token"}), 401)
 
+    current_user = db.session.get(User, token_user_id)
+    
+    if not current_user:
+        return None, (jsonify({"error": "User not found"}), 401)
+
     # 2. 리포트 조회
-    # (db.session.get()은 filter_by보다 최신 Flask-SQLAlchemy에서 권장됨)
     report = db.session.get(AnalysisReport, report_id)
     
     # 3. 리포트가 없는 경우
     if not report:
         return None, (jsonify({"error": "Report not found"}), 404)
         
-    # 4. [보안] 리포트 소유자가 현재 로그인한 유저가 아닌 경우
-    # DB의 정수(report.user_id)와 토큰에서 변환한 정수(token_user_id)를 비교
-    if report.user_id != token_user_id:
+    # 4. [보안] 권한 확인
+    is_owner = (report.user_id == current_user.id)
+    is_ta_or_admin = (current_user.role == 'ta' or current_user.is_admin)
+
+    # 소유자도 아니고, TA/Admin도 아니면 접근 거부
+    if not is_owner and not is_ta_or_admin:
         return None, (jsonify({"error": "Access denied"}), 403)
         
-    # 5. 성공
+    # 5. 성공 (소유자 또는 TA/Admin)
     return report, None
 
 # --- 2. [이동] API 엔드포인트 ---
@@ -169,6 +185,10 @@ def get_report(report_id):
         similarity_details_data = json.loads(report.similarity_details) if report.similarity_details else []
         qa_history_list = json.loads(report.qa_history) if report.qa_history else []
         questions_pool_list = json.loads(report.questions_pool) if report.questions_pool else []
+        ta_score_details_data = json.loads(report.ta_score_details) if report.ta_score_details else None
+        auto_score_details_data = json.loads(report.auto_score_details) if report.auto_score_details else None
+        high_similarity_candidates_data = json.loads(report.high_similarity_candidates) if report.high_similarity_candidates else []
+    
     
     except json.JSONDecodeError as e:
         # JSON 파싱에 실패하면(데이터가 깨졌을 경우) 에러를 반환합니다.
@@ -195,8 +215,11 @@ def get_report(report_id):
     # 클라이언트에게 전달할 'data' 페이로드를 조립합니다.
     # report.* (문자열) 대신 파싱된 객체 변수(summary_data 등)를 사용합니다.
     data = {
+        "report_title": report.report_title,
+        "assignment_id": report.assignment_id,
+        "user_rating": report.user_rating,
+
         "summary": summary_data,
-        "evaluation": evaluation_data,
         "logicFlow": logic_flow_data,
         "similarity_details": similarity_details_data, # (이제 리스트)
         "text_snippet": report.text_snippet, 
@@ -207,7 +230,13 @@ def get_report(report_id):
         "qa_history": qa_history_list, # <-- 파싱된 리스트 전달
         
         "is_refilling": report.is_refilling,
-        "advancement_ideas" : report.advancement_ideas
+        "advancement_ideas" : report.advancement_ideas,
+
+        # [신규] 채점 및 피드백 정보
+        "ta_score_details": ta_score_details_data,
+        "auto_score_details": auto_score_details_data,
+        "ta_feedback": report.ta_feedback
+
 
     }
     
@@ -520,3 +549,44 @@ def get_flow_graph(report_id):
         # (예: Plotly 라이브러리 오류 등)
         print(f"[{report_id}] Graph generation failed (Exception): {e}")
         return jsonify({"error": "An unexpected error occurred while generating the graph"}), 500
+
+
+# --- [신규] 학생 대시보드 API ---
+@student_bp.route('/dashboard/<int:target_student_id>', methods=['GET'])
+@jwt_required() # (student_required가 아닌 jwt_required 사용)
+def get_student_dashboard_by_id(target_student_id):
+    """
+    학생 대시보드 조회 (수강 과목, 제출 리포트)
+    - 학생 본인은 자기 ID로만 조회 가능
+    - TA/Admin은 모든 학생 ID로 조회 가능
+    """
+    if not course_service:
+        return jsonify({"error": "서비스가 초기화되지 않았습니다."}), 503
+
+    try:
+        # 1. 요청을 보낸 사용자의 ID와 정보 확인
+        current_user_id_str = get_jwt_identity()
+        current_user_id = int(current_user_id_str)
+        current_user = db.session.get(User, current_user_id)
+        
+        if not current_user:
+            return jsonify({"error": "요청한 사용자를 찾을 수 없습니다."}), 401
+
+        # 2. 권한 확인
+        is_owner = (current_user.id == target_student_id)
+        is_ta_or_admin = (current_user.role == 'ta' or current_user.is_admin)
+
+        # 본인도 아니고, TA/Admin도 아니면 접근 거부
+        if not is_owner and not is_ta_or_admin:
+            return jsonify({"error": "Access denied. You can only view your own dashboard."}), 403
+        
+        # 3. 권한이 확인되면, 서비스 로직 호출
+        details = course_service.get_student_dashboard_details(target_student_id)
+        return jsonify(details), 200
+    
+    except ValueError as e:
+        # (예: "학생을 찾을 수 없습니다." 등)
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        print(f"[Student API /dashboard/{target_student_id} GET] Error: {e}")
+        return jsonify({"error": "대시보드 조회 중 서버 오류 발생"}), 500

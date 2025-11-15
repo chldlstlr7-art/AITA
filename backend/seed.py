@@ -1,7 +1,7 @@
 import sys
 import os
 import json
-import csv  # 1. CSV 모듈 임포트
+import csv
 from datetime import datetime
 
 # [중요]
@@ -10,7 +10,10 @@ from datetime import datetime
 try:
     from app import app 
     from extensions import db
-    from models import User, Course, Assignment, AnalysisReport # 2. AnalysisReport 임포트
+    from models import User, Course, Assignment, AnalysisReport
+    
+    # [수정 1] 임베딩 재생성을 위한 헬퍼 함수 임포트
+    from services.analysis_service import get_embedding_vector, build_concat_text
 
 except ImportError as e:
     print(f"Import Error: {e}")
@@ -18,16 +21,8 @@ except ImportError as e:
     sys.exit(1)
 
 # --- CSV 파일 설정 ---
-# 3. CSV 파일 경로 및 컬럼 순서 (요청사항 반영)
-#   (이전에 'evaluation'과 'summary'를 교체한 파일이어야 함)
 CSV_FILE_PATH = 'corrected_dummy_data.csv'
-COLUMN_ORDER = [
-    "user_id", "assignment_id", "report_title", "text_snippet", "status",
-    "summary",      # 이 컬럼은 이제 JSON 데이터를 포함해야 합니다.
-    # "evaluation", # 요청대로 이 컬럼은 무시(skip)합니다.
-    "logic_flow",
-    "embedding_keyconcepts_corethesis", "embedding_keyconcepts_claim"
-]
+# (COLUMN_ORDER는 이제 CSV 파일 자체에 의존하므로 스크립트 내에서 사용 X)
 
 
 # --- 생성할 데이터 정의 ---
@@ -320,17 +315,14 @@ def seed_database():
                 for assign_data in c_data['assignments']:
                     total_assignments += 1
                     
-                    # --- [여기서부터 코드 완성] ---
                     new_assignment = Assignment(
                         assignment_name=assign_data['name'],
                         course=new_course,
                         description=assign_data['description'],
-                        # 4. grading_criteria는 JSON 문자열로 저장
                         grading_criteria=json.dumps(assign_data['grading_criteria']),
                         due_date=due_date_obj
                     )
                     db.session.add(new_assignment)
-                    # --- [여기까지 코드 완성] ---
                     
             db.session.commit() # 과목 및 과제 커밋
             print(f"  - 과목 {len(COURSES_DATA)}개, 총 과제 {total_assignments}개 생성 완료.")
@@ -345,35 +337,75 @@ def seed_database():
 
             reports_to_add = []
             with open(CSV_FILE_PATH, mode='r', encoding='utf-8-sig') as file:
-                # 5. DictReader로 CSV 읽기
                 reader = csv.DictReader(file)
                 
+                print(f"  - CSV 로드 완료. 임베딩 재생성 시작...")
+                row_count = 0
+                
                 for row in reader:
-                    # 6. 요청대로 컬럼 매핑 (evaluation은 제외)
-                    report_data = {
-                        "user_id": int(row["user_id"]),
-                        "assignment_id": int(row["assignment_id"]),
-                        "report_title": row["report_title"],
-                        "text_snippet": row["text_snippet"],
-                        "status": row["status"],
-                        "summary": row["summary"], # JSON 문자열이 여기 들어감
-                        # "evaluation": row["evaluation"], # <- 의도적으로 제외
-                        "logic_flow": row["logic_flow"],
-                        "embedding_keyconcepts_corethesis": row["embedding_keyconcepts_corethesis"],
-                        "embedding_keyconcepts_claim": row["embedding_keyconcepts_claim"],
-                        
-                        # 7. (중요) 이 데이터는 '테스트용'으로 표기하여 실제 분석과 섞이지 않게 함
-                        "is_test": True,
-                        
-                        # 기타 필드 기본값 설정
-                        "high_similarity_candidates": json.dumps([]),
-                        "qa_history": json.dumps([]),
-                        "created_at": datetime.now()
-                    }
+                    row_count += 1
                     
-                    new_report = AnalysisReport(**report_data)
-                    reports_to_add.append(new_report)
+                    # [수정 2] 올바른 try...except 구조
+                    try:
+                        # 1. summary(JSON 문자열)를 딕셔너리로 파싱
+                        summary_dict = json.loads(row["summary"])
+                        
+                        # 2. 임베딩용 텍스트 생성
+                        text_for_thesis = build_concat_text(
+                            summary_dict.get('key_concepts', ''),
+                            summary_dict.get('Core_Thesis', '')
+                        )
+                        text_for_claim = build_concat_text(
+                            summary_dict.get('key_concepts', ''),
+                            summary_dict.get('Claim', '')
+                        )
+                        
+                        # 3. (신규) 384차원 임베딩 생성
+                        vec_thesis = get_embedding_vector(text_for_thesis)
+                        vec_claim = get_embedding_vector(text_for_claim)
+                        
+                        if not vec_thesis or not vec_claim:
+                             print(f"  - [경고] {row_count}번째 행 임베딩 생성 실패. 건너뜀.")
+                             continue
 
+                        # 4. DB에 저장할 데이터 매핑
+                        report_data = {
+                            "user_id": int(row["user_id"]),
+                            "assignment_id": int(row["assignment_id"]),
+                            "report_title": row["report_title"],
+                            "text_snippet": row["text_snippet"],
+                            "status": row["status"],
+                            "summary": row["summary"], # JSON 원본
+                            "logic_flow": row["logic_flow"],
+                            
+                            # (신규) CSV값이 아닌 새로 생성한 384차원 벡터를 JSON 문자열로 저장
+                            "embedding_keyconcepts_corethesis": json.dumps(vec_thesis),
+                            "embedding_keyconcepts_claim": json.dumps(vec_claim),
+                            
+                            # [수정 3] 사용자가 요청한 대로 is_test=False로 설정
+                            "is_test": False, 
+                            
+                            "high_similarity_candidates": json.dumps([]),
+                            "qa_history": json.dumps([]),
+                            "created_at": datetime.now()
+                        }
+                        
+                        # [수정 4] try 블록 안으로 이동
+                        new_report = AnalysisReport(**report_data)
+                        reports_to_add.append(new_report)
+
+                    # [수정 5] 누락된 except 블록 추가
+                    except Exception as e_inner:
+                        print(f"  - [오류] {row_count}번째 행 처리 중 오류: {e_inner}")
+                        # (오류가 발생한 행의 summary 출력)
+                        if "summary" in row:
+                            print(f"    - problematic summary: {row['summary'][:50]}...")
+                        else:
+                            print(f"    - (Summary data missing in row)")
+
+
+            # [수정 6] add_all과 commit은 루프 *밖*에 있어야 함 (이건 원래 잘 되어 있었음)
+            print(f"  - 임베딩 생성 완료. DB에 {len(reports_to_add)}개 삽입 시도...")
             db.session.add_all(reports_to_add)
             db.session.commit() # 보고서 데이터 커밋
             print(f"  - 총 {len(reports_to_add)}개의 AnalysisReport를 DB에 추가했습니다.")

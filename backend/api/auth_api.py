@@ -4,7 +4,7 @@ import string
 import os
 import time
 import traceback
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from flask_mail import Message
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt
 from datetime import datetime, timezone, timedelta
