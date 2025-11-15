@@ -1,29 +1,43 @@
-# Flask 서버용
+# ----------------------------------------------------------------------
+# --- 웹 서버 및 기본 유틸리티 ---
+# ----------------------------------------------------------------------
 flask
 flask-cors
 gunicorn
-
-
-# AI/데이터 처리용 (Colab)
-pandas
-numpy
-google-generativeai
-sentence-transformers
-scikit-learn
-
-# 텍스트 파싱용 (app.py의 임시 parse_file 함수에 필요)
-python-docx
-pypdf
-
-# API 키 저장
+werkzeug
 python-dotenv
 
-#메일용
+# ----------------------------------------------------------------------
+# --- 데이터베이스 및 인증 ---
+# ----------------------------------------------------------------------
 Flask-Migrate
 flask-sqlalchemy
 flask-jwt-extended
 flask-mail
-werkzeug
-tqdm
+PyJWT
+alembic
+greenlet
+SQLAlchemy
+Mako
 
+# ----------------------------------------------------------------------
+# --- AI/데이터 처리용 (CPU 최적화) ---
+# ----------------------------------------------------------------------
+# *주의: torch와 그 의존성(safetensors, triton 등)은 GPU 버전 설치를 피하기 위해
+#       CPU 전용 설치를 권장하며, 의존성 목록에 포함하지 않아도
+#       sentence-transformers 설치 시 자동으로 포함될 수 있습니다.*
+
+# Google AI 및 임베딩
+google-generativeai
+sentence-transformers
+scikit-learn
+numpy
+pandas
+
+# ----------------------------------------------------------------------
+# --- 텍스트 파싱 및 기타 유틸리티 ---
+# ----------------------------------------------------------------------
+python-docx
+pypdf
+tqdm
 plotly
