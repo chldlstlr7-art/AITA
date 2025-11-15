@@ -31,6 +31,16 @@ class Config:
     # (기본값: MAIL_USERNAME과 동일하게 설정)
     MAIL_DEFAULT_SENDER = os.environ.get('SNUAITA301@gmail.com', os.environ.get('MAIL_USERNAME'))
 
+    # 기존 SQLite 설정 (로컬 개발용)
+    default_db_uri = "sqlite:///./instance/aita.db" # (경로는 기존 설정에 맞게)
+
+    # Render에서 설정한 DATABASE_URL 환경 변수를 읽어옴
+    # 만약 환경 변수가 없으면(로컬이면) default_db_uri(SQLite)를 사용
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', default_db_uri)
+    
+    # (선택) SQLAlchemy 관련 경고 메시지 끄기
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+
 
 # 1. 자료 분석 요약 프롬프트
 JSON_SYSTEM_PROMPT = (
