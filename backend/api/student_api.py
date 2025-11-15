@@ -3,7 +3,7 @@ import uuid
 import json
 from flask import Blueprint, request, jsonify, Response
 from werkzeug.utils import secure_filename
-
+from flask import current_app
 
 # --- [유지] services 폴더의 로직 임포트 ---
 from services.parsing_service import extract_text
@@ -21,12 +21,6 @@ from models import AnalysisReport, User
 # --- 1. '학생용' Blueprint 생성 ---
 student_bp = Blueprint('student_api', __name__)
 
-try:
-    course_service = CourseManagementService()
-    print("[Student API] CourseManagementService 초기화 완료.")
-except Exception as e:
-    print(f"[Student API] CRITICAL: CourseManagementService 초기화 실패: {e}")
-    course_service = None
 
 # --- [수정] 헬퍼 함수: get_report_or_404 ---
 def get_report_or_404(report_id, user_id_from_token):
@@ -560,7 +554,7 @@ def get_student_dashboard_by_id(target_student_id):
     - 학생 본인은 자기 ID로만 조회 가능
     - TA/Admin은 모든 학생 ID로 조회 가능
     """
-    if not course_service:
+    if not current_app.course_service:
         return jsonify({"error": "서비스가 초기화되지 않았습니다."}), 503
 
     try:
@@ -581,7 +575,7 @@ def get_student_dashboard_by_id(target_student_id):
             return jsonify({"error": "Access denied. You can only view your own dashboard."}), 403
         
         # 3. 권한이 확인되면, 서비스 로직 호출
-        details = course_service.get_student_dashboard_details(target_student_id)
+        details = current_app.course_service.get_student_dashboard_details(target_student_id)
         return jsonify(details), 200
     
     except ValueError as e:

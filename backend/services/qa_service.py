@@ -32,7 +32,18 @@ else:
 # --------------------------------------------------------------------------------------
 # --- 3. 헬퍼 함수 (LLM 호출) ---
 # --------------------------------------------------------------------------------------
-
+def _distribute_questions(questions_pool, count=3):
+    if not questions_pool: return []
+    critical_q = [q for q in questions_pool if q.get('type') == 'critical']
+    perspective_q = [q for q in questions_pool if q.get('type') == 'perspective']
+    innovative_q = [q for q in questions_pool if q.get('type') == 'innovative']
+    initial_set = []
+    if critical_q: initial_set.append(critical_q.pop(0))
+    if perspective_q: initial_set.append(perspective_q.pop(0))
+    if innovative_q: initial_set.append(innovative_q.pop(0))
+    for q in initial_set: questions_pool.remove(q)
+    return initial_set
+    
 def _call_llm_json(prompt_text):
     """LLM을 호출하고 JSON 응답을 파싱하는 내부 함수"""
     if not llm_client_pro:

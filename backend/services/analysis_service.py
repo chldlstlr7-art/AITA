@@ -317,7 +317,7 @@ def perform_full_analysis_and_comparison(report_id, text, original_filename, jso
         report_id, # [신규] 자기 자신을 제외하기 위해 ID 전달
         embedding_thesis, 
         embedding_claim, 
-        top_n=5
+        top_n=3
     )
 
     # --- 4단계: 후보 문서와 LLM 정밀 비교 (config.py의 COMPARISON_SYSTEM_PROMPT 사용) ---
@@ -365,3 +365,53 @@ def perform_full_analysis_and_comparison(report_id, text, original_filename, jso
     
     print(f"[{report_id}] 5. 모든 분석 완료. 데이터 반환.")
     return analysis_data
+
+
+def _parse_comparison_scores(report_text):
+    scores = {
+        "Core Thesis": 0, "Problem Framing": 0, "Claim": 0,
+        "Reasoning": 0, "Flow Pattern": 0, "Conclusion Framing": 0,
+    }
+    total_score = 0
+    parsed_count = 0
+    key_mapping = {
+        "Core Thesis": "Core Thesis", "Problem Framing": "Problem Framing",
+        "Claim": "Claim", "Reasoning": "Reasoning",
+        "Flow Pattern": "Flow Pattern", "Conclusion Framing": "Conclusion Framing",
+    }
+    try:
+        for key_name, mapped_key in key_mapping.items():
+            pattern = rf"{re.escape(key_name)}.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]"
+            match = re.search(pattern, report_text, re.IGNORECASE | re.DOTALL)
+            if match:
+                score = int(match.group(1))
+                scores[mapped_key] = score
+                parsed_count += 1
+            else:
+                print(f"[_parse_comparison_scores] DEBUG: Failed to parse score for key: '{key_name}'")
+        if parsed_count < 6:
+            print(f"[_parse_comparison_scores] WARNING: Parsed {parsed_count}/6 scores.")
+        scores["Core Thesis"] = scores["Core Thesis"] * 3
+        scores["Claim"] = scores["Claim"] * 3
+        scores["Reasoning"] = scores["Reasoning"] * 2
+        scores["Flow Pattern"] = scores["Flow Pattern"] * 1
+        scores["Problem Framing"] = scores["Problem Framing"] * 1
+        scores["Conclusion Framing"] = scores["Conclusion Framing"] * 0
+        total_score = sum(scores.values())
+    except Exception as e:
+        print(f"[_parse_comparison_scores] 파싱 중 에러: {e}")
+        return 0, scores
+    return total_score, scores
+
+
+def _filter_high_similarity_reports(comparison_results_list):
+    high_similarity_reports = []
+    threshold = 20
+    for result in comparison_results_list:
+        report_text = result.get("llm_comparison_report", "")
+        total_score, scores_dict = _parse_comparison_scores(report_text)
+        if total_score >= threshold:
+            result['plagiarism_score'] = total_score
+            result['scores_detail'] = scores_dict
+            high_similarity_reports.append(result)
+    return high_similarity_reports

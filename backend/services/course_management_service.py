@@ -2,7 +2,7 @@
 
 import json
 from extensions import db
-from models import Course, Assignment, User, AnalysisReport
+from models import User, Course, Assignment, AnalysisReport, course_enrollment, course_assistant
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
@@ -267,6 +267,53 @@ class CourseManagementService:
             "enrolled_courses": courses_list,
             "submitted_reports": reports_list
         }
+
+    def get_courses_for_ta(self, ta_id):
+        """
+        [신규] 특정 TA ID에 연결된 모든 과목 목록을 반환합니다.
+        (models.py의 N:M 관계 backref 'courses_assisted' 기반으로 작성됨)
+        """
+        
+        # 1. TA 사용자 객체를 찾습니다.
+        ta = db.session.get(User, ta_id)
+        
+        # 2. TA 또는 Admin인지 확인합니다.
+        if not ta:
+            raise ValueError("TA 사용자를 찾을 수 없습니다.")
+        if ta.role != 'ta' and not ta.is_admin:
+            raise ValueError("조회 권한이 없습니다. (TA 또는 Admin이 아님)")
+
+        # 3. [수정] 'courses_assisted' backref 대신 수동 조인 쿼리를 사용합니다.
+        # 이 방식은 DB에서 직접 정렬(order_by)을 수행할 수 있어 더 효율적입니다.
+        # ta.courses_assisted는 Python 리스트이므로 .order_by()를 사용할 수 없습니다.
+        try:
+            courses = db.session.query(Course).join(
+                course_assistant, (course_assistant.c.course_id == Course.id)
+            ).filter(course_assistant.c.user_id == ta_id).order_by(Course.course_code).all()
+        except Exception as e:
+            # (디버깅) 쿼리 자체에서 에러가 날 경우를 대비
+            print(f"[Service Error] 'get_courses_for_ta' 쿼리 실행 중 오류: {e}")
+            raise e # 오류를 상위로 다시 전달
+
+
+        # 4. 프론트엔드에 전달할 형태로 데이터를 직렬화(serialize)합니다.
+        courses_list = []
+        for course in courses:
+            # Course.assignments는 lazy=True (기본값)이므로 len() 사용
+            assignment_count = len(course.assignments)
+            
+            # Course.students는 lazy='dynamic'이므로 .count() 사용
+            student_count = course.students.count()
+
+            courses_list.append({
+                "id": course.id,
+                "course_name": course.course_name,
+                "course_code": course.course_code,
+                "assignment_count": assignment_count,
+                "student_count": student_count
+            })
+            
+        return courses_list
     # --- Helper Functions (오류 처리용) ---
     
     def _get_course(self, course_id):

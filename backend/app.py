@@ -11,8 +11,8 @@ import re
 import traceback
 import json
  
-from services.analysis_service import perform_full_analysis_and_comparison
-from services.qa_service import generate_initial_questions, generate_deep_dive_question, generate_refill_questions
+from services.analysis_service import perform_full_analysis_and_comparison, _parse_comparison_scores, _filter_high_similarity_reports
+from services.qa_service import generate_initial_questions, generate_deep_dive_question, generate_refill_questions, _distribute_questions
 from services.analysis_ta_service import AnalysisTAService 
 from services.grading_service import GradingService
 from services.course_management_service import CourseManagementService
@@ -64,65 +64,7 @@ except Exception as e:
     app.grading_service = None
 
 # --- 5. 백그라운드 함수 정의 (순서 중요) ---
-def _parse_comparison_scores(report_text):
-    scores = {
-        "Core Thesis": 0, "Problem Framing": 0, "Claim": 0,
-        "Reasoning": 0, "Flow Pattern": 0, "Conclusion Framing": 0,
-    }
-    total_score = 0
-    parsed_count = 0
-    key_mapping = {
-        "Core Thesis": "Core Thesis", "Problem Framing": "Problem Framing",
-        "Claim": "Claim", "Reasoning": "Reasoning",
-        "Flow Pattern": "Flow Pattern", "Conclusion Framing": "Conclusion Framing",
-    }
-    try:
-        for key_name, mapped_key in key_mapping.items():
-            pattern = rf"{re.escape(key_name)}.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]"
-            match = re.search(pattern, report_text, re.IGNORECASE | re.DOTALL)
-            if match:
-                score = int(match.group(1))
-                scores[mapped_key] = score
-                parsed_count += 1
-            else:
-                print(f"[_parse_comparison_scores] DEBUG: Failed to parse score for key: '{key_name}'")
-        if parsed_count < 6:
-            print(f"[_parse_comparison_scores] WARNING: Parsed {parsed_count}/6 scores.")
-        scores["Core Thesis"] = scores["Core Thesis"] * 3
-        scores["Claim"] = scores["Claim"] * 3
-        scores["Reasoning"] = scores["Reasoning"] * 2
-        scores["Flow Pattern"] = scores["Flow Pattern"] * 1
-        scores["Problem Framing"] = scores["Problem Framing"] * 1
-        scores["Conclusion Framing"] = scores["Conclusion Framing"] * 0
-        total_score = sum(scores.values())
-    except Exception as e:
-        print(f"[_parse_comparison_scores] 파싱 중 에러: {e}")
-        return 0, scores
-    return total_score, scores
 
-def _filter_high_similarity_reports(comparison_results_list):
-    high_similarity_reports = []
-    threshold = 20
-    for result in comparison_results_list:
-        report_text = result.get("llm_comparison_report", "")
-        total_score, scores_dict = _parse_comparison_scores(report_text)
-        if total_score >= threshold:
-            result['plagiarism_score'] = total_score
-            result['scores_detail'] = scores_dict
-            high_similarity_reports.append(result)
-    return high_similarity_reports
-    
-def _distribute_questions(questions_pool, count=3):
-    if not questions_pool: return []
-    critical_q = [q for q in questions_pool if q.get('type') == 'critical']
-    perspective_q = [q for q in questions_pool if q.get('type') == 'perspective']
-    innovative_q = [q for q in questions_pool if q.get('type') == 'innovative']
-    initial_set = []
-    if critical_q: initial_set.append(critical_q.pop(0))
-    if perspective_q: initial_set.append(perspective_q.pop(0))
-    if innovative_q: initial_set.append(innovative_q.pop(0))
-    for q in initial_set: questions_pool.remove(q)
-    return initial_set
 
 def background_analysis_step1(report_id, text, doc_type, original_filename, json_prompt_template, comparison_prompt_template):
     analysis_data = None
@@ -271,7 +213,7 @@ def background_refill(report_id):
             current_pool = json.loads(report.questions_pool) if report.questions_pool else []
             if new_questions:
                 current_pool.extend(new_questions)
-                report.questions_pool = current_pool
+                report.questions_pool = json.dumps(current_pool)
             else:
                 print(f"[{report_id}] Refill FAILED: ...")
         except Exception as e:
