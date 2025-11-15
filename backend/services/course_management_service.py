@@ -1,5 +1,5 @@
 # services/course_management_service.py (신규 생성)
-
+from datetime import datetime, timezone
 import json
 from extensions import db
 from models import User, Course, Assignment, AnalysisReport, course_enrollment, course_assistant
@@ -314,6 +314,35 @@ class CourseManagementService:
             })
             
         return courses_list
+
+    def get_assignments_for_course(self, course_id):
+        """
+        [신규] 특정 과목(course_id)에 속한 모든 과제 목록을 반환합니다.
+        """
+        # 1. 과목(Course) 객체를 찾습니다.
+        course = db.session.get(Course, course_id)
+        if not course:
+            raise ValueError("과목을 찾을 수 없습니다.")
+
+        # 2. 과목에 연결된 과제들을 조회합니다.
+        #    (최신 과제가 위로 오도록 정렬. due_date가 없는 경우(nullslast)를 고려)
+        assignments = db.session.query(Assignment).filter_by(course_id=course_id).order_by(
+            db.func.coalesce(Assignment.due_date, datetime(1900, 1, 1)).desc(), 
+            Assignment.id.desc()
+        ).all()
+
+        # 3. 프론트엔드에 전달할 형태로 데이터를 직렬화(serialize)합니다.
+        assignments_list = []
+        for assign in assignments:
+            assignments_list.append({
+                "id": assign.id,
+                "assignment_name": assign.assignment_name,
+                "description": assign.description,
+                "due_date": assign.due_date.isoformat() if assign.due_date else None,
+                "report_count": len(assign.reports) # (models.py: lazy=True)
+            })
+            
+        return assignments_list
     # --- Helper Functions (오류 처리용) ---
     
     def _get_course(self, course_id):
