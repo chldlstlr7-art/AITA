@@ -21,6 +21,11 @@ import RegisterPage from './pages/RegisterPage.jsx'
 import ReportPage from './pages/ReportPage.jsx';
 // 1. [삭제!] ForgotPasswordPage 임포트 제거
 
+import TADashboard from './pages/ta/TADashboard.jsx';
+import TACourseDetail from './pages/ta/TACourseDetail.jsx';
+import TAAssignmentDetail from './pages/ta/TAAssignmentDetail.jsx';
+
+
 const router = createBrowserRouter([
   {
     path: "/",
@@ -30,6 +35,11 @@ const router = createBrowserRouter([
       { path: "/login", element: <LoginPage /> },
       { path: "/register", element: <RegisterPage /> },
       { path: "/report/:reportId", element: <ReportPage /> },
+
+      // 🆕 TA용 라우트
+      {path: "/ta", element: <TADashboard /> },
+      {path: "/ta/course/:courseId", element: <TACourseDetail />,},
+      {path: "/ta/course/:courseId/assignment/:assignmentId", element: <TAAssignmentDetail />,},
       // 2. [삭제!] /forgot-password 라우트 제거
     ],
   },

@@ -157,3 +157,42 @@ apiClient.interceptors.request.use((config) => {
 }, (error) => {
   return Promise.reject(error);
 });
+
+
+//아래부터 TA용
+export const getTaCourses = async () => {
+  try {
+    // 백엔드에서 TA 본인이 담당하는 과목 목록을 돌려준다고 가정
+    const res = await apiClient.get('/api/ta/my-courses');
+    // 예상 응답: { courses: [ { id, course_code, course_name, student_count, ... }, ... ] }
+    return res.data;
+  } catch (error) {
+    console.error('TA 과목 목록 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '과목 목록을 불러오지 못했습니다.');
+  }
+};
+
+// 과목 상세 정보 조회 (백엔드에 구현되어 있다면 사용, 없으면 에러 → 프론트에서 fallback)
+export const getCourseDetail = async (courseId) => {
+  try {
+    const res = await apiClient.get(`/api/ta/courses/${courseId}`);
+    // 예상: { course: { ... } } 또는 { id, course_code, ... }
+    return res.data;
+  } catch (error) {
+    console.error('TA 과목 상세 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '과목 정보를 불러오지 못했습니다.');
+  }
+};
+
+// 특정 과목의 과제 리스트 조회
+// (백엔드에 /api/ta/courses/<course_id>/assignments 가 있다고 가정, 없으면 DUMMY 사용)
+export const getAssignmentsByCourse = async (courseId) => {
+  try {
+    const res = await apiClient.get(`/api/ta/courses/${courseId}/assignments`);
+    // 예상: { assignments: [ {id, assignment_name, due_date, ...}, ... ] }
+    return res.data;
+  } catch (error) {
+    console.error('과제 목록 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '과제 목록을 불러오지 못했습니다.');
+  }
+};
