@@ -22,6 +22,7 @@ PREDEFINED_TA_LIST = {
     "admin.park@snu.ac.kr",
     "ta-assistant@snu.ac.kr",
     "dev@snu.ac.kr"
+    "dabok2@snu.ac.kr"
 }
 
 # 2. 무제한/개발용 토큰을 발급받을 이메일
@@ -335,7 +336,49 @@ def get_dev_token():
         traceback.print_exc() 
         return jsonify({"error": "개발용 토큰 발급 중 서버 오류가 발생했습니다."}), 500
 
-# --- 5. [v4 삭제] '비밀번호 없는' OTP 로그인 엔드포인트 ---
-# /request-login-code (삭제됨)
+
+@auth_bp.route('/my-reports', methods=['GET']) # 또는 app.route(...)
+@jwt_required()
+def get_my_reports():
+    """
+    [신규 API] 현재 인증된 사용자가 제출한 모든 과제 리포트의 ID 목록을 반환합니다.
+    가장 최근에 제출한 순서대로 정렬됩니다.
+    """
+    try:
+        # 1. JWT 토큰에서 사용자 식별자 (로그인 시 사용한 identity, 보통 이메일)를 가져옵니다.
+        current_user_email = get_jwt_identity()
+        
+        # 2. 이메일을 기준으로 DB에서 사용자를 찾습니다.
+        user = User.query.filter_by(email=current_user_email).first()
+
+        if not user:
+            # 토큰이 유효하지만 해당 유저가 DB에 없는 경우 (예: 회원 탈퇴 직후)
+            return jsonify({"error": "User not found"}), 404
+
+        # 3. 해당 사용자의 ID(user.id)와 일치하는 모든 리포트의 'id' 컬럼만 조회합니다.
+        #    - AnalysisReport 객체 전체를 불러오는 것보다 훨씬 효율적입니다.
+        #    - created_at 기준으로 내림차순 정렬하여 최신순으로 제공합니다.
+        report_tuples = db.session.query(AnalysisReport.id)\
+                                  .filter_by(user_id=user.id)\
+                                  .order_by(AnalysisReport.created_at.desc())\
+                                  .all()
+
+        # 4. 쿼리 결과는 튜플의 리스트 [('id-1',), ('id-2',)] 형태이므로,
+        #    ID 문자열만 추출하여 리스트 ['id-1', 'id-2']로 변환합니다.
+        report_ids = [r[0] for r in report_tuples]
+
+        # 5. 성공 응답을 JSON 형식으로 반환합니다.
+        return jsonify({
+            "message": "Successfully retrieved report list",
+            "user_id": user.id,
+            "report_count": len(report_ids),
+            "report_ids": report_ids
+        }), 200
+
+    except Exception as e:
+        # (선택 사항) 실제 운영 시에는 에러 로깅을 하는 것이 좋습니다.
+        # current_app.logger.error(f"Error fetching reports for {current_user_email}: {e}")
+        return jsonify({"error": "An internal server error occurred"}), 500
+        
 # /verify-login-code (삭제됨)
 # eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc2MzEwODUyNCwianRpIjoiOGZmMDBkYWEtOTBhNS00MjA1LWJkOTUtMzUxYTllMjBkZTZkIiwidHlwZSI6ImFjY2VzcyIsInN1YiI6IjMiLCJuYmYiOjE3NjMxMDg1MjQsImNzcmYiOiI5NmQ1M2I3NC1kYWI4LTRjNDUtYjczMy1iNjdkOGIzMTg1NDgiLCJyb2xlIjoidGEiLCJlbWFpbCI6ImRldkBzbnUuYWMua3IifQ.OZX6_ESx6-QCaYuZWBKxjwEa9KPrpaPdf3tYGCAY4A4
