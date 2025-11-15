@@ -1,3 +1,29 @@
-# backend/requirements.txt (임시 내용)
-Flask
+# Flask 서버용
+flask
+flask-cors
 gunicorn
+
+
+# AI/데이터 처리용 (Colab)
+pandas
+numpy
+google-generativeai
+sentence-transformers
+scikit-learn
+
+# 텍스트 파싱용 (app.py의 임시 parse_file 함수에 필요)
+python-docx
+pypdf
+
+# API 키 저장
+python-dotenv
+
+#메일용
+Flask-Migrate
+flask-sqlalchemy
+flask-jwt-extended
+flask-mail
+werkzeug
+tqdm
+
+plotly
