@@ -49,12 +49,47 @@ def is_valid_snu_email(email):
     return re.match(r"^[a-zA-Z0-9._%+-]+@snu\.ac\.kr$", email) is not None
 
 def _send_otp_email(email, otp, subject_prefix="[AITA]"):
-    """ (테스트용) 실제 메일 발송 대신 터미널에 OTP 출력 """
-    print("\n--- ⚠️  [TESTING] OTP ---")
-    print(f"--- ⚠️  {subject_prefix} OTP for {email} is: {otp}  ⚠️ ---")
-    print(f"[Auth] Sending OTP to {email}...")
-    # 실제 mail.send(msg) 로직은 주석 처리
-    print("[Auth] OTP sent successfully (Mock).\n")
+    """
+    실제 메일 발송과 터미널 로깅을 동시에 수행합니다.
+    """
+    
+    # ----------------------------------------------------
+    # --- 1. 터미널에 OTP 출력 (테스트 및 로깅용) ---
+    # ----------------------------------------------------
+    print("\n--- 📧 [Email Send & Log] ---")
+    print(f"--- 📧  {subject_prefix} OTP for {email} is: {otp} ---")
+    print(f"[Auth] Preparing to send OTP to {email}...")
+
+    # ----------------------------------------------------
+    # --- 2. 실제 메일 발송 로직 (Flask-Mail) ---
+    # ----------------------------------------------------
+    try:
+        # 메시지 객체 생성
+        subject = f"{subject_prefix} 이메일 인증 코드입니다."
+        msg = Message(subject,
+                      sender=os.environ.get('MAIL_USERNAME'), # 발신자 주소 (환경변수)
+                      recipients=[email]) # 수신자 주소
+        
+        # 메일 본문 (HTML 또는 텍스트)
+        msg.body = f"인증 코드는 [{otp}] 입니다."
+        # 예시: msg.html = f"<h1>인증 코드: {otp}</h1>"
+
+        # 실제 메일 발송
+        # current_app.app_context() 내에서 실행되도록 보장 (만약 앱 컨텍스트 밖이라면)
+        # with current_app.app_context():
+        mail.send(msg)
+        
+        print(f"[Auth] Successfully sent email to {email}.")
+        print("------------------------------------------\n")
+
+    except Exception as e:
+        # 메일 발송 실패 시 로깅
+        print(f"\n--- ❌ [Email Error] ---")
+        print(f"[Auth] Failed to send email to {email}. Error: {e}")
+        print("--------------------------\n")
+        # 실패 시에도 OTP는 터미널에 이미 출력되었음
+        # 필요시 여기서 에러를 다시 발생시킬 수 있음
+        # raise e
 
 def ta_required():
     """JWT 토큰의 'role' 클레임이 'ta'인지 확인하는 데코레이터."""
