@@ -22,6 +22,7 @@ PREDEFINED_TA_LIST = {
     "admin.park@snu.ac.kr",
     "ta-assistant@snu.ac.kr",
     "dev@snu.ac.kr"
+    "dabok2@snu.ac.kr"
 }
 
 # 2. 무제한/개발용 토큰을 발급받을 이메일
@@ -49,12 +50,47 @@ def is_valid_snu_email(email):
     return re.match(r"^[a-zA-Z0-9._%+-]+@snu\.ac\.kr$", email) is not None
 
 def _send_otp_email(email, otp, subject_prefix="[AITA]"):
-    """ (테스트용) 실제 메일 발송 대신 터미널에 OTP 출력 """
-    print("\n--- ⚠️  [TESTING] OTP ---")
-    print(f"--- ⚠️  {subject_prefix} OTP for {email} is: {otp}  ⚠️ ---")
-    print(f"[Auth] Sending OTP to {email}...")
-    # 실제 mail.send(msg) 로직은 주석 처리
-    print("[Auth] OTP sent successfully (Mock).\n")
+    """
+    실제 메일 발송과 터미널 로깅을 동시에 수행합니다.
+    """
+    
+    # ----------------------------------------------------
+    # --- 1. 터미널에 OTP 출력 (테스트 및 로깅용) ---
+    # ----------------------------------------------------
+    print("\n--- 📧 [Email Send & Log] ---")
+    print(f"--- 📧  {subject_prefix} OTP for {email} is: {otp} ---")
+    print(f"[Auth] Preparing to send OTP to {email}...")
+
+    # ----------------------------------------------------
+    # --- 2. 실제 메일 발송 로직 (Flask-Mail) ---
+    # ----------------------------------------------------
+    try:
+        # 메시지 객체 생성
+        subject = f"{subject_prefix} 이메일 인증 코드입니다."
+        msg = Message(subject,
+                      sender=os.environ.get('MAIL_USERNAME'), # 발신자 주소 (환경변수)
+                      recipients=[email]) # 수신자 주소
+        
+        # 메일 본문 (HTML 또는 텍스트)
+        msg.body = f"인증 코드는 [{otp}] 입니다."
+        # 예시: msg.html = f"<h1>인증 코드: {otp}</h1>"
+
+        # 실제 메일 발송
+        # current_app.app_context() 내에서 실행되도록 보장 (만약 앱 컨텍스트 밖이라면)
+        # with current_app.app_context():
+        mail.send(msg)
+        
+        print(f"[Auth] Successfully sent email to {email}.")
+        print("------------------------------------------\n")
+
+    except Exception as e:
+        # 메일 발송 실패 시 로깅
+        print(f"\n--- ❌ [Email Error] ---")
+        print(f"[Auth] Failed to send email to {email}. Error: {e}")
+        print("--------------------------\n")
+        # 실패 시에도 OTP는 터미널에 이미 출력되었음
+        # 필요시 여기서 에러를 다시 발생시킬 수 있음
+        # raise e
 
 def ta_required():
     """JWT 토큰의 'role' 클레임이 'ta'인지 확인하는 데코레이터."""
@@ -300,7 +336,49 @@ def get_dev_token():
         traceback.print_exc() 
         return jsonify({"error": "개발용 토큰 발급 중 서버 오류가 발생했습니다."}), 500
 
-# --- 5. [v4 삭제] '비밀번호 없는' OTP 로그인 엔드포인트 ---
-# /request-login-code (삭제됨)
+
+@auth_bp.route('/my-reports', methods=['GET']) # 또는 app.route(...)
+@jwt_required()
+def get_my_reports():
+    """
+    [신규 API] 현재 인증된 사용자가 제출한 모든 과제 리포트의 ID 목록을 반환합니다.
+    가장 최근에 제출한 순서대로 정렬됩니다.
+    """
+    try:
+        # 1. JWT 토큰에서 사용자 식별자 (로그인 시 사용한 identity, 보통 이메일)를 가져옵니다.
+        current_user_email = get_jwt_identity()
+        
+        # 2. 이메일을 기준으로 DB에서 사용자를 찾습니다.
+        user = User.query.filter_by(email=current_user_email).first()
+
+        if not user:
+            # 토큰이 유효하지만 해당 유저가 DB에 없는 경우 (예: 회원 탈퇴 직후)
+            return jsonify({"error": "User not found"}), 404
+
+        # 3. 해당 사용자의 ID(user.id)와 일치하는 모든 리포트의 'id' 컬럼만 조회합니다.
+        #    - AnalysisReport 객체 전체를 불러오는 것보다 훨씬 효율적입니다.
+        #    - created_at 기준으로 내림차순 정렬하여 최신순으로 제공합니다.
+        report_tuples = db.session.query(AnalysisReport.id)\
+                                  .filter_by(user_id=user.id)\
+                                  .order_by(AnalysisReport.created_at.desc())\
+                                  .all()
+
+        # 4. 쿼리 결과는 튜플의 리스트 [('id-1',), ('id-2',)] 형태이므로,
+        #    ID 문자열만 추출하여 리스트 ['id-1', 'id-2']로 변환합니다.
+        report_ids = [r[0] for r in report_tuples]
+
+        # 5. 성공 응답을 JSON 형식으로 반환합니다.
+        return jsonify({
+            "message": "Successfully retrieved report list",
+            "user_id": user.id,
+            "report_count": len(report_ids),
+            "report_ids": report_ids
+        }), 200
+
+    except Exception as e:
+        # (선택 사항) 실제 운영 시에는 에러 로깅을 하는 것이 좋습니다.
+        # current_app.logger.error(f"Error fetching reports for {current_user_email}: {e}")
+        return jsonify({"error": "An internal server error occurred"}), 500
+        
 # /verify-login-code (삭제됨)
 # eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6ZmFsc2UsImlhdCI6MTc2MzEwODUyNCwianRpIjoiOGZmMDBkYWEtOTBhNS00MjA1LWJkOTUtMzUxYTllMjBkZTZkIiwidHlwZSI6ImFjY2VzcyIsInN1YiI6IjMiLCJuYmYiOjE3NjMxMDg1MjQsImNzcmYiOiI5NmQ1M2I3NC1kYWI4LTRjNDUtYjczMy1iNjdkOGIzMTg1NDgiLCJyb2xlIjoidGEiLCJlbWFpbCI6ImRldkBzbnUuYWMua3IifQ.OZX6_ESx6-QCaYuZWBKxjwEa9KPrpaPdf3tYGCAY4A4

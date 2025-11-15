@@ -256,13 +256,6 @@ def perform_full_analysis_and_comparison(report_id, text, original_filename, jso
     try:
         print(f"[{report_id}] Starting full analysis and comparison...")
         
-        # --- 1단계: LLM 분석 및 요약 ---
-        print(f"[{report_id}] 1. LLM 분석 시작...")
-        print("--- [디버깅 정보 출력] ---")
-        print(f"1. report_id: {report_id}")
-        print(f"2. raw_text (Text 내용 시작): {text}...") # 텍스트의 앞 50자만 출력하여 너무 길어지는 것을 방지
-        print(f"3. system_prompt (프롬프트 내용 시작): {json_prompt_template}...") # 프롬프트의 앞 50자만 출력
-        print("--------------------------")
         submission_analysis_json = _llm_call_analysis(
             raw_text=text,
             system_prompt=json_prompt_template

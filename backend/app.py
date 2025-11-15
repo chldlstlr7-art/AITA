@@ -28,7 +28,7 @@ from extensions import db, mail, jwt
 # --- 3. [핵심 수정!] CORS를 *먼저* 초기화합니다 ---
 CORS(app, 
      origins=[
-         "*.vercel.app", 
+         "https://aita-kappa.vercel.app", 
          "http://localhost:3000", 
          "http://localhost:5173",
          "https://cautious-doodle-q75wx75gv596hx57r-5173.app.github.dev",
