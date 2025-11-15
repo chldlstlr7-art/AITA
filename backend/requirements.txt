@@ -41,3 +41,5 @@ python-docx
 pypdf
 tqdm
 plotly
+
+psycopg2-binary
