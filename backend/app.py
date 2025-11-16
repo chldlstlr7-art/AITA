@@ -65,15 +65,19 @@ except Exception as e:
     app.grading_service = None
 
 # --- 5. 백그라운드 함수 정의 (순서 중요) ---
-
-
-def background_analysis_step1(report_id, text, doc_type, original_filename, json_prompt_template, comparison_prompt_template):
+def background_analysis_step1_analysis(report_id, text, doc_type, original_filename, json_prompt_template, comparison_prompt_template):
+    """
+    [1단계] 분석 및 임베딩 생성 (빠른 완료)
+    - analysis_service.perform_step1_analysis_and_embedding 호출
+    - 'summary'와 'embedding' 필드를 DB에 저장
+    - 상태를 'processing_comparison'으로 변경
+    - 2단계(비교) 스레드 시작
+    """
     analysis_data = None
     summary_dict = {}
-    similarity_details_list = []
-    snippet = text[:4000]
     
     with app.app_context():
+        report = None
         try:
             report = db.session.get(AnalysisReport, report_id)
             if not report: 
@@ -83,122 +87,200 @@ def background_analysis_step1(report_id, text, doc_type, original_filename, json
             report.status = "processing_analysis"
             db.session.commit()
             
-            # 1. 분석 서비스 호출 (기존과 동일)
-            analysis_data = perform_full_analysis_and_comparison(
-                report_id, text, original_filename, 
-                json_prompt_template, comparison_prompt_template
+            # 1. [신규] 1단계 서비스 호출 (분석 + 임베딩)
+            analysis_data = perform_step1_analysis_and_embedding(
+                report_id, text, json_prompt_template
             )
             
             if not analysis_data: 
-                raise Exception("perform_full_analysis_and_comparison returned None")
+                raise Exception("perform_step1_analysis_and_embedding returned None")
 
             summary_dict = analysis_data.get('summary_json', {})
             embedding_thesis_list = analysis_data.get('embedding_thesis', [])
             embedding_claim_list = analysis_data.get('embedding_claim', [])
-            
-            # 2. 모든 비교 결과 리스트 (상세보기용)
-            similarity_details_list = analysis_data.get('comparison_results_list', [])
 
-            # --- [핵심 수정] 20점 이상 후보군 필터링 및 요약 ---
-            
-            # 3. 20점 이상인 결과만 필터링 (필터 함수가 점수 계산 및 추가)
-            high_similarity_list = _filter_high_similarity_reports(similarity_details_list)
-            
-            # 4. TA 대시보드 저장을 위한 경량화된 요약 리스트 생성
-            candidates_for_storage = []
-            for item in high_similarity_list:
-                # services/analysis_service가 반환하는 키가 'report_id'와 'original_filename'이라고 가정
-                candidate = {
-                    "candidate_id": item.get("candidate_id"), 
-                    "filename": item.get("candidate_filename"),
-                    "total_score": item.get("plagiarism_score"), # _filter_... 함수에서 추가된 값
-                    "itemized_scores": item.get("scores_detail") # _filter_... 함수에서 추가된 값
-                }
-                candidates_for_storage.append(candidate)
-            
-            # 5. DB에 저장
+            # 2. [신규] 1단계 결과(요약, 임베딩)를 DB에 즉시 저장
             report.summary = json.dumps(summary_dict)
             report.embedding_keyconcepts_corethesis = json.dumps(embedding_thesis_list)
             report.embedding_keyconcepts_claim = json.dumps(embedding_claim_list)
             
-            # [수정] 'similarity_details'는 모든 비교 결과를 저장 (상세보기용)
-            report.similarity_details = json.dumps(similarity_details_list)
+            # 3. [신규] 2단계(비교)를 위한 상태 업데이트
+            report.status = "processing_comparison" 
             
-            # [신규] 'high_similarity_candidates'에 20점 이상 요약본 저장 (TA 대시보드용)
-            report.high_similarity_candidates = json.dumps(candidates_for_storage)
-
+            # (QA 필드는 3단계(QA) 스레드에서 채워지므로 여기서 초기화)
             report.qa_history = json.dumps([])
             report.questions_pool = json.dumps([])
             report.is_refilling = False
-            report.status = "processing_questions"
-            
+
             db.session.commit()
             
-            print(f"[{report_id}] Step 1 (Analysis) SUCCESS. Found {len(candidates_for_storage)} high-similarity candidates.")
+            print(f"[{report_id}] Step 1 (Analysis & Embedding) SUCCESS. DB saved.")
 
         except Exception as e:
             print(f"[{report_id}] Step 1 (Analysis) FAILED: {e}")
             traceback.print_exc()
             db.session.rollback()
             try:
-                report = db.session.get(AnalysisReport, report_id)
-                if report:
+                if report: # report 객체가 유효할 때만
                     report.status = "error"
                     report.error_message = f"Step 1 FAILED: {str(e)}"
                     db.session.commit()
             except Exception as e_inner:
                 print(f"[{report_id}] CRITICAL: Failed to write error state to DB: {e_inner}")
-            return # 실패 시 2단계(QA) 스레드를 시작하지 않음
+            return # 실패 시 2단계 스레드를 시작하지 않음
 
-    # 6. 2단계(QA) 스레드 시작 (기존과 동일)
+    # 4. [신규] 2단계(비교) 스레드 시작
+    # (analysis_data에는 1단계 결과가, comparison_prompt_template는 2단계에 필요)
+    comparison_thread = threading.Thread(
+        target=background_analysis_step2_comparison, 
+        args=(report_id, analysis_data, comparison_prompt_template)
+    )
+    comparison_thread.start()
+
+
+# [핵심 수정 2/3]
+# 2단계(비교)를 수행하는 새로운 백그라운드 함수
+def background_analysis_step2_comparison(report_id, analysis_data, comparison_prompt_template):
+    """
+    [2단계] 유사도 비교 (중간 시간 소요)
+    - 1단계에서 받은 임베딩으로 analysis_service.perform_step2_comparison 호출
+    - 'similarity_details', 'high_similarity_candidates' 필드를 DB에 저장
+    - 상태를 'processing_questions'로 변경
+    - 3단계(QA) 스레드 시작
+    """
+    summary_dict = {}
+    similarity_details_list = []
+    snippet = "" # 3단계(QA)에 전달하기 위해 DB에서 로드
+
+    with app.app_context():
+        report = None
+        try:
+            report = db.session.get(AnalysisReport, report_id)
+            if not report: 
+                print(f"[{report_id}] Step 2 ABORT: Report not found.")
+                return
+
+            # 1. 1단계 결과물 추출
+            summary_dict = analysis_data.get('summary_json', {})
+            embedding_thesis_list = analysis_data.get('embedding_thesis', [])
+            embedding_claim_list = analysis_data.get('embedding_claim', [])
+            submission_json_str = json.dumps(summary_dict) # 비교를 위해 JSON 문자열로
+            snippet = report.text_snippet # 3단계(QA)에 전달할 스니펫 로드
+
+            # 2. [신규] 2단계 서비스 호출 (비교)
+            similarity_details_list = perform_step2_comparison(
+                report_id,
+                embedding_thesis_list,
+                embedding_claim_list,
+                submission_json_str,
+                comparison_prompt_template
+            )
+
+            # 3. 20점 이상 후보군 필터링 (기존 로직)
+            high_similarity_list = _filter_high_similarity_reports(similarity_details_list)
+            
+            candidates_for_storage = []
+            for item in high_similarity_list:
+                candidate = {
+                    "candidate_id": item.get("candidate_id"), 
+                    "filename": item.get("candidate_filename"),
+                    "total_score": item.get("plagiarism_score"), 
+                    "itemized_scores": item.get("scores_detail") 
+                }
+                candidates_for_storage.append(candidate)
+            
+            # 4. [신규] 2단계 결과(비교 결과)를 DB에 저장
+            report.similarity_details = json.dumps(similarity_details_list)
+            report.high_similarity_candidates = json.dumps(candidates_for_storage)
+            
+            # 5. [신규] 3단계(QA)를 위한 상태 업데이트
+            report.status = "processing_questions"
+            db.session.commit()
+
+            print(f"[{report_id}] Step 2 (Comparison) SUCCESS. Found {len(candidates_for_storage)} high-similarity candidates.")
+
+        except Exception as e:
+            print(f"[{report_id}] Step 2 (Comparison) FAILED: {e}")
+            traceback.print_exc()
+            db.session.rollback()
+            try:
+                if report:
+                    report.status = "error"
+                    report.error_message = f"Step 2 FAILED: {str(e)}"
+                    db.session.commit()
+            except Exception as e_inner:
+                print(f"[{report_id}] CRITICAL: Failed to write error state (Step 2) to DB: {e_inner}")
+            return # 실패 시 3단계(QA) 스레드를 시작하지 않음
+
+    # 6. [신규] 3단계(QA) 스레드 시작 (기존 로직과 동일한 인자 전달)
     qa_thread = threading.Thread(
-        target=background_analysis_step2_qa, 
+        target=background_analysis_step3_qa, 
         args=(report_id, summary_dict, similarity_details_list, snippet)
     )
     qa_thread.start()
 
-def background_analysis_step2_qa(report_id, summary_dict, similarity_details_list, snippet):
-    # ... (이하 모든 background_... 함수 내용은 제공해주신 원본과 동일) ...
-    try:
-        if not summary_dict: raise Exception("Step 2 received empty summary_dict")
-        current_qa_history = []
-        high_similarity_reports = _filter_high_similarity_reports(similarity_details_list)
-        questions_pool = generate_initial_questions(
-            summary_dict, high_similarity_reports, snippet
-        )
-        if not questions_pool:
-            print(f"[{report_id}] WARNING: QA service failed. Using dummy questions.")
-            questions_pool = [
-                {"type": "critical", "question": "[Dummy] ..."},
-            ]
-        initial_questions = _distribute_questions(questions_pool, 3)
-        for q_data in initial_questions:
-            q_id = str(uuid.uuid4())
-            history_entry = {
-                "question_id": q_id, "question": q_data.get("question", "Failed to parse"),
-                "type": q_data.get("type", "unknown"), "answer": None,
-                "parent_question_id": None
-            }
-            current_qa_history.append(history_entry)
-        with app.app_context():
+
+# [핵심 수정 3/3]
+# 'background_analysis_step2_qa' -> 'background_analysis_step3_qa'로 이름 변경
+def background_analysis_step3_qa(report_id, summary_dict, similarity_details_list, snippet):
+    """
+    [3단계] QA 생성 (중간 시간 소요)
+    - 2단계에서 받은 요약/비교 결과로 generate_initial_questions 호출
+    - 'qa_history', 'questions_pool' 필드를 DB에 저장
+    - 상태를 'completed'로 변경 (최종 완료)
+    """
+    with app.app_context():
+        report = None
+        try:
             report = db.session.get(AnalysisReport, report_id)
-            if not report: return
+            if not report: 
+                print(f"[{report_id}] Step 3 ABORT: Report not found.")
+                return
+            
+            if not summary_dict: raise Exception("Step 3 received empty summary_dict")
+            
+            current_qa_history = []
+            high_similarity_reports = _filter_high_similarity_reports(similarity_details_list)
+            
+            questions_pool = generate_initial_questions(
+                summary_dict, high_similarity_reports, snippet
+            )
+            
+            if not questions_pool:
+                print(f"[{report_id}] WARNING: QA service failed. Using dummy questions.")
+                questions_pool = [
+                    {"type": "critical", "question": "[Dummy] ..."},
+                ]
+                
+            initial_questions = _distribute_questions(questions_pool, 3)
+            
+            for q_data in initial_questions:
+                q_id = str(uuid.uuid4())
+                history_entry = {
+                    "question_id": q_id, "question": q_data.get("question", "Failed to parse"),
+                    "type": q_data.get("type", "unknown"), "answer": None,
+                    "parent_question_id": None
+                }
+                current_qa_history.append(history_entry)
+
+            # 3단계(QA) 결과 저장 및 최종 'completed' 상태 업데이트
             report.questions_pool = json.dumps(questions_pool)
             report.qa_history = json.dumps(current_qa_history)
             report.status = "completed"
             db.session.commit()
-    except Exception as e:
-        print(f"[{report_id}] Step 2 (QA) FAILED: {e}")
-        traceback.print_exc()
-        try:
-            with app.app_context():
-                report = db.session.get(AnalysisReport, report_id)
+            print(f"[{report_id}] Step 3 (QA) SUCCESS. Process complete.")
+
+        except Exception as e:
+            print(f"[{report_id}] Step 3 (QA) FAILED: {e}")
+            traceback.print_exc()
+            db.session.rollback()
+            try:
                 if report:
-                    report.status = "completed"
-                    report.error_message = f"Step 2 QA FAILED: {e}"
+                    report.status = "completed" # QA가 실패해도 일단 '완료' 처리 (분석/비교는 성공)
+                    report.error_message = f"Step 3 QA FAILED: {e}"
                     db.session.commit()
-        except Exception as e_inner:
-            print(f"[{report_id}] CRITICAL: Failed to write error state (Step 2) to DB: {e_inner}")
+            except Exception as e_inner:
+                print(f"[{report_id}] CRITICAL: Failed to write error state (Step 3) to DB: {e_inner}")
 
 def background_refill(report_id):
     # ... (이하 모든 background_... 함수 내용은 제공해주신 원본과 동일) ...
