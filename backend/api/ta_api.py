@@ -430,3 +430,49 @@ def get_assignments_for_course(course_id):
         print(f"[TA API /courses/{course_id}/assignments GET] Error: {e}")
         traceback.print_exc()
         return jsonify({"error": "과제 목록 조회 중 서버 오류 발생"}), 500
+
+
+
+# --- [신규] 일괄 자동 채점 API ---
+@ta_bp.route('/assignments/<int:assignment_id>/bulk-auto-grade', methods=['POST'])
+@ta_required()
+def trigger_bulk_auto_grading(assignment_id):
+    """
+    [신규] 특정 과제에 제출된 모든 (채점 안 된) 리포트에 대해 일괄 자동 채점을 실행합니다.
+    """
+    grading_service = current_app.grading_service
+    if not grading_service:
+        return jsonify({"error": "자동 채점 서비스가 초기화되지 않았습니다."}), 503
+
+    app = current_app._get_current_object()
+
+    def background_bulk_grading_task(app_context, assign_id):
+        """백그라운드 스레드에서 일괄 자동 채점 실행"""
+        with app_context.app_context():
+            try:
+                print(f"[BulkAutoGrade Task] Assignment {assign_id} 일괄 채점 시작...")
+                service = current_app.grading_service 
+                if not service:
+                    print(f"[BulkAutoGrade Task] FAILED: 스레드 내에서 서비스를 찾을 수 없습니다.")
+                    return
+
+                # (가정) grading_service에 이 로직이 구현되어 있어야 함
+                # (예: assignment_id로 리포트 조회 -> auto_score_details가 없는 것들만 run_auto_grading 실행)
+                service.run_bulk_auto_grading(assign_id)
+                
+                print(f"[BulkAutoGrade Task] Assignment {assign_id} 일괄 채점 완료.")
+            
+            except Exception as e:
+                print(f"[BulkAutoGrade Task] CRITICAL ERROR: 백그라운드 작업 실패: {e}")
+                traceback.print_exc() 
+
+    thread = threading.Thread(
+        target=background_bulk_grading_task,
+        args=(app, assignment_id)
+    )
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({
+        "message": f"Assignment {assignment_id}에 대한 일괄 자동 채점 작업을 백그라운드에서 시작했습니다."
+    }), 202

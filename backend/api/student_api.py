@@ -4,7 +4,7 @@ import json
 from flask import Blueprint, request, jsonify, Response
 from werkzeug.utils import secure_filename
 from flask import current_app
-
+import traceback
 # --- [유지] services 폴더의 로직 임포트 ---
 from services.parsing_service import extract_text
 from services.qa_service import generate_deep_dive_question
@@ -584,3 +584,83 @@ def get_student_dashboard_by_id(target_student_id):
     except Exception as e:
         print(f"[Student API /dashboard/{target_student_id} GET] Error: {e}")
         return jsonify({"error": "대시보드 조회 중 서버 오류 발생"}), 500
+# --- [신규] 학생 리포트 과제 제출 API ---
+@student_bp.route("/report/<report_id>/submit", methods=["POST"])
+@jwt_required()
+def submit_report_to_assignment(report_id):
+    """
+    POST /api/student/report/<report_id>/submit
+    이미 분석이 완료된 리포트를 특정 과제에 '제출'합니다.
+    Request Body: {"assignment_id": <int>}
+    """
+    if not current_app.course_service:
+        return jsonify({"error": "서비스가 초기화되지 않았습니다."}), 503
+
+    try:
+        # 1. 토큰에서 학생 ID 가져오기
+        user_id_str = get_jwt_identity()
+        student_id = int(user_id_str)
+        
+        # 2. Request Body에서 과제 ID 가져오기
+        data = request.json
+        assignment_id = data.get("assignment_id")
+        
+        if not assignment_id:
+            return jsonify({"error": "Missing 'assignment_id' in request body"}), 400
+            
+        # 3. 서비스 로직 호출
+        report = current_app.course_service.submit_report_to_assignment(
+            report_id, 
+            assignment_id, 
+            student_id
+        )
+        
+        return jsonify({
+            "status": "success",
+            "message": "Report submitted successfully.",
+            "report_id": report.id,
+            "assignment_id": report.assignment_id
+        }), 200
+
+    except ValueError as e:
+        error_message = str(e)
+        if "Access denied" in error_message:
+            return jsonify({"error": error_message}), 403 # 금지됨
+        if "not found" in error_message:
+            return jsonify({"error": error_message}), 404 # 찾을 수 없음
+        if "not yet complete" in error_message or "already been submitted" in error_message:
+            return jsonify({"error": error_message}), 409 # 충돌 (Conflict)
+        if "not enrolled" in error_message:
+             return jsonify({"error": error_message}), 403 # 금지됨 (등록되지 않음)
+        
+        return jsonify({"error": error_message}), 400 # 기타 잘못된 요청
+    
+    except Exception as e:
+        print(f"[Student API /report/{report_id}/submit POST] Error: {e}")
+        return jsonify({"error": "An unexpected server error occurred."}), 500
+
+# --- [신규] 학생용 과제 목록 조회 API ---
+@student_bp.route('/courses/<int:course_id>/assignments', methods=['GET'])
+@jwt_required()
+def get_student_assignments_for_course(course_id):
+    """
+    [신규] 학생이 수강 중인 과목의 과제 목록을 조회합니다.
+    """
+    if not current_app.course_service:
+        return jsonify({"error": "서비스가 초기화되지 않았습니다."}), 503
+    
+    try:
+        user_id_str = get_jwt_identity()
+        user_id = int(user_id_str)
+        
+        # [신규] 학생이 수강 중인지 확인하는 서비스 로직 호출
+        assignments_list = current_app.course_service.get_assignments_for_student(course_id, user_id)
+        
+        return jsonify({"assignments": assignments_list}), 200
+    except ValueError as e:
+        # (예: "과목을 찾을 수 없습니다." 또는 "수강 중이 아닙니다.")
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        print(f"[Student API /courses/{course_id}/assignments GET] Error: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "과제 목록 조회 중 서버 오류 발생"}), 500

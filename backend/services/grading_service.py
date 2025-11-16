@@ -1,5 +1,3 @@
-# services/grading_service.py
-
 import os
 import json
 import google.generativeai as genai
@@ -21,17 +19,21 @@ except Exception as e:
 
 class GradingService:
     
-    def __init__(self, model_name='gemini-2.5-pro'):
+    def __init__(self, model_name='gemini-1.5-pro'): # [예시] 모델명은 최신 버전을 권장합니다.
         """
         Gemini 모델을 초기화합니다.
         JSON 출력을 위해 'response_mime_type'을 설정합니다.
         """
-        self.model = genai.GenerativeModel(
-            model_name,
-            # JSON 모드 활성화: 프롬프트 지침에 따라 JSON만 생성하도록 강제
-            generation_config={"response_mime_type": "application/json"}
-        )
-        print(f"[GradingService] {model_name} 모델이 초기화되었습니다 (JSON 모드).")
+        try:
+            self.model = genai.GenerativeModel(
+                model_name,
+                # JSON 모드 활성화: 프롬프트 지침에 따라 JSON만 생성하도록 강제
+                generation_config={"response_mime_type": "application/json"}
+            )
+            print(f"[GradingService] {model_name} 모델이 초기화되었습니다 (JSON 모드).")
+        except Exception as e:
+            print(f"[GradingService] CRITICAL: 모델 초기화 실패. API 키 또는 모델 이름을 확인하세요: {e}")
+            self.model = None # 모델 초기화 실패 시 self.model을 None으로 설정
 
     def _get_report_and_criteria(self, report_id):
         """ 헬퍼: 리포트 ID로 리포트 본문과 평가 기준을 가져옵니다. """
@@ -51,7 +53,7 @@ class GradingService:
         # 만약 S3 등 다른 곳에 있다면, 여기서 해당 텍스트를 불러와야 합니다.
         document_text = report.text_snippet 
         if not document_text:
-             raise ValueError(f"Report {report_id}에 채점할 본문(text_snippet)이 없습니다.")
+            raise ValueError(f"Report {report_id}에 채점할 본문(text_snippet)이 없습니다.")
 
         return report, assignment, document_text, criteria_dict
 
@@ -105,6 +107,11 @@ class GradingService:
         """
         특정 리포트에 대해 자동 채점을 실행하고 결과를 DB에 저장합니다.
         """
+        if not self.model:
+            print(f"[GradingService] ERROR: 모델이 초기화되지 않아 Report {report_id} 채점을 건너뜁니다.")
+            return None
+            
+        report = None # finally에서 사용하기 위해 try 밖에 선언
         try:
             # 1. 데이터 로드
             report, assignment, doc_text, criteria_dict = self._get_report_and_criteria(report_id)
@@ -147,11 +154,88 @@ class GradingService:
             print(f"[GradingService] CRITICAL: Report {report_id} 채점 중 오류 발생: {e}")
             # 오류 발생 시 auto_score_details에 에러 메시지 저장 (선택적)
             try:
-                report = AnalysisReport.query.get(report_id)
+                # report 변수가 위 try 블록에서 할당되었는지 확인
+                if report is None:
+                    report = AnalysisReport.query.get(report_id)
+                
                 if report:
                     report.auto_score_details = json.dumps({"error": str(e)})
                     db.session.commit()
             except Exception as db_e:
                 print(f"[GradingService] 에러 메시지 저장 실패: {db_e}")
+                db.session.rollback() # 에러 저장 실패 시 롤백
             
-            return None
+            return None # 실패 시 None 반환
+
+    # --- [신규] 일괄 자동 채점 메서드 ---
+    
+    def run_bulk_auto_grading(self, assignment_id):
+        """
+        [신규] 특정 과제에 속한, 아직 자동 채점이 안 된 모든 리포트를 찾아
+        순차적으로 자동 채점을 실행합니다.
+        (백그라운드 스레드에서 호출됨)
+        """
+        if not self.model:
+            print("[BulkAutoGrade] FAILED: 모델이 초기화되지 않아 일괄 채점 작업을 시작할 수 없습니다.")
+            return
+            
+        print(f"[BulkAutoGrade] Task started for Assignment {assignment_id}.")
+
+        # 1. 자동 채점이 필요한 리포트 목록 조회
+        # (제출되었고, auto_score_details가 비어있는 리포트)
+        try:
+            target_reports = AnalysisReport.query.filter(
+                AnalysisReport.assignment_id == assignment_id,
+                AnalysisReport.auto_score_details == None
+            ).all()
+        except Exception as e:
+            print(f"[BulkAutoGrade] FAILED: DB에서 리포트 목록 조회 중 오류: {e}")
+            return
+
+        if not target_reports:
+            print(f"[BulkAutoGrade] No reports found needing auto-grading for Assignment {assignment_id}.")
+            return
+
+        print(f"[BulkAutoGrade] Found {len(target_reports)} reports to grade for Assignment {assignment_id}.")
+
+        success_count = 0
+        fail_count = 0
+
+        # 2. 각 리포트에 대해 run_auto_grading() 개별 호출
+        for report in target_reports:
+            try:
+                print(f"[BulkAutoGrade] Processing Report {report.id}...")
+                
+                # 기존의 단일 채점 함수를 재사용합니다.
+                # 이 함수는 API 호출, JSON 파싱, DB 저장을 모두 처리하며,
+                # 자체 예외 처리가 있어, 실패 시 '{"error":...}'를 DB에 저장합니다.
+                result_json = self.run_auto_grading(report.id)
+
+                if result_json is None:
+                    # run_auto_grading이 None을 반환한 경우 (예외 발생)
+                    fail_count += 1
+                    print(f"[BulkAutoGrade] Report {report.id} failed (see service log for critical error).")
+                elif result_json.get("error"):
+                    # run_auto_grading이 오류 JSON을 반환한 경우 (거의 없음, 보통 None 반환)
+                    fail_count += 1
+                    print(f"[BulkAutoGrade] Report {report.id} failed (error saved to report).")
+                else:
+                    success_count += 1
+                    print(f"[BulkAutoGrade] Report {report.id} graded successfully.")
+            
+            except Exception as e:
+                # run_auto_grading에서 잡히지 않은 최상위 예외 (드문 경우)
+                fail_count += 1
+                print(f"[BulkAutoGrade] CRITICAL: Unhandled exception for Report {report.id}: {e}")
+                # 이 경우 DB에 에러가 저장되지 않았을 수 있으므로 수동으로 저장 시도
+                try:
+                    db.session.rollback() # 이전 세션 정리
+                    error_report = AnalysisReport.query.get(report.id)
+                    if error_report:
+                        error_report.auto_score_details = json.dumps({"error": f"Critical bulk grading error: {str(e)}"})
+                        db.session.commit()
+                except Exception as db_e:
+                    print(f"[BulkAutoGrade] CRITICAL: Failed to save unhandled exception to DB: {db_e}")
+                    db.session.rollback()
+
+        print(f"[BulkAutoGrade] Task finished for Assignment {assignment_id}. Total: {len(target_reports)}, Success: {success_count}, Failed: {fail_count}.")
