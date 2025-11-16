@@ -1,7 +1,8 @@
 import axios from 'axios';
 
-// 뭔지 몰라서 주석 - 인식 const API_URL = 'https://cautious-doodle-q75wx75gv596hx57r-5000.app.github.dev';
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+const API_BASE_URL = 
+  import.meta.env.VITE_API_BASE_URL || 
+  'https://aita-5xo5.onrender.com'; // 로컬 개발용 (주석 처리 가능)
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
