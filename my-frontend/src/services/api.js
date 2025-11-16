@@ -197,3 +197,37 @@ export const getAssignmentsByCourse = async (courseId) => {
     throw new Error(error.response?.data?.error || '과제 목록을 불러오지 못했습니다.');
   }
 };
+
+// 특정 과제 상세 조회 (TA용)
+export const getAssignmentDetail = async (assignmentId) => {
+  try {
+    const res = await apiClient.get(`/api/ta/assignments/${assignmentId}`);
+    // 예상 응답: { id, assignment_name, description, due_date, criteria?, submissions? }
+    return res.data;
+  } catch (error) {
+    console.error('과제 상세 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '과제 상세를 불러오지 못했습니다.');
+  }
+};
+
+// 과제의 제출물 목록 조회
+export const getAssignmentSubmissions = async (assignmentId) => {
+  try {
+    const res = await apiClient.get(`/api/ta/assignments/${assignmentId}/submissions`);
+    return res.data;
+  } catch (error) {
+    console.error('제출물 목록 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '제출물 목록을 불러오지 못했습니다.');
+  }
+};
+
+// 과제 채점 기준 등록/수정
+export const putAssignmentCriteria = async (assignmentId, criteriaPayload) => {
+  try {
+    const res = await apiClient.put(`/api/ta/assignments/${assignmentId}/criteria`, criteriaPayload);
+    return res.data;
+  } catch (error) {
+    console.error('채점 기준 저장 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '채점 기준 저장에 실패했습니다.');
+  }
+};
