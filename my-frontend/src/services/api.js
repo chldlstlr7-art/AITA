@@ -275,6 +275,22 @@ export const getAssignmentsByCourse = async (courseId) => {
   }
 };
 
+// TA 과제 생성
+// POST /api/ta/courses/<course_id>/assignments
+export const createAssignment = async (courseId, { assignment_name, description, due_date }) => {
+  try {
+    const res = await apiClient.post(`/api/ta/courses/${courseId}/assignments`, {
+      assignment_name,
+      description,
+      due_date,
+    });
+    return res.data;
+  } catch (error) {
+    console.error('과제 생성 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '과제 생성에 실패했습니다.');
+  }
+};
+
 // 특정 과제 상세 조회 (TA용)
 export const getAssignmentDetail = async (assignmentId) => {
   try {
@@ -284,6 +300,19 @@ export const getAssignmentDetail = async (assignmentId) => {
   } catch (error) {
     console.error('과제 상세 API 에러:', error.response || error);
     throw new Error(error.response?.data?.error || '과제 상세를 불러오지 못했습니다.');
+  }
+};
+
+// GET assignment criteria helper (reads from assignment detail)
+export const getAssignmentCriteria = async (assignmentId) => {
+  try {
+    const res = await apiClient.get(`/api/ta/assignments/${assignmentId}`);
+    const data = res.data || {};
+    // assignment may be nested or criteria may be top-level
+    return (data.assignment && data.assignment.criteria) || data.criteria || null;
+  } catch (error) {
+    console.error('채점 기준 조회 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '채점 기준을 불러오지 못했습니다.');
   }
 };
 
@@ -306,5 +335,51 @@ export const putAssignmentCriteria = async (assignmentId, criteriaPayload) => {
   } catch (error) {
     console.error('채점 기준 저장 API 에러:', error.response || error);
     throw new Error(error.response?.data?.error || '채점 기준 저장에 실패했습니다.');
+  }
+};
+
+// DELETE /api/ta/assignments/<assignment_id>
+export const deleteAssignment = async (assignmentId) => {
+  try {
+    const res = await apiClient.delete(`/api/ta/assignments/${assignmentId}`);
+    return res.data;
+  } catch (error) {
+    console.error('과제 삭제 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '과제 삭제에 실패했습니다.');
+  }
+};
+
+// === 수강생 관리 API ===
+// GET /api/ta/courses/<course_id>/students
+export const getCourseStudents = async (courseId) => {
+  try {
+    const res = await apiClient.get(`/api/ta/courses/${courseId}/students`);
+    // 예상: { students: [ { id, email, name, ... } ] }
+    return res.data;
+  } catch (error) {
+    console.error('수강생 목록 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '수강생 목록을 불러오지 못했습니다.');
+  }
+};
+
+// POST /api/ta/courses/<course_id>/students
+export const addCourseStudent = async (courseId, { email }) => {
+  try {
+    const res = await apiClient.post(`/api/ta/courses/${courseId}/students`, { email });
+    return res.data;
+  } catch (error) {
+    console.error('수강생 추가 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '수강생 추가에 실패했습니다.');
+  }
+};
+
+// DELETE /api/ta/courses/<course_id>/students/<student_id>
+export const deleteCourseStudent = async (courseId, studentId) => {
+  try {
+    const res = await apiClient.delete(`/api/ta/courses/${courseId}/students/${studentId}`);
+    return res.data;
+  } catch (error) {
+    console.error('수강생 삭제 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '수강생 삭제에 실패했습니다.');
   }
 };
