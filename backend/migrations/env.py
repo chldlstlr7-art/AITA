@@ -4,15 +4,37 @@ from logging.config import fileConfig
 from flask import current_app
 
 from alembic import context
+# --- [수정 1] Flask 앱, db 객체, 모델 임포트 ---
+# -------------------------------------------------
+# 이 스크립트가 'app'을 찾을 수 있도록 경로를 추가합니다.
+import os
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+from app import app  # Flask app 임포트
+from extensions import db # db 객체 임포트
+# Alembic이 감지해야 할 모든 모델을 임포트합니다.
+from models import User, Course, Assignment, AnalysisReport, course_enrollment, course_assistant
+# -------------------------------------------------
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+# --- [수정 2] Flask 앱의 DB 설정을 Alembic에 적용 ---
+# -------------------------------------------------
+# 이것이 SQLite 오류를 해결하는 핵심입니다.
+# app.config['SQLALCHEMY_DATABASE_URI'] 값을 읽어 Alembic 설정에 덮어씁니다.
+config.set_main_option("sqlalchemy.url", app.config.get('SQLALCHEMY_DATABASE_URI'))
+# -------------------------------------------------
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
 fileConfig(config.config_file_name)
 logger = logging.getLogger('alembic.env')
+# --- [수정 3] target_metadata를 db.metadata로 설정 ---
+# -------------------------------------------------
+target_metadata = db.metadata
+# -------------------------------------------------
 
 
 def get_engine():
@@ -94,7 +116,7 @@ def run_migrations_online():
     if conf_args.get("process_revision_directives") is None:
         conf_args["process_revision_directives"] = process_revision_directives
 
-    connectable = get_engine()
+    connectable = db.engine
 
     with connectable.connect() as connection:
         context.configure(
