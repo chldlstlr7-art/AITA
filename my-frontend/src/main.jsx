@@ -24,6 +24,7 @@ import ReportPage from './pages/ReportPage.jsx';
 import TADashboard from './pages/ta/TADashboard.jsx';
 import TACourseDetail from './pages/ta/TACourseDetail.jsx';
 import TAAssignmentDetail from './pages/ta/TAAssignmentDetail.jsx';
+import TAGradingDetail from './pages/ta/TAGradingDetail.jsx';
 
 
 const router = createBrowserRouter([
@@ -39,7 +40,8 @@ const router = createBrowserRouter([
       // 🆕 TA용 라우트
       {path: "/ta", element: <TADashboard /> },
       {path: "/ta/course/:courseId", element: <TACourseDetail />,},
-      {path: "/ta/course/:courseId/assignment/:assignmentId", element: <TAAssignmentDetail />,},
+      {path: "/ta/course/:courseId/assignment/:assignmentId", element: <TAAssignmentDetail /> ,},
+      {path: "/ta/course/:courseId/assignment/:assignmentId/grading", element: <TAGradingDetail /> ,},
       // 2. [삭제!] /forgot-password 라우트 제거
     ],
   },

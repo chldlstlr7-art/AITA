@@ -17,6 +17,7 @@ import {
   DialogContent,
   DialogActions,
   TextField,
+  IconButton,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import { useNavigate } from 'react-router-dom';
@@ -25,6 +26,11 @@ import {
   getAssignmentSubmissions,
   putAssignmentCriteria,
 } from '../../services/api';
+import { getAssignmentCriteria } from '../../services/api';
+import { deleteAssignment } from '../../services/api';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import { getTaCourses } from '../../services/api';
 
 function TAAssignmentDetail() {
@@ -61,6 +67,10 @@ function TAAssignmentDetail() {
   const [submissions, setSubmissions] = useState([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [criteriaText, setCriteriaText] = useState('');
+  const [criteriaRows, setCriteriaRows] = useState([]);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [criteriaLoading, setCriteriaLoading] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -121,27 +131,142 @@ function TAAssignmentDetail() {
     }
   };
 
+  const submittedCount = submissions?.length ?? 0;
+  const gradedCount = (submissions || []).filter((s) => s && (s.graded === true || s.score != null || String(s.status || s.state || '').toLowerCase() === 'graded' || String(s.status || s.state || '').toLowerCase() === 'completed')).length;
+
   // 🔹 “보기” 버튼: 항상 수정 가능한 다이얼로그 오픈
   const handleOpenCriteriaDialog = () => {
-    // criteria가 없으면 그냥 빈 상태로 시작
-    if (!criteria) {
-      setCriteriaText('');
-    }
-    setDialogOpen(true);
+    // 최신 과제 상세를 다시 불러와서 채점 기준을 반영하고 다이얼로그를 엽니다.
+    (async () => {
+      if (!assignmentId) {
+        alert('과제 정보가 없습니다.');
+        return;
+      }
+      setCriteriaLoading(true);
+      try {
+        const data = await getAssignmentDetail(assignmentId);
+        const a = data.assignment || data;
+        const criteriaData = a.criteria || data.criteria || null;
+        setCriteria(criteriaData);
+        setCriteriaText(criteriaData ? JSON.stringify(criteriaData, null, 2) : '');
+
+        // criteriaData -> criteriaRows 변환 (object 또는 array 형태 지원)
+        if (criteriaData) {
+          if (Array.isArray(criteriaData)) {
+            setCriteriaRows(
+              criteriaData.map((v, i) => ({
+                key: v.key || `criteria_${i + 1}`,
+                name: v.name || v.title || '',
+                description: v.description || v.criteria || '',
+                max_score: v.max_score ?? v.maxScore ?? v.score ?? 0,
+              }))
+            );
+          } else if (typeof criteriaData === 'object') {
+            setCriteriaRows(
+              Object.entries(criteriaData).map(([k, v], i) => ({
+                key: k,
+                name: v?.name || v?.title || '',
+                description: v?.description || v?.criteria || '',
+                max_score: v?.max_score ?? v?.maxScore ?? v?.score ?? 0,
+              }))
+            );
+          } else {
+            setCriteriaRows([]);
+          }
+        } else {
+          setCriteriaRows([]);
+        }
+      } catch (e) {
+        console.error('채점 기준 로드 실패:', e);
+        alert('채점 기준을 불러오지 못했습니다.');
+        setCriteriaText(criteria ? JSON.stringify(criteria, null, 2) : '');
+      } finally {
+        setCriteriaLoading(false);
+        setDialogOpen(true);
+      }
+    })();
+  };
+
+  const handleAddRow = () => {
+    setCriteriaRows((prev) => [...prev, { name: '', description: '', max_score: 0 }]);
+  };
+
+  const handleRemoveRow = (index) => {
+    setCriteriaRows((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleChangeRow = (index, field, value) => {
+    setCriteriaRows((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
   };
 
   const handleSaveCriteria = async () => {
     try {
-      const parsed = criteriaText ? JSON.parse(criteriaText) : null;
-      await putAssignmentCriteria(assignmentId, parsed);
+      // criteriaRows -> object 변환
+      if (!criteriaRows || criteriaRows.length === 0) {
+        // 빈값은 null 로 보냄
+        await putAssignmentCriteria(assignmentId, null);
+        setCriteria(null);
+        setCriteriaText('');
+        setCriteriaRows([]);
+        setDialogOpen(false);
+        return;
+      }
 
-      // 다시 상세 정보 받아와서 state 갱신
-      const data = await getAssignmentDetail(assignmentId);
-      const a = data.assignment || data;
-      const criteriaData = a.criteria || data.criteria || parsed || null;
+      const payload = {};
+      criteriaRows.forEach((r, i) => {
+        const key = r.key || `criteria_${i + 1}`;
+        const maxScore = Number(r.max_score) || 0;
+        payload[key] = {
+          name: r.name || '',
+          description: r.description || '',
+          max_score: maxScore,
+        };
+      });
+
+      // 저장 요청
+      await putAssignmentCriteria(assignmentId, payload);
+
+      // 다시 상세 정보 받아와서 state 갱신 (helper 사용, 실패 시 fallback)
+      const criteriaData = await (async () => {
+        try {
+          return await getAssignmentCriteria(assignmentId);
+        } catch (e) {
+          const data = await getAssignmentDetail(assignmentId);
+          const a = data.assignment || data;
+          return a.criteria || data.criteria || payload || null;
+        }
+      })();
 
       setCriteria(criteriaData);
       setCriteriaText(criteriaData ? JSON.stringify(criteriaData, null, 2) : '');
+
+      // 새로 받은 criteriaData -> rows 변환
+      if (criteriaData) {
+        if (Array.isArray(criteriaData)) {
+          setCriteriaRows(
+            criteriaData.map((v, i) => ({
+              key: v.key || `criteria_${i + 1}`,
+              name: v.name || v.title || '',
+              description: v.description || v.criteria || '',
+              max_score: v.max_score ?? v.maxScore ?? v.score ?? 0,
+            }))
+          );
+        } else if (typeof criteriaData === 'object') {
+          setCriteriaRows(
+            Object.entries(criteriaData).map(([k, v], i) => ({
+              key: k,
+              name: v?.name || v?.title || '',
+              description: v?.description || v?.criteria || '',
+              max_score: v?.max_score ?? v?.maxScore ?? v?.score ?? 0,
+            }))
+          );
+        }
+      }
+
       setDialogOpen(false);
     } catch (err) {
       alert('채점 기준 저장 중 오류: ' + (err.message || err));
@@ -229,6 +354,26 @@ function TAAssignmentDetail() {
                 {courseName}
               </Typography>
             </Box>
+            <Stack direction="row" spacing={1}>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<EditIcon sx={{ color: '#274472' }} />}
+                onClick={() => { /* API not implemented yet */ }}
+                sx={{ color: '#274472', borderColor: 'rgba(39,68,114,0.12)' }}
+              >
+                수정
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<DeleteIcon sx={{ color: '#6b7280' }} />}
+                onClick={() => setConfirmDeleteOpen(true)}
+                sx={{ color: '#6b7280', borderColor: 'rgba(107,114,128,0.12)' }}
+              >
+                삭제
+              </Button>
+            </Stack>
           </Box>
 
           <Box sx={{ mb: 0 }}>
@@ -241,13 +386,13 @@ function TAAssignmentDetail() {
                 assignment?.title ||
                 '과제명 없음'}
             </Typography>
-            <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
+            <Typography variant="body1" sx={{ mt: 1, color: '#000' }}>
               제출기한:{' '}
               {assignment?.due_date ? formatDateString(assignment.due_date) : '미정'}
             </Typography>
             {assignment?.description && (
               <Typography
-                variant="caption"
+                variant="body2"
                 color="text.secondary"
                 display="block"
                 sx={{ mt: 1, whiteSpace: 'pre-line' }}
@@ -276,12 +421,10 @@ function TAAssignmentDetail() {
               <List>
                 {submissions.map((s, idx) => (
                   <React.Fragment key={s.id || s.report_id || idx}>
-                    <ListItem>
+                    <ListItem sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <ListItemText
                         primary={s.student_name || s.student_email || `제출자 ${idx + 1}`}
-                        secondary={`리포트 ID: ${
-                          s.id || s.report_id || '-'
-                        }  | 상태: ${s.status || s.state || 'N/A'}`}
+                        secondary={`리포트 ID: ${s.id || s.report_id || '-'}`}
                         primaryTypographyProps={{
                           noWrap: true,
                           sx: {
@@ -302,6 +445,26 @@ function TAAssignmentDetail() {
                         }}
                         sx={{ maxWidth: '100%' }}
                       />
+
+                      <Box sx={{ ml: 2 }}>
+                        {String(s.status || s.state || '').toLowerCase() === 'completed' ? (
+                          <Button
+                            variant="contained"
+                            size="small"
+                            onClick={() => navigate(`/ta/course/${courseId}/assignment/${assignmentId}/report/${s.id || s.report_id}/analysis`)}
+                          >
+                            분석 결과
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={() => navigate(`/ta/course/${courseId}/assignment/${assignmentId}/report/${s.id || s.report_id}/aita`)}
+                          >
+                            AITA분석
+                          </Button>
+                        )}
+                      </Box>
                     </ListItem>
                     <Divider component="li" />
                   </React.Fragment>
@@ -345,44 +508,133 @@ function TAAssignmentDetail() {
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               제출된 리포트에 대한 점수 입력 및 채점 현황을 관리하는 영역입니다.
-              (추후 기능 연동 예정)
             </Typography>
             <Stack spacing={1}>
               <Typography variant="body2">
-                • 총 제출 수: {submissions?.length ?? 0}개
+                • 총 제출 수: {submittedCount}개
+              </Typography>
+              <Typography variant="body2">
+                • 채점 완료 수: {gradedCount}개
               </Typography>
               <Typography variant="body2">
                 • 채점 기준 상태: {criteria ? '등록됨' : '미등록'}
               </Typography>
             </Stack>
-            <Box sx={{ mt: 2, textAlign: 'right' }}>
-              <Button variant="outlined" size="small" disabled>
-                채점 페이지 (준비중)
-              </Button>
-            </Box>
+                <Box sx={{ mt: 2, textAlign: 'right' }}>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    onClick={() => navigate(`/ta/course/${courseId}/assignment/${assignmentId}/grading`, { state: { course: courseFromState, assignment } })}
+                    sx={(theme) => ({
+                      backgroundColor: theme.palette.primary.main,
+                      color: '#fff',
+                      '&:hover': {
+                        backgroundColor: theme.palette.primary.dark,
+                      },
+                    })}
+                  >
+                    채점 페이지로 이동
+                  </Button>
+                </Box>
           </Paper>
         </Box>
       </Box>
 
       {/* 채점 기준 JSON 다이얼로그 (항상 수정 가능) */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="lg">
         <DialogTitle>채점 기준 보기/수정</DialogTitle>
         <DialogContent>
-          <TextField
-            label="채점 기준 (JSON)"
-            value={criteriaText}
-            onChange={(e) => setCriteriaText(e.target.value)}
-            multiline
-            minRows={8}
-            fullWidth
-            variant="outlined"
-            placeholder='예: { "criteria_1": { "name": "논리성", "max_score": 10 } }'
-          />
+          {criteriaLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+              <CircularProgress />
+            </Box>
+          ) : (
+            <Stack spacing={2}>
+              {(!criteriaRows || criteriaRows.length === 0) && (
+                <Typography color="text.secondary">채점 항목이 없습니다. 새 항목을 추가하세요.</Typography>
+              )}
+
+              <Box sx={{ pt: 2 }}>
+                {criteriaRows.map((row, idx) => (
+                  <Box key={idx} sx={{ display: 'flex', gap: 1, alignItems: 'stretch', mb: 1 }}>
+                    <TextField
+                      label="채점 항목"
+                      value={row.name}
+                      onChange={(e) => handleChangeRow(idx, 'name', e.target.value)}
+                      variant="outlined"
+                      fullWidth
+                      sx={{ flex: 1, '& .MuiInputBase-root': { minHeight: 56 } }}
+                    />
+                    <TextField
+                      label="채점 기준 설명"
+                      value={row.description}
+                      onChange={(e) => handleChangeRow(idx, 'description', e.target.value)}
+                      variant="outlined"
+                      multiline
+                      //minRows={3}
+                      fullWidth
+                      sx={{ flex: 2, '& .MuiInputBase-root': { minHeight: 56, alignItems: 'flex-start', paddingTop: '10px' } }}
+                    />
+                    <TextField
+                      label="배점"
+                      value={row.max_score}
+                      onChange={(e) => handleChangeRow(idx, 'max_score', e.target.value)}
+                      variant="outlined"
+                      type="number"
+                      sx={{ width: 110, '& .MuiInputBase-root': { minHeight: 56, justifyContent: 'center' }, '& input': { textAlign: 'center' } }}
+                    />
+                    <IconButton onClick={() => handleRemoveRow(idx)} aria-label="삭제" sx={{ alignSelf: 'center' }}>
+                      <DeleteIcon />
+                    </IconButton>
+                  </Box>
+                ))}
+
+              </Box>
+              <Box>
+                <Button startIcon={<AddCircleOutlineIcon />} onClick={handleAddRow}>
+                  항목 추가
+                </Button>
+              </Box>
+            </Stack>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>닫기</Button>
           <Button variant="contained" onClick={handleSaveCriteria}>
             저장
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 과제 삭제 확인 다이얼로그 */}
+      <Dialog open={confirmDeleteOpen} onClose={() => setConfirmDeleteOpen(false)}>
+        <DialogTitle>과제 삭제 확인</DialogTitle>
+        <DialogContent>
+          <Typography>정말 이 과제를 삭제하시겠습니까? 삭제하면 복구할 수 없습니다.</Typography>
+          <Typography sx={{ mt: 1, fontWeight: 700 }}>{assignment?.assignment_name || assignment?.name || '과제명'}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDeleteOpen(false)}>취소</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={async () => {
+              if (!assignmentId) return;
+              setDeleting(true);
+              try {
+                await deleteAssignment(assignmentId);
+                // 이동: 과목 페이지로
+                navigate(`/ta/course/${courseId}`);
+              } catch (e) {
+                console.error('과제 삭제 실패:', e);
+                alert('과제 삭제에 실패했습니다: ' + (e?.message || e));
+              } finally {
+                setDeleting(false);
+                setConfirmDeleteOpen(false);
+              }
+            }}
+          >
+            {deleting ? '삭제 중...' : '삭제'}
           </Button>
         </DialogActions>
       </Dialog>
