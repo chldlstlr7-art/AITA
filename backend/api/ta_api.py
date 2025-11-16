@@ -212,7 +212,7 @@ def update_assignment_criteria(assignment_id):
         
     criteria_data = request.json
     try:
-        current_app.course_service.update_assignment_criteria(assignment_id, criteria_data)
+        current_app.course_service.update_assignment_criteria(assignment_id, criteria_data, ta_user_id)
         return jsonify({"message": "평가 기준이 업데이트되었습니다."}), 200
     except ValueError as e:
         return jsonify({"error": str(e)}), 400 # 404(Not Found) or 400(Bad Data)
