@@ -406,7 +406,7 @@ def _parse_comparison_scores(report_text):
 
 def _filter_high_similarity_reports(comparison_results_list):
     high_similarity_reports = []
-    threshold = 20
+    threshold = 30
     for result in comparison_results_list:
         report_text = result.get("llm_comparison_report", "")
         total_score, scores_dict = _parse_comparison_scores(report_text)
