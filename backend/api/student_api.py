@@ -369,12 +369,111 @@ def submit_answer(report_id):
     print(f"[{report_id}] Answer saved successfully for {question_id}.")
     return jsonify({"status": "success", "message": "Answer saved successfully"})
 
+def _background_generate_deep_dive(app_context, report_id, parent_question_id):
+    """[수정] 백그라운드에서 심화 질문을 생성하고 (동시성 문제 해결) DB에 저장"""
+    
+    # --- [1. Read Phase] ---
+    # AI 호출에 필요한 데이터를 DB에서 미리 읽습니다.
+    conversation_history_list = []
+    summary_data_dict = {}
+
+    with app_context.app_context():
+        print(f"[{report_id}] Deep-dive generation task starting for parent: {parent_question_id}")
+        report = db.session.get(AnalysisReport, report_id)
+        if not report:
+            print(f"[{report_id}] Deep-dive task ABORT: Report not found.")
+            return
+        
+        try:
+            qa_history_str = report.qa_history if report.qa_history else "[]"
+            qa_history = json.loads(qa_history_str)
+            summary_data_dict = json.loads(report.summary) if report.summary else {}
+        except json.JSONDecodeError as e:
+            print(f"[{report_id}] Deep-dive task ABORT: Failed to parse initial JSON data: {e}")
+            return
+
+        history_map = {item['question_id']: item for item in qa_history}
+        current_id = parent_question_id
+
+        while current_id is not None:
+            if current_id not in history_map:
+                print(f"[{report_id}] CRITICAL: History chain broken. ID {current_id} not found.")
+                break
+            
+            parent_qa = history_map[current_id]
+            
+            if parent_qa.get("answer") is None:
+                print(f"[{report_id}] Deep-dive task WARN: Parent answer not found (yet?).")
+                break # (안전하게 중단)
+
+            conversation_history_list.insert(0, {
+                "question": parent_qa.get("question"),
+                "answer": parent_qa.get("answer")
+            })
+            current_id = parent_qa.get("parent_question_id")
+    
+    if not conversation_history_list:
+            print(f"[{report_id}] Deep-dive task ABORT: Could not reconstruct history or parent not answered.")
+            return
+
+    # --- [2. Slow AI Call Phase] ---
+    # (DB 세션과 분리된 상태에서 느린 AI 호출 실행)
+    try:
+        deep_dive_question_text = generate_deep_dive_question(
+            conversation_history_list,
+            summary_data_dict
+        )
+    except Exception as e_ai:
+        print(f"[{report_id}] Deep-dive AI call FAILED: {e_ai}")
+        return
+
+    if not deep_dive_question_text:
+        print(f"[{report_id}] Deep-dive task FAILED: AI returned no text.")
+        return
+
+    # --- [3. Write Phase] ---
+    # (새 앱 컨텍스트를 열고, DB에서 최신 데이터를 다시 읽어서 쓰기)
+    with app_context.app_context():
+        try:
+            # 1. [RE-READ] DB에서 최신 리포트 정보를 다시 가져옵니다.
+            # (다른 스레드가 qa_history를 변경했을 수 있으므로)
+            report_fresh = db.session.get(AnalysisReport, report_id)
+            if not report_fresh:
+                print(f"[{report_id}] Deep-dive task FAILED: Report gone after AI call.")
+                return
+
+            # 2. 최신 qa_history를 파싱합니다.
+            latest_qa_history_str = report_fresh.qa_history if report_fresh.qa_history else "[]"
+            latest_qa_history = json.loads(latest_qa_history_str)
+
+            # 3. [MODIFY] 생성된 새 질문을 *최신* 히스토리에 추가합니다.
+            new_question_id = str(uuid.uuid4())
+            history_entry = {
+                "question_id": new_question_id,
+                "question": deep_dive_question_text,
+                "type": "deep_dive",
+                "answer": None,
+                "parent_question_id": parent_question_id
+            }
+            latest_qa_history.append(history_entry)
+
+            # 4. [WRITE] DB에 저장합니다.
+            report_fresh.qa_history = json.dumps(latest_qa_history)
+            db.session.commit()
+            
+            print(f"[{report_id}] Deep-dive task SUCCESS. New question {new_question_id} saved.")
+
+        except Exception as e_write:
+            print(f"[Deep-dive Task] CRITICAL: Report {report_id} 최종 쓰기 중 오류: {e_write}")
+            traceback.print_exc()
+            db.session.rollback()
+            
 @student_bp.route("/report/<report_id>/question/deep-dive", methods=["POST"])
 @jwt_required()
 def post_deep_dive_question(report_id):
     """
-    POST /api/student/report/<report_id>/question/deep-dive
-    'parent_question_id'를 받아, 전체 대화 맥락을 탐색하여 심화 질문을 생성
+    [수정] 'parent_question_id'를 받아, 심화 질문 생성을 '시작'시킵니다.
+    (AI 호출은 백그라운드 스레드에서 수행)
     """
     user_id = get_jwt_identity()
     report, error_response = get_report_or_404(report_id, user_id)
@@ -386,79 +485,23 @@ def post_deep_dive_question(report_id):
     if not parent_question_id:
         return jsonify({"error": "Missing parent_question_id to deep-dive from"}), 400
 
-    # 1. DB에서 히스토리 가져오기 및 JSON 파싱
-    # --- [수정] JSON 파싱 추가 ---
-    qa_history_str = report.qa_history if report.qa_history else "[]"
-    try:
-        qa_history = json.loads(qa_history_str)
-    except json.JSONDecodeError:
-        return jsonify({"error": "Corrupted qa_history data in database"}), 500
-    # --- [수정 완료] ---
+    # (선택적: 이미 생성 중인지 확인하는 플래그를 DB에 추가할 수 있음)
+    # (예: if report.is_generating_deep_dive: return 409)
 
-    # 2. 히스토리 재구성 (기존 로직 동일)
-    history_map = {item['question_id']: item for item in qa_history}
-    conversation_history_list = [] 
-    current_id = parent_question_id
-
-    while current_id is not None:
-        if current_id not in history_map:
-            print(f"[{report_id}] CRITICAL: History chain broken. ID {current_id} not found.")
-            break 
-        
-        parent_qa = history_map[current_id]
-        
-        if parent_qa.get("answer") is None:
-            if current_id == parent_question_id:
-                 return jsonify({"error": f"Parent question ID {parent_question_id} has not been answered yet."}), 400
-            break
-
-        conversation_history_list.insert(0, {
-            "question": parent_qa.get("question"),
-            "answer": parent_qa.get("answer")
-        })
-        
-        current_id = parent_qa.get("parent_question_id")
-
-    if not conversation_history_list:
-        return jsonify({"error": f"Could not reconstruct valid history for {parent_question_id}."}), 404
-
-    # 3. 심화 질문 생성 (서비스 호출)
-    try:
-        summary_data_dict = json.loads(report.summary) if report.summary else {}
-    except json.JSONDecodeError:
-        print(f"[{report_id}] CRITICAL: Deep-dive failed to parse report.summary JSON.")
-        return jsonify({"error": "Corrupted summary data in database"}), 500
-    
-    deep_dive_question_text = generate_deep_dive_question(
-        conversation_history_list,
-        summary_data_dict # [수정] 딕셔너리 전달
+    # --- [수정] ---
+    # 1. 백그라운드 작업 시작
+    app = current_app._get_current_object()
+    thread = threading.Thread(
+        target=_background_generate_deep_dive, # <-- 신규 백그라운드 함수
+        args=(app, report_id, parent_question_id)
     )
-    # --- [수정 완료] ---
+    thread.daemon = True
+    thread.start()
 
-    if not deep_dive_question_text:
-        return jsonify({"error": "Failed to generate deep-dive question"}), 500
-
-    new_question_id = str(uuid.uuid4())
-    
-    history_entry = {
-        "question_id": new_question_id, 
-        "question": deep_dive_question_text,
-        "type": "deep_dive", 
-        "answer": None,
-        "parent_question_id": parent_question_id 
-    }
-    # qa_history는 이미 리스트(JSON 파싱됨)
-    qa_history.append(history_entry) 
-    report.qa_history = json.dumps(qa_history) # 변경 사항을 JSON 문자열로 DB에 저장
-    
-    db.session.commit()
-    # 5. 클라이언트 응답
-    client_response = {
-        "question_id": new_question_id,
-        "question": deep_dive_question_text
-    }
-
-    return jsonify(client_response)
+    # 2. 즉시 202 Accepted 반환
+    return jsonify({
+        "message": "Deep-dive question generation started. Please poll the report status."
+    }), 202
 
 def _background_generate_advancement(app_context, report_id):
     """백그라운드에서 AI를 호출하고 DB에 저장하는 함수"""
