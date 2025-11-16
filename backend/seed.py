@@ -482,6 +482,36 @@ def seed_database():
             print(f"\n[오류] 시딩 작업 중 오류 발생: {e}")
             db.session.rollback()
             print(" └> 작업이 롤백되었습니다.")
+
+        # --- [신규] 5. 모든 개발자 계정을 모든 과목의 TA로 연결 ---
+        print("\n[신규 작업] 모든 관리자/개발자 계정을 모든 과목의 TA로 연결합니다...")
+        
+        # (admin 포함) TA 역할을 하는 모든 관리자/개발자 계정 이메일
+        ta_emails = [
+            ADMIN_DATA['email'],
+            "dabok2@snu.ac.kr",
+            "dev2@snu.ac.kr",
+            "dev3@snu.ac.kr",
+            "dev@snu.ac.kr"
+        ]
+        
+        # DB에서 User 객체 가져오기
+        ta_users = User.query.filter(User.email.in_(ta_emails)).all()
+        
+        # DB에서 Course 객체 가져오기
+        all_courses = Course.query.all()
+
+        for course in all_courses:
+            for ta in ta_users:
+                if ta not in course.assistants:
+                    course.assistants.append(ta)
+                    print(f" └> [연결] {ta.email} -> {course.course_name}")
+        
+        db.session.commit() # TA 관계 연결 커밋
+        print(" └> TA-과목 연결 완료.")
+
+
+        print("\n[성공] 모든 데이터베이스 시딩 작업이 완료되었습니다.")
         
         finally:
             db.session.close()
