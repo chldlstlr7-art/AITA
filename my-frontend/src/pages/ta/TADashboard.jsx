@@ -12,11 +12,21 @@ import {
   MenuItem,
   Stack,
   Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import AddIcon from '@mui/icons-material/Add';
-import { getTaCourses } from '../../services/api.js';
+import {
+  getTaCourses,
+  createCourse,
+  updateCourse,
+  deleteCourse,
+} from '../../services/api.js';
 
 // 🧪 백엔드에 아직 과목이 없을 때 사용할 DUMMY 데이터
 const DUMMY_COURSES = [
@@ -58,31 +68,50 @@ function TADashboard() {
   const [anchorEl, setAnchorEl] = useState(null);
   const [menuCourseId, setMenuCourseId] = useState(null);
 
-  useEffect(() => {
-    const fetchCourses = async () => {
-      try {
-        const data = await getTaCourses();
-        const list = data?.courses || [];
+  // 과목 추가 다이얼로그 상태
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [newCourseName, setNewCourseName] = useState('');
+  const [newCourseCode, setNewCourseCode] = useState('');
 
-        if (list.length === 0) {
-          setCourses(DUMMY_COURSES);
-        } else {
-          setCourses(list);
-        }
-      } catch (e) {
-        console.error(e);
-        setErrorMsg(e.message || '과목 목록을 불러오는 중 문제가 발생했습니다.');
-        setCourses(DUMMY_COURSES); // 에러여도 예시 카드 1개는 보여줌
-      } finally {
-        setLoading(false);
+  // 과목 수정 다이얼로그 상태
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editCourseName, setEditCourseName] = useState('');
+  const [editCourseCode, setEditCourseCode] = useState('');
+  const [editingCourse, setEditingCourse] = useState(null);
+
+  // 과목 삭제 확인 다이얼로그 상태
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingCourse, setDeletingCourse] = useState(null);
+
+  // 과목 목록 조회 (재사용 가능하도록 분리)
+  const fetchCourses = async () => {
+    setLoading(true);
+    setErrorMsg('');
+    try {
+      const data = await getTaCourses();
+      const list = data?.courses || [];
+
+      if (list.length === 0) {
+        setCourses(DUMMY_COURSES);
+      } else {
+        setCourses(list);
       }
-    };
+    } catch (e) {
+      console.error(e);
+      setErrorMsg(e.message || '과목 목록을 불러오는 중 문제가 발생했습니다.');
+      setCourses(DUMMY_COURSES); // 에러여도 예시 카드 1개는 보여줌
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchCourses();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleCardClick = (course) => {
-    if (!course.id) return;
+    if (!course.id || course.isDummy) return;
     navigate(`/ta/course/${course.id}`, { state: { course } });
   };
 
@@ -97,9 +126,120 @@ function TADashboard() {
     setMenuCourseId(null);
   };
 
+  // =========================
+  // 1) 과목 추가 다이얼로그
+  // =========================
   const handleAddCourseClick = () => {
-    // TODO: 나중에 과목 생성 다이얼로그로 연결
-    console.log('과목 추가 버튼 클릭');
+    setNewCourseName('');
+    setNewCourseCode('');
+    setAddDialogOpen(true);
+  };
+
+  const handleAddCourseCancel = () => {
+    setAddDialogOpen(false);
+  };
+
+  const handleAddCourseSubmit = async () => {
+    if (!newCourseName.trim() || !newCourseCode.trim()) {
+      setErrorMsg('과목 이름과 과목 코드를 모두 입력해주세요.');
+      return;
+    }
+
+    try {
+      setErrorMsg('');
+      await createCourse({
+        course_code: newCourseCode.trim(),
+        course_name: newCourseName.trim(),
+      });
+
+      // 성공 시 목록 갱신
+      await fetchCourses();
+      setAddDialogOpen(false);
+    } catch (e) {
+      console.error(e);
+      setErrorMsg(e.message || '과목 생성 중 오류가 발생했습니다.');
+    }
+  };
+
+  // =========================
+  // 2) 과목 이름/코드 수정 다이얼로그
+  // =========================
+  const handleEditCourseMenuClick = () => {
+    if (!menuCourseId) return;
+    const course = courses.find((c) => c.id === menuCourseId);
+    if (!course || course.isDummy) {
+      handleMenuClose();
+      return;
+    }
+    setEditingCourse(course);
+    setEditCourseName(course.course_name || '');
+    setEditCourseCode(course.course_code || '');
+    setEditDialogOpen(true);
+    handleMenuClose();
+  };
+
+  const handleEditCourseCancel = () => {
+    setEditDialogOpen(false);
+    setEditingCourse(null);
+  };
+
+  const handleEditCourseSubmit = async () => {
+    if (!editingCourse) return;
+    if (!editCourseName.trim() || !editCourseCode.trim()) {
+      setErrorMsg('과목 이름과 과목 코드를 모두 입력해주세요.');
+      return;
+    }
+
+    try {
+      setErrorMsg('');
+      await updateCourse(editingCourse.id, {
+        course_name: editCourseName.trim(),
+        course_code: editCourseCode.trim(),
+      });
+
+      await fetchCourses();
+      setEditDialogOpen(false);
+      setEditingCourse(null);
+    } catch (e) {
+      console.error(e);
+      setErrorMsg(e.message || '과목 수정 중 오류가 발생했습니다.');
+    }
+  };
+
+  // =========================
+  // 3) 과목 삭제 확인 다이얼로그
+  // =========================
+  const handleDeleteCourseMenuClick = () => {
+    if (!menuCourseId) return;
+    const course = courses.find((c) => c.id === menuCourseId);
+    if (!course || course.isDummy) {
+      handleMenuClose();
+      return;
+    }
+    setDeletingCourse(course);
+    setDeleteDialogOpen(true);
+    handleMenuClose();
+  };
+
+  const handleDeleteCourseCancel = () => {
+    setDeleteDialogOpen(false);
+    setDeletingCourse(null);
+  };
+
+  const handleDeleteCourseConfirm = async () => {
+    if (!deletingCourse) return;
+
+    try {
+      setErrorMsg('');
+      await deleteCourse(deletingCourse.id);
+
+      await fetchCourses();
+      setDeleteDialogOpen(false);
+      setDeletingCourse(null);
+    } catch (e) {
+      console.error(e);
+      setErrorMsg(e.message || '과목 삭제 중 오류가 발생했습니다.');
+    }
   };
 
   return (
@@ -220,9 +360,86 @@ function TADashboard() {
         open={Boolean(anchorEl)}
         onClose={handleMenuClose}
       >
-        <MenuItem onClick={handleMenuClose}>과목 이름 수정</MenuItem>
-        <MenuItem onClick={handleMenuClose}>과목 삭제</MenuItem>
+        <MenuItem onClick={handleEditCourseMenuClick}>과목 이름 수정</MenuItem>
+        <MenuItem onClick={handleDeleteCourseMenuClick}>과목 삭제</MenuItem>
       </Menu>
+
+      {/* 1) 과목 추가 다이얼로그 */}
+      <Dialog open={addDialogOpen} onClose={handleAddCourseCancel} fullWidth maxWidth="xs">
+        <DialogTitle>새 과목 추가</DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          <TextField
+            label="과목 이름"
+            fullWidth
+            margin="dense"
+            value={newCourseName}
+            onChange={(e) => setNewCourseName(e.target.value)}
+          />
+          <TextField
+            label="과목 코드"
+            fullWidth
+            margin="dense"
+            value={newCourseCode}
+            onChange={(e) => setNewCourseCode(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleAddCourseCancel}>취소</Button>
+          <Button variant="contained" onClick={handleAddCourseSubmit}>
+            추가
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 2) 과목 이름/코드 수정 다이얼로그 */}
+      <Dialog open={editDialogOpen} onClose={handleEditCourseCancel} fullWidth maxWidth="xs">
+        <DialogTitle>과목 정보 수정</DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          <TextField
+            label="과목 이름"
+            fullWidth
+            margin="dense"
+            value={editCourseName}
+            onChange={(e) => setEditCourseName(e.target.value)}
+          />
+          <TextField
+            label="과목 코드"
+            fullWidth
+            margin="dense"
+            value={editCourseCode}
+            onChange={(e) => setEditCourseCode(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleEditCourseCancel}>취소</Button>
+          <Button variant="contained" onClick={handleEditCourseSubmit}>
+            저장
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 3) 과목 삭제 확인 다이얼로그 */}
+      <Dialog open={deleteDialogOpen} onClose={handleDeleteCourseCancel} fullWidth maxWidth="xs">
+        <DialogTitle>과목 삭제</DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          <Typography variant="body2">
+            정말{' '}
+            <strong>
+              {deletingCourse?.course_name} [{deletingCourse?.course_code}]
+            </strong>{' '}
+            과목을 삭제하시겠습니까?
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            이 작업은 되돌릴 수 없습니다.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleDeleteCourseCancel}>취소</Button>
+          <Button color="error" variant="contained" onClick={handleDeleteCourseConfirm}>
+            삭제
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

@@ -50,6 +50,12 @@ export const login = async (email, password) => {
     });
     
     if (response.data && response.data.access_token) {
+      // ✅ 여기서 토큰 저장
+      localStorage.setItem('accessToken', response.data.access_token);
+
+      // (선택) 유저 정보도 같이 저장하고 싶으면
+      // localStorage.setItem('user', JSON.stringify(response.data.user));
+
       return response.data; 
     } else {
       throw new Error('로그인 응답이 올바르지 않습니다.');
@@ -59,6 +65,7 @@ export const login = async (email, password) => {
     throw new Error(error.response?.data?.error || '로그인에 실패했습니다.');
   }
 };
+
 
 export const analyzeReport = async (formData) => {
   try {
@@ -170,6 +177,49 @@ export const getTaCourses = async () => {
   } catch (error) {
     console.error('TA 과목 목록 API 에러:', error.response || error);
     throw new Error(error.response?.data?.error || '과목 목록을 불러오지 못했습니다.');
+  }
+};
+
+// TA 과목 생성
+// POST /api/ta/courses
+export const createCourse = async ({ course_code, course_name }) => {
+  try {
+    const res = await apiClient.post('/api/ta/courses', {
+      course_code,
+      course_name,
+    });
+    return res.data;
+  } catch (error) {
+    console.error('TA 과목 생성 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '과목 생성에 실패했습니다.');
+  }
+};
+
+// TA 과목 정보 수정
+// PUT /api/ta/courses/<course_id>
+export const updateCourse = async (courseId, { course_code, course_name }) => {
+  try {
+    const res = await apiClient.put(`/api/ta/courses/${courseId}`, {
+      course_code,
+      course_name,
+    });
+    return res.data;
+  } catch (error) {
+    console.error('TA 과목 수정 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '과목 수정에 실패했습니다.');
+  }
+};
+
+// TA 과목 삭제
+// ⚠️ 백엔드 명세서에는 과목 삭제가 없어서,
+//    DELETE /api/ta/courses/<course_id> 엔드포인트가 있다고 가정합니다.
+export const deleteCourse = async (courseId) => {
+  try {
+    const res = await apiClient.delete(`/api/ta/courses/${courseId}`);
+    return res.data;
+  } catch (error) {
+    console.error('TA 과목 삭제 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '과목 삭제에 실패했습니다.');
   }
 };
 
