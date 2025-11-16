@@ -18,12 +18,19 @@ import {
   CardContent,
   InputAdornment,
   LinearProgress,
+  Checkbox,
+  Divider,
+  Select,
+  MenuItem,
+  InputLabel,
 } from '@mui/material';
 import { 
   UploadFile as UploadFileIcon,
   Description as DescriptionIcon,
   CheckCircle as CheckCircleIcon,
   TextFields as TextFieldsIcon,
+  BugReport as BugReportIcon,
+  Category as CategoryIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { styled } from '@mui/material/styles';
@@ -75,6 +82,18 @@ const StyledTextField = styled(TextField)(({ theme }) => ({
   },
 }));
 
+const StyledSelect = styled(Select)(({ theme }) => ({
+  '& .MuiOutlinedInput-notchedOutline': {
+    borderRadius: theme.spacing(1),
+  },
+  '&:hover .MuiOutlinedInput-notchedOutline': {
+    borderColor: '#667eea',
+  },
+  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+    boxShadow: `0 0 0 3px rgba(102, 126, 234, 0.1)`,
+  },
+}));
+
 const UploadButton = styled(Button)(({ theme }) => ({
   borderRadius: theme.spacing(1),
   padding: theme.spacing(2),
@@ -117,10 +136,26 @@ const FormLabel2 = styled(FormLabel)(({ theme }) => ({
   color: theme.palette.text.primary,
 }));
 
+const DevModeBox = styled(Box)(({ theme }) => ({
+  padding: theme.spacing(2),
+  borderRadius: theme.spacing(1),
+  background: 'rgba(255, 152, 0, 0.05)',
+  border: '1px solid rgba(255, 152, 0, 0.2)',
+}));
+
+// 제출물 형식 옵션
+const ASSIGNMENT_TYPES = [
+  '논설문/에세이',
+  '프로젝트 기획서',
+  '논문'
+];
+
 function AnalysisForm() {
   const [uploadType, setUploadType] = useState('file');
   const [file, setFile] = useState(null);
   const [text, setText] = useState('');
+  const [assignmentType, setAssignmentType] = useState('');
+  const [isTest, setIsTest] = useState(true);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   
@@ -149,20 +184,38 @@ function AnalysisForm() {
     setIsLoading(true);
 
     const formData = new FormData();
+    let submissionTitle = '';
+    
     if (uploadType === 'file') {
       formData.append('file', file);
+      submissionTitle = file.name;
     } else {
       formData.append('text', text);
+      // 🎯 텍스트 입력 시: 첫 문장을 제목으로 (최대 100자)
+      submissionTitle = text.split('\n')[0].substring(0, 100);
+      formData.append('title', submissionTitle);
     }
-    formData.append('docType', 'report'); 
-    formData.append('is_test', 'true');   
+    
+    formData.append('docType', 'report');
+    formData.append('is_test', isTest.toString());
+    
+    if (assignmentType) {
+      formData.append('assignment_type', assignmentType);
+    }
 
     try {
       const data = await analyzeReport(formData);
       
       setIsLoading(false);
       console.log('분석 요청 성공, Report ID:', data.reportId);
-      navigate(`/report/${data.reportId}`);
+      
+      // 제목과 제출물 형식을 state로 전달
+      navigate(`/report/${data.reportId}`, {
+        state: { 
+          submissionTitle: submissionTitle,
+          userAssignmentType: assignmentType || null 
+        }
+      });
 
     } catch (err) {
       setIsLoading(false);
@@ -228,6 +281,39 @@ function AnalysisForm() {
             </Stack>
           </Box>
 
+          {/* 제출물 형식 선택 */}
+          <Box>
+            <FormControl fullWidth>
+              <InputLabel id="assignment-type-label">
+                제출물 형식 (선택사항)
+              </InputLabel>
+              <StyledSelect
+                labelId="assignment-type-label"
+                id="assignment-type"
+                value={assignmentType}
+                label="제출물 형식 (선택사항)"
+                onChange={(e) => setAssignmentType(e.target.value)}
+                startAdornment={
+                  <InputAdornment position="start">
+                    <CategoryIcon sx={{ color: '#667eea', ml: 1 }} />
+                  </InputAdornment>
+                }
+              >
+                <MenuItem value="">
+                  <em>선택 안 함 (AI가 자동 판단)</em>
+                </MenuItem>
+                {ASSIGNMENT_TYPES.map((type) => (
+                  <MenuItem key={type} value={type}>
+                    {type}
+                  </MenuItem>
+                ))}
+              </StyledSelect>
+            </FormControl>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+              💡 형식을 지정하지 않으면 AI가 자동으로 판단합니다
+            </Typography>
+          </Box>
+
           {/* 파일 업로드 또는 텍스트 입력 */}
           {uploadType === 'file' ? (
             <Box>
@@ -276,7 +362,7 @@ function AnalysisForm() {
               <Box sx={{ mt: 1 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                   <Typography variant="caption" color="text.secondary">
-                    최소 입력: 50자
+                    최소 입력: 50자 • 💡 첫 문장이 제목으로 사용됩니다
                   </Typography>
                   <Typography variant="caption" color={textLength >= 50 ? '#4caf50' : 'text.secondary'}>
                     {textLength}/10000
@@ -298,6 +384,41 @@ function AnalysisForm() {
               </Box>
             </Box>
           )}
+
+          {/* 개발자 옵션 */}
+          <Divider />
+          <DevModeBox>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+              <BugReportIcon sx={{ color: '#ff9800', fontSize: 20 }} />
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#ff9800' }}>
+                개발자 옵션
+              </Typography>
+            </Box>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={isTest}
+                  onChange={(e) => setIsTest(e.target.checked)}
+                  sx={{
+                    color: '#ff9800',
+                    '&.Mui-checked': {
+                      color: '#ff9800',
+                    },
+                  }}
+                />
+              }
+              label={
+                <Box>
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                    테스트 모드
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    활성화 시 문서가 저장되지 않아 표절 검사에 포함되지 않습니다
+                  </Typography>
+                </Box>
+              }
+            />
+          </DevModeBox>
 
           {/* 에러 메시지 */}
           {error && (
@@ -323,13 +444,14 @@ function AnalysisForm() {
                 분석 요청 중...
               </Box>
             ) : (
-              '🚀 분석 시작하기'
+              '분석 시작하기'
             )}
           </StyledSubmitButton>
 
           {/* 안내 텍스트 */}
           <Typography variant="caption" color="text.secondary" align="center" sx={{ pt: 1 }}>
             분석은 최대 2-3분 정도 소요됩니다.
+            {!isTest && ' ⚠️ 테스트 모드가 꺼져있어 문서가 저장됩니다.'}
           </Typography>
         </Stack>
       </form>

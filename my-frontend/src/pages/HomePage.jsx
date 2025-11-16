@@ -117,6 +117,22 @@ function HomePage() {
           {/* 사용자 환영 섹션 */}
           <HeroSection sx={{ position: 'relative', zIndex: 1 }}>
             <Box sx={{ position: 'relative', zIndex: 2 }}>
+              {/* 🆕 서울대 로고 추가 */}
+              <Box
+                component="img"
+                src="/snu_ui_download.png"
+                alt="Seoul National University"
+                sx={{
+                  width: 60,
+                  height: 60,
+                  mb: 2,
+                  borderRadius: 1,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                  background: 'white',
+                  padding: 0.5,
+                }}
+              />
+              
               <Typography
                 variant="h4"
                 component="h1"
@@ -126,7 +142,7 @@ function HomePage() {
                   fontSize: { xs: '1.8rem', sm: '2.2rem', md: '2.5rem' },
                 }}
               >
-                환영합니다! 👋
+                환영합니다!
               </Typography>
               <Typography
                 variant="h6"
@@ -163,6 +179,24 @@ function HomePage() {
           {/* 메인 히어로 섹션 */}
           <HeroSection sx={{ textAlign: 'center', position: 'relative', zIndex: 1 }}>
             <Box sx={{ position: 'relative', zIndex: 2 }}>
+              {/* 🆕 서울대 로고 추가 (메인) */}
+              <Box
+                component="img"
+                src="/snu_ui_download.png"
+                alt="Seoul National University"
+                sx={{
+                  width: { xs: 80, sm: 100, md: 120 },
+                  height: { xs: 80, sm: 100, md: 120 },
+                  mb: 3,
+                  margin: '0 auto 1.5rem',
+                  display: 'block',
+                  borderRadius: 2,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+                  background: 'white',
+                  padding: 1.5,
+                }}
+              />
+              
               <Typography
                 variant="h3"
                 component="h1"
@@ -299,6 +333,23 @@ function HomePage() {
             }}
           >
             <CardContent>
+              {/* 🆕 서울대 로고 추가 (배너) */}
+              <Box
+                component="img"
+                src="/snu_ui_download.png"
+                alt="Seoul National University"
+                sx={{
+                  width: 50,
+                  height: 50,
+                  mb: 2,
+                  margin: '0 auto 1rem',
+                  display: 'block',
+                  borderRadius: 1,
+                  background: 'white',
+                  padding: 0.5,
+                }}
+              />
+              
               <Typography
                 variant="h6"
                 sx={{

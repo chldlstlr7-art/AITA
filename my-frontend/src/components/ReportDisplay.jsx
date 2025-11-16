@@ -28,42 +28,42 @@ import { styled, alpha } from '@mui/material/styles';
 const summaryFieldsConfig = [
   {
     key: 'assignment_type',
-    label: '📌 과제 유형',
+    label: '과제 유형',
     icon: AssignmentIcon,
     description: '제출된 문서의 분류',
     color: '#667eea'
   },
   {
     key: 'Core_Thesis',
-    label: '🎯 핵심 주장',
+    label: '핵심 주장',
     icon: FlagIcon,
     description: '글의 가장 중요한 주장',
     color: '#f5576c'
   },
   {
     key: 'Problem_Framing',
-    label: '❓ 문제 제기',
+    label: '문제 제기',
     icon: HelpOutlineIcon,
     description: '해결하려는 문제 정의',
     color: '#fa8231'
   },
   {
     key: 'Claim',
-    label: '💡 세부 주장',
+    label: '세부 주장',
     icon: LightbulbIcon,
     description: '핵심 주장을 뒷받침하는 세부 논점',
     color: '#4caf50'
   },
   {
     key: 'Reasoning',
-    label: '🔍 논거',
+    label: '논거',
     icon: SearchIcon,
     description: '주장을 뒷받침하는 근거와 논리',
     color: '#2196f3'
   },
   {
     key: 'key_concepts',
-    label: '🏷️ 주요 키워드',
+    label: '주요 키워드',
     icon: LocalOfferIcon,
     description: '문서의 핵심 개념',
     color: '#9c27b0'
@@ -124,14 +124,13 @@ const copyToClipboard = (text) => {
   }
 };
 
-function ReportDisplay({ data }) {
+function ReportDisplay({ data, userAssignmentType }) {
   if (!data) return null;
 
   const { summary = {} } = data;
 
   return (
     <Box sx={{ mt: 3 }}>
-      {/* 분석 요약 섹션 */}
       <Fade in timeout={600}>
         <RootCard elevation={0}>
           <CardContent sx={{ p: 4 }}>
@@ -173,10 +172,16 @@ function ReportDisplay({ data }) {
             {/* 정렬된 순서로 요약 필드 렌더링 */}
             <Stack spacing={3}>
               {summaryFieldsConfig.map((field) => {
-                const value = summary[field.key];
+                // 🎯 과제 유형: 사용자가 선택한 값이 있으면 그것을 사용, 없으면 백엔드 값
+                let value = summary[field.key];
+                if (field.key === 'assignment_type') {
+                  value = userAssignmentType || summary[field.key] || 'AI 자동 판단';
+                }
+                
                 if (!value) return null;
 
                 const IconComponent = field.icon;
+                const displayValue = Array.isArray(value) ? value.join(', ') : value;
 
                 return (
                   <SectionCard key={field.key} elevation={0} fieldcolor={field.color}>
@@ -206,39 +211,16 @@ function ReportDisplay({ data }) {
                           {field.description}
                         </Typography>
 
-                        {/* 과제 유형은 Chip으로 표시 */}
-                        {field.key === 'assignment_type' && (
-                          <Chip 
-                            label={value} 
-                            color={value === '분석 불가능' ? 'error' : 'primary'} 
-                            sx={{ fontWeight: 700, fontSize: '0.9rem' }}
-                          />
-                        )}
-
-                        {/* 주요 키워드는 Chip 리스트로 표시 */}
-                        {field.key === 'key_concepts' && Array.isArray(value) && (
-                          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
-                            {value.map((keyword, i) => (
-                              <Chip 
-                                key={i} 
-                                label={keyword} 
-                                variant="outlined" 
-                                size="small"
-                                sx={{ 
-                                  borderColor: alpha(field.color, 0.4),
-                                  color: field.color,
-                                  fontWeight: 600,
-                                  '&:hover': {
-                                    bgcolor: alpha(field.color, 0.08),
-                                  }
-                                }}
-                              />
-                            ))}
-                          </Stack>
-                        )}
-
-                        {/* 나머지 필드는 텍스트로 표시 */}
-                        {field.key !== 'assignment_type' && field.key !== 'key_concepts' && (
+                        {field.key === 'assignment_type' ? (
+                          <Box>
+                            <Chip 
+                              label={value} 
+                              color={value === '분석 불가능' ? 'error' : 'primary'} 
+                              sx={{ fontWeight: 700, fontSize: '0.9rem' }}
+                            />
+                            
+                          </Box>
+                        ) : (
                           <Typography 
                             variant="body1" 
                             sx={{ 
@@ -247,7 +229,7 @@ function ReportDisplay({ data }) {
                               color: 'text.primary'
                             }}
                           >
-                            {typeof value === 'object' ? JSON.stringify(value) : value}
+                            {typeof displayValue === 'object' ? JSON.stringify(displayValue) : displayValue}
                           </Typography>
                         )}
                       </Box>
@@ -280,7 +262,7 @@ function ReportDisplay({ data }) {
                         color: '#9c27b0'
                       }}
                     >
-                      📊 논리 흐름
+                      논리 흐름
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
                       문서의 논리적 흐름 시각화
