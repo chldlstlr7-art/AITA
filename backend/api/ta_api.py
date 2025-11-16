@@ -476,3 +476,102 @@ def trigger_bulk_auto_grading(assignment_id):
     return jsonify({
         "message": f"Assignment {assignment_id}에 대한 일괄 자동 채점 작업을 백그라운드에서 시작했습니다."
     }), 202
+
+
+
+@ta_bp.route('/assignments/<int:assignment_id>', methods=['PUT'])
+@ta_required()
+def update_assignment(assignment_id):
+    """
+    [신규] 과제 정보 수정 API
+    - (가정) 이 TA가 해당 과제가 속한 과목의 조교인지 서비스에서 확인합니다.
+    - 수정 가능한 필드: assignment_name, description, due_date 등
+    """
+    if not current_app.course_service:
+        return jsonify({"error": "서비스가 초기화되지 않았습니다."}), 503
+        
+    data = request.json
+    if not data:
+        return jsonify({"error": "수정할 데이터가 필요합니다."}), 400
+        
+    try:
+        ta_user = g.user
+        
+        # (가정) 서비스가 ID, 데이터, TA ID를 받아 권한 확인 후 수정
+        assignment = current_app.course_service.update_assignment(assignment_id, data, ta_user.id)
+        
+        return jsonify({
+            "message": "과제 정보가 수정되었습니다.",
+            "assignment": {
+                "id": assignment.id, 
+                "assignment_name": assignment.assignment_name,
+                "description": assignment.description,
+                "due_date": assignment.due_date.isoformat() if assignment.due_date else None
+            }
+        }), 200
+        
+    except ValueError as e:
+        # 404 (Not Found), 403 (Forbidden), or 400 (Bad Data)
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        print(f"[TA API /assignments/{assignment_id} PUT] Error: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "과제 정보 수정 중 서버 오류 발생"}), 500
+
+
+@ta_bp.route('/courses/<int:course_id>', methods=['DELETE'])
+@ta_required()
+def delete_course(course_id):
+    """
+    [신규] 과목 삭제 API
+    - (가정) 이 TA가 해당 과목의 조교(assistants)인지 서비스에서 확인합니다.
+    - (가정) 과목에 연결된 과제, 제출물이 모두 삭제되거나, 
+    -        제출물이 있어 삭제가 금지되는 로직은 서비스 레이어에 구현되어 있습니다.
+    """
+    if not current_app.course_service:
+        return jsonify({"error": "서비스가 초기화되지 않았습니다."}), 503
+        
+    try:
+        # @ta_required가 g.user에 현재 TA 유저 객체를 로드한다고 가정
+        ta_user = g.user 
+        
+        # (가정) 서비스가 course_id와 ta_user.id를 받아 권한 확인 후 삭제
+        current_app.course_service.delete_course(course_id, ta_user.id)
+        
+        return jsonify({"message": f"과목(ID: {course_id})이(가) 삭제되었습니다."}), 200
+        
+    except ValueError as e:
+        # 404 (Not Found), 403 (Forbidden), 400 (Bad Request - 예: 리포트 존재)
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        print(f"[TA API /courses/{course_id} DELETE] Error: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "과목 삭제 중 서버 오류 발생"}), 500
+
+@ta_bp.route('/assignments/<int:assignment_id>/criteria', methods=['GET'])
+@ta_required()
+def get_assignment_criteria(assignment_id):
+    """ 
+    [신규] 과제 평가 기준 조회 API 
+    - (가정) 이 TA가 해당 과목의 조교인지 서비스에서 확인합니다.
+    """
+    if not current_app.course_service:
+        return jsonify({"error": "서비스가 초기화되지 않았습니다."}), 503
+        
+    try:
+        ta_user = g.user
+        
+        # (가정) 서비스가 ID와 TA ID를 받아 권한 확인 후 기준 반환
+        # (가정) 서비스가 DB의 JSON 문자열을 파싱하여 dict로 반환
+        criteria = current_app.course_service.get_assignment_criteria(assignment_id, ta_user.id)
+        
+        # criteria는 dict 또는 list 형태의 JSON 객체여야 함
+        return jsonify(criteria), 200 
+        
+    except ValueError as e:
+        # 404 (Not Found) or 403 (Forbidden)
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        print(f"[TA API /assignments/{assignment_id}/criteria GET] Error: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "평가 기준 조회 중 서버 오류 발생"}), 500

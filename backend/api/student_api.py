@@ -1,17 +1,18 @@
 import threading
 import uuid
 import json
-from flask import Blueprint, request, jsonify, Response
+from flask import Blueprint, request, jsonify, Response, send_file
 from werkzeug.utils import secure_filename
 from flask import current_app
 import traceback
+import io
+import plotly.io as pio
 # --- [유지] services 폴더의 로직 임포트 ---
 from services.parsing_service import extract_text
 from services.qa_service import generate_deep_dive_question
 from services.advancement_service import generate_advancement_ideas
-from services import flow_graph_services
 from services.course_management_service import CourseManagementService
-
+from services.flow_graph_services import _create_flow_graph_figure
 
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
@@ -593,70 +594,6 @@ def request_advancement_ideas(report_id):
     }), 202
 
 
-@student_bp.route("/report/<report_id>/flow-graph", methods=["GET"])
-@jwt_required()
-def get_flow_graph(report_id):
-    """
-    GET /api/student/report/<report_id>/flow-graph
-    Report의 summary 필드 내 "Flow_Pattern" 데이터를 기반으로 
-    Plotly.js용 그래프 JSON을 반환합니다.
-    """
-    # 1. 사용자 인증 및 리포트 소유권 확인 (기존 헬퍼 함수 사용)
-    user_id = get_jwt_identity()
-    report, error_response = get_report_or_404(report_id, user_id)
-    if error_response:
-        return error_response
-
-    # 2. 리포트 상태 확인 (완료된 리포트인지)
-    if report.status not in ["completed", "processing_questions", "processing_comparison"]:
-        return jsonify({
-            "error": "Graph cannot be generated. Report analysis is not complete."
-        }), 409
-
-    # 3. DB에서 summary (JSON 문자열) 가져오기
-    summary_str = report.summary
-    if not summary_str:
-        return jsonify({"error": "No summary data found for this report"}), 404
-
-    # 4. JSON 문자열을 Python 객체(dict)로 파싱
-    try:
-        summary_dict = json.loads(summary_str)
-    except json.JSONDecodeError:
-        print(f"[{report_id}] CRITICAL: Failed to parse summary JSON.")
-        return jsonify({"error": "Corrupted summary data in database"}), 500
-
-    # 5. summary 딕셔너리에서 "flow pattern" 추출 (핵심 수정 사항)
-    logic_flow_data = summary_dict.get("Flow_Pattern")
-    
-    if not logic_flow_data or not isinstance(logic_flow_data, dict):
-        return jsonify({"error": "No 'flow pattern' data found within the summary"}), 404
-
-    # 6. 파싱된 "flow pattern" 데이터에서 nodes와 edges 추출
-    nodes = logic_flow_data.get("nodes")
-    edges = logic_flow_data.get("edges")
-
-    if not nodes or not isinstance(edges, list): # edges는 리스트여야 함
-        return jsonify({"error": "Flow pattern data is incomplete (missing nodes or edges)"}), 404
-
-    # 7. flow_graph_services를 호출하여 Plotly JSON "문자열" 생성
-    try:
-        graph_json_string = flow_graph_services.generate_flow_graph_json(
-            nodes,
-            edges
-        )
-        
-        # 8. 생성된 JSON 문자열을 그대로 Response로 반환
-        return Response(graph_json_string, content_type="application/json")
-
-    except ValueError as ve:
-        # (예: "nodes가 비어 있습니다." 등 서비스 내부 오류)
-        print(f"[{report_id}] Graph generation failed (ValueError): {ve}")
-        return jsonify({"error": f"Graph generation error: {ve}"}), 500
-    except Exception as e:
-        # (예: Plotly 라이브러리 오류 등)
-        print(f"[{report_id}] Graph generation failed (Exception): {e}")
-        return jsonify({"error": "An unexpected error occurred while generating the graph"}), 500
-
 
 # --- [신규] 학생 대시보드 API ---
 @student_bp.route('/dashboard/<int:target_student_id>', methods=['GET'])
@@ -697,6 +634,7 @@ def get_student_dashboard_by_id(target_student_id):
     except Exception as e:
         print(f"[Student API /dashboard/{target_student_id} GET] Error: {e}")
         return jsonify({"error": "대시보드 조회 중 서버 오류 발생"}), 500
+
 # --- [신규] 학생 리포트 과제 제출 API ---
 @student_bp.route("/report/<report_id>/submit", methods=["POST"])
 @jwt_required()
@@ -777,3 +715,94 @@ def get_student_assignments_for_course(course_id):
         print(f"[Student API /courses/{course_id}/assignments GET] Error: {e}")
         traceback.print_exc()
         return jsonify({"error": "과제 목록 조회 중 서버 오류 발생"}), 500
+
+
+@student_bp.route("/report/<report_id>/flow-graph", methods=["GET"])
+@jwt_required()
+def get_flow_graph(report_id):
+    """
+    [신규] 분석 리포트의 논리 흐름(logic_flow) 데이터를 
+    Plotly 그래프 PNG 이미지로 반환합니다.
+    """
+    user_id = get_jwt_identity()
+    report, error_response = get_report_or_404(report_id, user_id)
+    if error_response:
+        return error_response
+
+    # 1. 완료/에러 상태 확인 ( ...이전 코드 동일... )
+    completed_states = ["processing_comparison", "processing_questions", "processing_advancement", "completed"]
+    if report.status not in completed_states:
+        if report.status == "error":
+            return jsonify({"status": "error", "message": report.error_message or "Unknown error"}), 500
+        # processing, processing_analysis 상태
+        return jsonify({"status": report.status, "message": "Report analysis is not yet complete."}), 202
+
+    # 2. [수정] summary 데이터 파싱
+    try:
+        # report.logic_flow 대신 report.summary를 파싱합니다.
+        summary_data = json.loads(report.summary) if report.summary else {}
+    except json.JSONDecodeError as e:
+        print(f"[get_flow_graph:{report_id}] CRITICAL: JSONDecodeError (summary): {e}")
+        return jsonify({"status": "error", "message": "Failed to parse summary data."}), 500
+    
+    nodes_dict = {} # 최종적으로 서비스에 넘길 딕셔너리
+    edges = []      # 엣지 리스트
+    
+    try:
+        flow_pattern_data = summary_data.get("Flow_Pattern", {})
+        
+        # 'nodes'는 이제 리스트일 것으로 예상
+        nodes_list_or_dict = flow_pattern_data.get("nodes", []) 
+        edges = flow_pattern_data.get("edges", [])
+
+        # 4. [수정] 'nodes' 데이터 형식을 딕셔너리로 변환/통일
+        
+        # [신규] 'nodes'가 리스트(List)인 경우 (새로운 형식)
+        if isinstance(nodes_list_or_dict, list):
+            for node_obj in nodes_list_or_dict:
+                # 각 항목이 {id: ..., summary: ...} 형태인지 확인
+                if isinstance(node_obj, dict) and "id" in node_obj and "summary" in node_obj:
+                    # { "A1": "문제 제기\n..." } 형식으로 변환
+                    nodes_dict[node_obj["id"]] = node_obj["summary"]
+                else:
+                    print(f"[get_flow_graph:{report_id}] WARNING: Invalid node object in nodes list: {str(node_obj)}")
+        
+        # [기존] 'nodes'가 딕셔너리(Dict)인 경우 (이전 형식 호환)
+        elif isinstance(nodes_list_or_dict, dict):
+            print(f"[get_flow_graph:{report_id}] INFO: 'nodes' field is a dict (legacy format). Using as-is.")
+            nodes_dict = nodes_list_or_dict
+        
+        # 'nodes' 변수에 최종 변환된 딕셔너리를 할당
+        nodes = nodes_dict
+
+    except AttributeError as e:
+        # summary_data가 딕셔너리가 아닌 경우 등
+        print(f"[get_flow_graph:{report_id}] CRITICAL: Invalid summary structure: {e}")
+        nodes = {} # 에러 시 빈 딕셔너리로 초기화
+        edges = []
+
+    # 5. [기존 4번] 노드 유효성 검사 (변환된 'nodes' 딕셔너리 기준)
+    if not nodes: # nodes_dict가 비어있는 경우
+        print(f"[get_flow_graph:{report_id}] No valid nodes found after parsing summary's Flow_Pattern.")
+        return jsonify({"status": "error", "message": "No logic flow data available to generate graph."}), 404
+
+    # 6. [기존 5번] 그래프 생성
+    try:
+        # _create_flow_graph_figure는 이제 항상 딕셔너리 형태의 'nodes'를 받음
+        fig = _create_flow_graph_figure(nodes, edges)
+        
+        # 7. [기존 6번] PNG 이미지 바이트로 변환 ( ...이하 동일... )
+        img_bytes = pio.to_image(fig, format="png")
+        
+        # 8. [기존 7번] PNG 바이트를 send_file을 통해 반환
+        return send_file(
+            io.BytesIO(img_bytes),
+            mimetype='image/png',
+            as_attachment=False 
+        )
+    
+    except Exception as e:
+        # [수정] 에러 메시지 명확화
+        print(f"[get_flow_graph:{report_id}] CRITICAL: Failed to generate graph image: {e}")
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": "An error occurred while generating the graph image."}), 500
