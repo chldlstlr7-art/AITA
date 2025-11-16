@@ -66,7 +66,8 @@ def analyze_report():
     POST /api/student/analyze
     프론트엔드에서 파일과 폼 데이터를 받아 분석을 '시작'시킴
     """
-    from app import background_analysis_step1
+    # [핵심 수정] app.py에 정의된 새 함수 이름을 임포트합니다.
+    from app import background_analysis_step1_analysis
     print("\n--- [Debug] /api/student/analyze ---")
     try:
         print(f"Request Headers: {request.headers}")
@@ -135,14 +136,15 @@ def analyze_report():
         return jsonify({"error": "Failed to initialize report in database"}), 500
     
     thread = threading.Thread(
-        target=background_analysis_step1,
+        # [핵심 수정] 새 백그라운드 함수 이름을 타겟으로 지정합니다.
+        target=background_analysis_step1_analysis,
         args=(
             report_id, 
             text, 
             doc_type, 
             original_filename,
-            JSON_SYSTEM_PROMPT,        # [신규] 5번째 인자
-            COMPARISON_SYSTEM_PROMPT   # [신규] 6번째 인자
+            JSON_SYSTEM_PROMPT,       # [신규] 5번째 인자
+            COMPARISON_SYSTEM_PROMPT  # [신규] 6번째 인자
         )
     )
     thread.start()
@@ -166,7 +168,7 @@ def get_report(report_id):
     if status == "error":
         return jsonify({"status": "error", "data": {"error": report.error_message}}), 500
         
-    # 'completed' 또는 'processing_questions'
+    # 'completed' 또는 'processing_comparison', 'processing_questions'
     
     # --- [유지] ---
     # DB의 JSON '문자열' 필드들을 파이썬 '객체'로 변환합니다.
@@ -234,7 +236,18 @@ def get_report(report_id):
 
     }
     
-    # status와 함께 최종 데이터를 반환합니다.
+    # [수정] processing_comparison 상태일 때 summary만 반환
+    if status == "processing_comparison":
+        return jsonify({
+            "status": status,
+            "data": {
+                "summary": summary_data,
+                "is_test": report.is_test,
+                "text_snippet": report.text_snippet
+            }
+        })
+
+    # status와 함께 최종 데이터를 반환합니다. (completed, processing_questions)
     return jsonify({"status": status, "data": data})
 
 @student_bp.route("/report/<report_id>/question/next", methods=["POST"])
@@ -521,7 +534,7 @@ def request_advancement_ideas(report_id):
     # 2. (선택적) 이미 생성 중인지 확인 (is_generating_advancement 같은 플래그가 있다면)
     # if report.is_generating_advancement:
     #     return jsonify({"message": "Generation is already in progress."}), 409 # Conflict
-         
+            
     # 3. 백그라운드 작업 시작
     app = current_app._get_current_object()
     thread = threading.Thread(
@@ -552,7 +565,7 @@ def get_flow_graph(report_id):
         return error_response
 
     # 2. 리포트 상태 확인 (완료된 리포트인지)
-    if report.status not in ["completed", "processing_questions"]:
+    if report.status not in ["completed", "processing_questions", "processing_comparison"]:
         return jsonify({
             "error": "Graph cannot be generated. Report analysis is not complete."
         }), 409
