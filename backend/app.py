@@ -11,7 +11,12 @@ import re
 import traceback
 import json
  
-from services.analysis_service import perform_full_analysis_and_comparison, _parse_comparison_scores, _filter_high_similarity_reports
+from services.analysis_service import (
+    perform_step1_analysis_and_embedding, 
+    perform_step2_comparison, 
+    _parse_comparison_scores, 
+    _filter_high_similarity_reports
+)
 from services.qa_service import generate_initial_questions, generate_deep_dive_question, generate_refill_questions, _distribute_questions
 from services.analysis_ta_service import AnalysisTAService 
 from services.grading_service import GradingService
