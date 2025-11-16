@@ -148,16 +148,24 @@ class CourseManagementService:
         db.session.commit()
         return assignment
 
-    def get_students_in_course(self, course_id):
-        """ 5. 특정 과목 수강 학생 ID 목록 얻기 """
+    def get_students_in_course(self, course_id, ta_user_id):
+        """ [수정] 5. 특정 과목 수강 학생 ID 목록 얻기 (TA 권한 확인 추가) """
         course = self._get_course(course_id)
+        
+        # [수정] TA 권한 확인
+        self._check_ta_permission(ta_user_id, course_id)
+        
         # lazy='dynamic'이므로 .all() 또는 반복문 필요
         students = course.students.all() 
         return [{"id": s.id, "email": s.email, "username": s.username} for s in students]
 
-    def get_submissions_for_assignment(self, assignment_id):
-        """ 6. 특정 과제에 제출된 리포트 ID 및 학생 ID 얻기 """
+    def get_submissions_for_assignment(self, assignment_id, ta_user_id):
+        """ [수정] 6. 특정 과제에 제출된 리포트 ID 및 학생 ID 얻기 (TA 권한 확인 추가) """
         assignment = self._get_assignment(assignment_id)
+        
+        # [수정] TA 권한 확인
+        self._check_ta_permission(ta_user_id, assignment.course_id)
+        
         # 'reports' relationship 사용
         submissions = db.session.query(
             AnalysisReport.id, 
@@ -185,9 +193,13 @@ class CourseManagementService:
             for r in submissions
         ]
 
-    def add_student_to_course(self, course_id, student_email):
-        """ 7. 특정 과목에 학생 등록 """
+    def add_student_to_course(self, course_id, student_email, ta_user_id):
+        """ [수정] 7. 특정 과목에 학생 등록 (TA 권한 확인 추가) """
         course = self._get_course(course_id)
+        
+        # [수정] TA 권한 확인
+        self._check_ta_permission(ta_user_id, course_id)
+        
         student = User.query.filter(
             func.lower(User.email) == func.lower(student_email),
             User.role == 'student'
@@ -203,9 +215,13 @@ class CourseManagementService:
         db.session.commit()
         return student
 
-    def remove_student_from_course(self, course_id, student_id):
-        """ 7. 특정 과목에서 학생 삭제 """
+    def remove_student_from_course(self, course_id, student_id, ta_user_id):
+        """ [수정] 7. 특정 과목에서 학생 삭제 (TA 권한 확인 추가) """
         course = self._get_course(course_id)
+        
+        # [수정] TA 권한 확인
+        self._check_ta_permission(ta_user_id, course_id)
+        
         student = User.query.filter_by(id=student_id, role='student').first()
 
         if not student:
@@ -237,9 +253,13 @@ class CourseManagementService:
         db.session.commit()
         return report
 
-    def get_assignment_details(self, assignment_id):
-        """ 9. 과제 상세 정보 조회 """
+    def get_assignment_details(self, assignment_id, ta_user_id):
+        """ [수정] 9. 과제 상세 정보 조회 (TA 권한 확인 추가) """
         assignment = self._get_assignment(assignment_id)
+        
+        # [수정] TA 권한 확인
+        self._check_ta_permission(ta_user_id, assignment.course_id)
+        
         return {
             "id": assignment.id,
             "course_id": assignment.course_id,
@@ -249,9 +269,13 @@ class CourseManagementService:
             "grading_criteria": assignment.get_criteria_dict() # JSON -> dict
         }
 
-    def get_assignment_stats(self, assignment_id):
-        """ 11. 과제별 통계 조회 """
+    def get_assignment_stats(self, assignment_id, ta_user_id):
+        """ [수정] 11. 과제별 통계 조회 (TA 권한 확인 추가) """
         assignment = self._get_assignment(assignment_id)
+        
+        # [수정] TA 권한 확인
+        self._check_ta_permission(ta_user_id, assignment.course_id)
+        
         course = assignment.course
         
         total_students = course.students.count()
@@ -367,17 +391,22 @@ class CourseManagementService:
             
         return courses_list
 
-    def get_assignments_for_course(self, course_id):
-        """ [수정] 특정 과목의 모든 과제 목록을 반환합니다. (성능 최적화) """
-        course = db.session.get(Course, course_id)
-        if not course:
-            raise ValueError("과목을 찾을 수 없습니다.")
+    def get_assignments_for_course(self, course_id, ta_user_id):
+        """
+        [수정] 특정 과목(course_id)에 속한 모든 과제 목록을 반환합니다.
+        (TA 권한 확인 추가)
+        """
+        # 1. 과목(Course) 객체를 찾고, TA 권한을 확인합니다.
+        course = self._get_course(course_id)
+        self._check_ta_permission(ta_user_id, course_id)
 
+        # 2. 과목에 연결된 과제들을 조회합니다.
         assignments = db.session.query(Assignment).filter_by(course_id=course_id).order_by(
             db.func.coalesce(Assignment.due_date, datetime(1900, 1, 1)).desc(), 
             Assignment.id.desc()
         ).all()
 
+        # 3. 프론트엔드에 전달할 형태로 데이터를 직렬화(serialize)합니다.
         assignments_list = []
         for assign in assignments:
             # [최적화] len(relationship) 대신 count() 쿼리 사용
@@ -405,7 +434,30 @@ class CourseManagementService:
         if not is_enrolled:
             raise ValueError("Student is not enrolled in this course.")
             
-        return self.get_assignments_for_course(course_id)
+        # [수정] 학생용 API는 TA 권한이 필요 없으므로 ta_user_id 없이 호출
+        # (단, get_assignments_for_course가 ta_user_id를 필수로 받으므로,
+        #  학생용/TA용을 분리하거나, 이 함수에 TA 권한 확인을 빼야 함)
+        
+        # [임시 수정] 학생은 권한 검사가 필요 없으므로, TA용 함수를 재사용하지 않고
+        # TA 권한 검사만 뺀 로직을 여기에 구현합니다.
+        assignments = db.session.query(Assignment).filter_by(course_id=course_id).order_by(
+            db.func.coalesce(Assignment.due_date, datetime(1900, 1, 1)).desc(), 
+            Assignment.id.desc()
+        ).all()
+
+        assignments_list = []
+        for assign in assignments:
+            report_count = db.session.query(AnalysisReport.id).filter_by(assignment_id=assign.id).count()
+            
+            assignments_list.append({
+                "id": assign.id,
+                "assignment_name": assign.assignment_name,
+                "description": assign.description,
+                "due_date": assign.due_date.isoformat() if assign.due_date else None,
+                "report_count": report_count
+            })
+        return assignments_list
+
 
     def submit_report_to_assignment(self, report_id, assignment_id, student_id):
         """ [신규] 학생이 분석 완료된 리포트를 과제에 제출합니다. """
@@ -437,6 +489,7 @@ class CourseManagementService:
     # --- Helper Functions (오류 처리용) ---
     
     def _get_course(self, course_id):
+        # [수정] get()은 integer/uuid에만 사용. id가 아닐 수 있으니 get() 사용
         course = db.session.get(Course, course_id)
         if not course:
             raise ValueError(f"Course ID {course_id}를 찾을 수 없습니다.")
