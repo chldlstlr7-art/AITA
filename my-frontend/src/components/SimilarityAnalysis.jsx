@@ -55,7 +55,7 @@ const StyledAccordion = styled(Accordion)(({ theme }) => ({
 const ScoreChip = ({ score }) => {
   const numeric = Number(score) || 0;
   const getConfig = () => {
-    // 🔄 수정: 점수가 높을수록 위험
+    // 🔥 수정: 30점 이상부터 표절 의심
     if (numeric >= 40) return { 
       color: 'error', 
       icon: <ErrorIcon fontSize="small" />,
@@ -63,7 +63,7 @@ const ScoreChip = ({ score }) => {
       bgcolor: (t) => alpha(t.palette.error.main, 0.12),
       textColor: 'error.main'
     };
-    if (numeric >= 25) return { 
+    if (numeric >= 30) return { 
       color: 'warning', 
       icon: <WarningIcon fontSize="small" />,
       label: '주의',
@@ -170,7 +170,22 @@ function SimilarityAnalysis({ data }) {
     high_similarity_candidates = []
   } = data;
 
-  const displayCandidates = high_similarity_candidates;
+  // 🔥 핵심 수정: similarity_details에서 30점 이상인 것만 필터링
+  const filteredCandidates = similarity_details
+    .filter(item => {
+      const score = Number(item.total_score) || 0;
+      return score >= 30; // 30점 이상만 표시
+    })
+    .sort((a, b) => (Number(b.total_score) || 0) - (Number(a.total_score) || 0)); // 점수 높은 순 정렬
+
+  // 🔥 표시할 데이터: 필터링된 결과 우선 사용
+  const displayCandidates = filteredCandidates.length > 0 
+    ? filteredCandidates 
+    : high_similarity_candidates;
+
+  console.log('[SimilarityAnalysis] 📊 원본 데이터:', similarity_details.length, '건');
+  console.log('[SimilarityAnalysis] 🔍 30점 이상 필터링:', filteredCandidates.length, '건');
+  console.log('[SimilarityAnalysis] 📌 표시할 데이터:', displayCandidates.length, '건');
 
   return (
     <Box>
@@ -190,7 +205,7 @@ function SimilarityAnalysis({ data }) {
           <Box>
             <Typography variant="h4" sx={{ fontWeight: 800 }}>표절 의심 문서</Typography>
             <Typography variant="body2" color="text.secondary">
-              LLM 정밀 비교 결과 · 20점 이상 유사도 발견 ({displayCandidates.length}건)
+              LLM 정밀 비교 결과
             </Typography>
           </Box>
         </Box>
@@ -240,10 +255,10 @@ function SimilarityAnalysis({ data }) {
                               bgcolor: (t) => alpha(t.palette.primary.main, 0.12),
                               '& .MuiLinearProgress-bar': {
                                 borderRadius: 2,
-                                // 🔄 수정: 점수가 높을수록 빨간색
+                                // 🔥 수정: 30점 기준 적용
                                 background: (t) => numeric >= 40 
                                   ? t.palette.error.main 
-                                  : numeric >= 25 
+                                  : numeric >= 30 
                                   ? t.palette.warning.main 
                                   : t.palette.success.main
                               }
@@ -284,7 +299,7 @@ function SimilarityAnalysis({ data }) {
                       </Box>
 
                       {/* LLM 비교 리포트 */}
-                      {similarity_details[index]?.llm_comparison_report && (
+                      {item.llm_comparison_report && (
                         <>
                           <Divider sx={{ my: 2 }} />
                           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -294,7 +309,7 @@ function SimilarityAnalysis({ data }) {
                             <Tooltip title="리포트 복사" arrow>
                               <IconButton 
                                 size="small" 
-                                onClick={() => copyToClipboard(similarity_details[index].llm_comparison_report)}
+                                onClick={() => copyToClipboard(item.llm_comparison_report)}
                                 sx={{ 
                                   bgcolor: (t) => alpha(t.palette.primary.main, 0.08),
                                   '&:hover': { bgcolor: (t) => alpha(t.palette.primary.main, 0.15) }
@@ -310,7 +325,7 @@ function SimilarityAnalysis({ data }) {
                             bgcolor: 'background.paper',
                             border: (t) => `1px solid ${t.palette.divider}`
                           }}>
-                            {formatReportText(similarity_details[index].llm_comparison_report)}
+                            {formatReportText(item.llm_comparison_report)}
                           </Box>
                         </>
                       )}
@@ -335,9 +350,7 @@ function SimilarityAnalysis({ data }) {
                 <Typography variant="h6" color="text.primary" fontWeight={700}>
                   표절 의심 문서가 발견되지 않았습니다
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  모든 문서의 유사도 점수가 20점 미만입니다.
-                </Typography>
+                
               </Stack>
             </GlassCard>
           )}
@@ -369,7 +382,7 @@ function SimilarityAnalysis({ data }) {
             }}
           >
             <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-              📌 전체 비교 결과 (similarity_details): {similarity_details.length}건
+              📌 전체 비교 결과 (similarity_details): {similarity_details.length}건 | 30점 이상: {filteredCandidates.length}건
             </Typography>
             <Box 
               component="pre" 

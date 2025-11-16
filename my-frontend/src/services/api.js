@@ -155,6 +155,33 @@ export const getAdvancementIdeas = async (reportId) => {
   }
 };
 
+// 🆕 발전 아이디어 생성 요청 (비동기 방식)
+export const requestAdvancementIdeas = async (reportId) => {
+  try {
+    console.log(`[API] 📡 Requesting advancement ideas generation for report: ${reportId}`);
+    
+    // POST 요청으로 백그라운드 작업 시작
+    const response = await apiClient.post(`/api/student/report/${reportId}/advancement`);
+
+    console.log(`[API] ✅ Response status: ${response.status}`);
+    console.log('[API] 📦 Message:', response.data);
+    
+    return response.data; // { message: "Advancement idea generation started..." }
+    
+  } catch (error) {
+    console.error('[API] ❌ requestAdvancementIdeas 에러:', error);
+    
+    if (error.response) {
+      const errorMessage = error.response.data?.error || `HTTP ${error.response.status}`;
+      throw new Error(errorMessage);
+    } else if (error.request) {
+      throw new Error('서버에 연결할 수 없습니다. 네트워크를 확인해주세요.');
+    } else {
+      throw new Error(error.message || '요청 중 알 수 없는 오류가 발생했습니다.');
+    }
+  }
+};
+
 // --- API 요청 시 자동으로 토큰 추가 (활성화됨) ---
 apiClient.interceptors.request.use((config) => {
   const token = localStorage.getItem('accessToken');

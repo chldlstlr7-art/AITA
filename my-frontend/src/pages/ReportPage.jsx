@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import { getReportStatus } from '../services/api.js';
 import { 
   Box, 
@@ -32,8 +32,8 @@ import {
 import { styled, alpha } from '@mui/material/styles';
 import ReportDisplay from '../components/ReportDisplay.jsx';
 import SimilarityAnalysis from '../components/SimilarityAnalysis.jsx';
-import AdvancementIdeas from '../components/AdvancementIdeas.jsx';
 import QAChat from '../components/QAChat.jsx';
+import FloatingAdvancementButton from '../components/FloatingAdvancementButton';
 
 const POLLING_INTERVAL = 3000;
 
@@ -119,7 +119,9 @@ const TabPanel = ({ children, value, index }) => (
 // ==================== Main Component ====================
 
 function ReportPage() {
-  const { reportId } = useParams(); 
+  const { reportId } = useParams();
+  const location = useLocation();
+  
   const [reportData, setReportData] = useState(null);
   const [status, setStatus] = useState('processing_analysis'); 
   const [error, setError] = useState('');
@@ -127,69 +129,85 @@ function ReportPage() {
   const [showAdvancement, setShowAdvancement] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
 
-  // 각 단계별 완료 상태
-  const [step1Complete, setStep1Complete] = useState(false); // 분석 요약
-  const [step2Complete, setStep2Complete] = useState(false); // 표절 의심 문서
-  const [step3Complete, setStep3Complete] = useState(false); // Q&A
+  // 각 단계별 완료 상태 (3단계 구조에 맞게 수정)
+  const [step1Complete, setStep1Complete] = useState(false); // 분석 완료 (summary)
+  const [step2Complete, setStep2Complete] = useState(false); // 유사도 비교 완료 (similarity_details)
+  const [step3Complete, setStep3Complete] = useState(false); // QA 생성 완료 (initialQuestions)
 
-  // 로컬 스토리지에서 파일명 가져오기
-  const [submissionTitle, setSubmissionTitle] = useState('');
-
-  useEffect(() => {
-    const storedFilename = localStorage.getItem(`report_${reportId}_filename`);
-    if (storedFilename) {
-      setSubmissionTitle(storedFilename);
-    } else {
-      setSubmissionTitle('제목 없음');
-    }
-  }, [reportId]);
+  // AnalysisForm에서 전달받은 제목과 제출물 형식
+  const submissionTitle = location.state?.submissionTitle || '제목 없음';
+  const userAssignmentType = location.state?.userAssignmentType;
 
   useEffect(() => {
     let timerId = null;
 
     const pollReport = async () => {
+      // 🔒 완료 또는 에러 상태면 폴링 중지
       if (status === 'completed' || status === 'error') { 
         return; 
       }
 
       try {
+        console.log(`[Polling] 현재 상태: ${status}`);
         const response = await getReportStatus(reportId);
+        console.log('[Polling] 서버 응답:', response);
         
-        if (response.status === 'completed') {
-          setReportData(response.data);
-          setStatus('completed');
-          setStep1Complete(true);
-          setStep2Complete(true);
-          setStep3Complete(true);
-          
-        } else if (response.status === 'processing_analysis') {
-          setLoadingMessage('AI가 리포트를 분석 중입니다... (1/3단계)');
+        // 🎯 상태 1: processing_analysis (분석 중)
+        if (response.status === 'processing_analysis') {
+          setLoadingMessage('AI가 리포트를 분석하고 있습니다... (1/3단계)');
           setStatus('processing_analysis');
+          // data가 null이므로 아무것도 렌더링하지 않음
           timerId = setTimeout(pollReport, POLLING_INTERVAL); 
+        }
+        
+        // 🎯 상태 2: processing_comparison (유사도 비교 중)
+        else if (response.status === 'processing_comparison') {
+          console.log('[Polling] ✅ 1단계 완료! summary 데이터 수신');
+          setReportData(response.data); // summary, text_snippet, is_test
+          setStep1Complete(true); // 🟢 분석 탭 활성화
+          setLoadingMessage('유사 문서를 비교하고 있습니다... (2/3단계)');
+          setStatus('processing_comparison');
           
-        } else if (response.status === 'processing_similarity') {
-          // 1단계(분석 요약) 완료
-          setReportData(response.data);
-          setStep1Complete(true);
-          setLoadingMessage('표절 의심 문서를 분석 중입니다... (2/3단계)');
-          setStatus('processing_similarity');
+          // 🔄 1단계 완료 시 자동으로 분석 탭으로 이동
+          if (activeTab === 0 && !step1Complete) {
+            setActiveTab(0);
+          }
+          
           timerId = setTimeout(pollReport, POLLING_INTERVAL);
-          
-        } else if (response.status === 'processing_questions') {
-          // 2단계(표절 의심 문서) 완료
-          setReportData(response.data); 
+        }
+        
+        // 🎯 상태 3: processing_questions (QA 생성 중)
+        else if (response.status === 'processing_questions') {
+          console.log('[Polling] ✅ 2단계 완료! similarity_details 데이터 수신');
+          setReportData(response.data); // summary + similarity_details
           setStep1Complete(true);
-          setStep2Complete(true);
-          setLoadingMessage('AI가 질문을 생성 중입니다... (3/3단계)');
+          setStep2Complete(true); // 🟢 유사도 탭 활성화
+          setLoadingMessage('AITA가 질문을 생성하고 있습니다... (3/3단계)');
           setStatus('processing_questions');
           timerId = setTimeout(pollReport, POLLING_INTERVAL); 
-          
-        } else if (response.status === 'error') {
-          setError(response.data.error || '분석 중 알 수 없는 오류가 발생했습니다.');
+        }
+        
+        // 🎯 상태 4: completed (모든 작업 완료)
+        else if (response.status === 'completed') {
+          console.log('[Polling] ✅ 3단계 완료! 모든 데이터 수신');
+          setReportData(response.data); // 모든 데이터 포함
+          setStep1Complete(true);
+          setStep2Complete(true);
+          setStep3Complete(true); // 🟢 QA 탭 활성화
+          setStatus('completed');
+          setLoadingMessage('분석이 완료되었습니다!');
+          // 폴링 중지 (return으로 타이머 설정 안 함)
+        }
+        
+        // 🎯 상태 5: error
+        else if (response.status === 'error') {
+          console.error('[Polling] ❌ 에러 발생:', response.data?.error);
+          setError(response.data?.error || '분석 중 알 수 없는 오류가 발생했습니다.');
           setStatus('error');
         }
         
       } catch (err) {
+        console.error('[Polling] 네트워크 에러:', err);
         setError(err.message);
         setStatus('error');
       }
@@ -203,7 +221,7 @@ function ReportPage() {
       }
     };
 
-  }, [reportId, status]);
+  }, [reportId, status, activeTab, step1Complete]);
 
   const handleTabChange = (event, newValue) => {
     // 완료된 탭만 클릭 가능
@@ -216,6 +234,7 @@ function ReportPage() {
     setShowAdvancement(true);
   };
 
+  // 🚨 에러 상태
   if (status === 'error') {
     return (
       <Container maxWidth="lg" sx={{ mt: 4 }}>
@@ -245,22 +264,26 @@ function ReportPage() {
                   textShadow: '0 2px 4px rgba(0,0,0,0.1)',
                 }}
               >
-                 리포트 분석
+                리포트 분석
               </Typography>
-              <Chip
-                icon={<Description sx={{ color: 'white !important' }} />}
-                label="제출물"
-                size="small"
-                sx={{
-                  background: alpha('#fff', 0.2),
-                  color: 'white',
-                  fontWeight: 700,
-                  backdropFilter: 'blur(10px)',
-                  border: `1px solid ${alpha('#fff', 0.3)}`
-                }}
-              />
+              
+              {/* 제출물 형식 표시 */}
+              {userAssignmentType && (
+                <Chip
+                  label={userAssignmentType}
+                  size="small"
+                  sx={{
+                    background: alpha('#fff', 0.25),
+                    color: 'white',
+                    fontWeight: 700,
+                    backdropFilter: 'blur(10px)',
+                    border: `1px solid ${alpha('#fff', 0.4)}`
+                  }}
+                />
+              )}
             </Stack>
             
+            {/* 제목 표시 */}
             <Typography 
               variant="h5" 
               sx={{ 
@@ -272,7 +295,7 @@ function ReportPage() {
                 gap: 1
               }}
             >
-               {submissionTitle}
+              {submissionTitle}
             </Typography>
             
             <Typography 
@@ -282,12 +305,12 @@ function ReportPage() {
                 fontWeight: 500
               }}
             >
-              AI가 생성한 종합 분석 리포트를 확인하세요
+               AI가 생성한 종합 분석 리포트를 확인하세요
             </Typography>
           </Box>
         </Stack>
 
-        {/* 진행 상황 표시 */}
+        {/* 🆕 진행 상황 표시 (3단계 구조) */}
         {status !== 'completed' && (
           <Box sx={{ mt: 3 }}>
             <LinearProgress 
@@ -342,7 +365,7 @@ function ReportPage() {
               <Typography variant="body1" fontWeight={700}>분석 요약</Typography>
               {!step1Complete && (
                 <Typography variant="caption" color="text.secondary">
-                  처리 중...
+                  처리 중... (1/3)
                 </Typography>
               )}
             </Box>
@@ -360,10 +383,10 @@ function ReportPage() {
           }
           label={
             <Box>
-              <Typography variant="body1" fontWeight={700}>표절 의심 문서</Typography>
+              <Typography variant="body1" fontWeight={700}>유사 문서 비교</Typography>
               {!step2Complete && step1Complete && (
                 <Typography variant="caption" color="text.secondary">
-                  처리 중...
+                  처리 중... (2/3)
                 </Typography>
               )}
             </Box>
@@ -381,10 +404,10 @@ function ReportPage() {
           }
           label={
             <Box>
-              <Typography variant="body1" fontWeight={700}>AI 대화형 Q&A</Typography>
+              <Typography variant="body1" fontWeight={700}>AITA와의 대화</Typography>
               {!step3Complete && step2Complete && (
                 <Typography variant="caption" color="text.secondary">
-                  처리 중...
+                  처리 중... (3/3)
                 </Typography>
               )}
             </Box>
@@ -394,10 +417,13 @@ function ReportPage() {
         />
       </StyledTabs>
 
-      {/* 탭 1: 분석 요약 */}
+      {/* 🎯 탭 1: 분석 요약 */}
       <TabPanel value={activeTab} index={0}>
-        {step1Complete && reportData ? (
-          <ReportDisplay data={reportData} />
+        {step1Complete && reportData?.summary ? (
+          <ReportDisplay 
+            data={reportData} 
+            userAssignmentType={userAssignmentType}
+          />
         ) : (
           <LoadingTabContent elevation={3}>
             <CircularProgress size={60} sx={{ mb: 3 }} />
@@ -411,15 +437,15 @@ function ReportPage() {
         )}
       </TabPanel>
 
-      {/* 탭 2: 표절 의심 문서 - 🆕 SimilarityAnalysis 컴포넌트 연결 */}
+      {/* 🎯 탭 2: 유사 문서 비교 */}
       <TabPanel value={activeTab} index={1}>
-        {step2Complete && reportData ? (
+        {step2Complete && reportData?.similarity_details ? (
           <SimilarityAnalysis data={reportData} />
         ) : (
           <LoadingTabContent elevation={3}>
             <CircularProgress size={60} sx={{ mb: 3 }} />
             <Typography variant="h5" gutterBottom sx={{ fontWeight: 700 }}>
-              표절 의심 문서를 분석 중입니다
+              유사 문서를 비교 중입니다
             </Typography>
             <Typography variant="body1" color="text.secondary">
               유사 문서를 검색하고 분석하고 있습니다. 잠시만 기다려주세요...
@@ -428,9 +454,9 @@ function ReportPage() {
         )}
       </TabPanel>
 
-      {/* 탭 3: AI 대화형 Q&A */}
+      {/* 🎯 탭 3: AITA와의 대화 */}
       <TabPanel value={activeTab} index={2}>
-        {step3Complete && reportData ? (
+        {step3Complete && reportData?.initialQuestions ? (
           <>
             <QAChat 
               reportId={reportId}
@@ -440,94 +466,6 @@ function ReportPage() {
               isRefilling={reportData.is_refilling}
             />
 
-            {/* 발전 아이디어 생성 버튼 */}
-            {!showAdvancement && (
-              <Fade in timeout={800}>
-                <Box sx={{ mt: 6 }}>
-                  <Paper 
-                    elevation={4} 
-                    sx={{ 
-                      p: 5, 
-                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                      borderRadius: 3,
-                      position: 'relative',
-                      overflow: 'hidden',
-                    }}
-                  >
-                    <Stack spacing={3} alignItems="center" sx={{ position: 'relative', zIndex: 1 }}>
-                      <Avatar
-                        sx={{
-                          width: 80,
-                          height: 80,
-                          background: 'rgba(255,255,255,0.2)',
-                          backdropFilter: 'blur(10px)',
-                        }}
-                      >
-                        <TipsAndUpdates sx={{ fontSize: 48, color: 'white' }} />
-                      </Avatar>
-                      
-                      <Box textAlign="center">
-                        <Typography 
-                          variant="h4" 
-                          gutterBottom 
-                          sx={{ 
-                            fontWeight: 900, 
-                            color: 'white',
-                            textShadow: '0 2px 8px rgba(0,0,0,0.2)'
-                          }}
-                        >
-                          💡 Q&A 준비가 완료되었습니다!
-                        </Typography>
-                        <Typography 
-                          variant="h6" 
-                          sx={{ 
-                            color: 'rgba(255,255,255,0.95)',
-                            fontWeight: 500,
-                            maxWidth: 600,
-                            mx: 'auto',
-                            lineHeight: 1.6
-                          }}
-                        >
-                          대화 내용과 리포트를 바탕으로 AI가 개선 아이디어를 생성할 수 있습니다.
-                        </Typography>
-                      </Box>
-
-                      <Button
-                        variant="contained"
-                        size="large"
-                        startIcon={<AutoAwesome />}
-                        onClick={handleShowAdvancement}
-                        sx={{
-                          py: 2,
-                          px: 6,
-                          fontSize: '1.2rem',
-                          fontWeight: 800,
-                          background: 'white',
-                          color: '#667eea',
-                          borderRadius: 2,
-                          textTransform: 'none',
-                          '&:hover': {
-                            background: 'rgba(255,255,255,0.95)',
-                            transform: 'translateY(-2px)',
-                          },
-                        }}
-                      >
-                        발전 아이디어 생성하기
-                      </Button>
-                    </Stack>
-                  </Paper>
-                </Box>
-              </Fade>
-            )}
-
-            {/* 발전 아이디어 섹션 */}
-            {showAdvancement && (
-              <Fade in timeout={1000}>
-                <Box sx={{ mt: 6 }}>
-                  <AdvancementIdeas reportId={reportId} />
-                </Box>
-              </Fade>
-            )}
           </>
         ) : (
           <LoadingTabContent elevation={3}>
@@ -541,6 +479,11 @@ function ReportPage() {
           </LoadingTabContent>
         )}
       </TabPanel>
+
+      {/* 🆕 우측 하단 고정 버튼 추가 */}
+      {reportId && status === 'completed' && (
+        <FloatingAdvancementButton reportId={reportId} />
+      )}
     </Container>
   );
 }

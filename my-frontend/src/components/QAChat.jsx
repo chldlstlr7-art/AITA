@@ -17,6 +17,8 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import SendIcon from '@mui/icons-material/Send';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import { submitAnswer, getNextQuestion, getDeepDiveQuestion } from '../services/api.js';
 
 const ChatContainer = styled(Box)(({ theme }) => ({
@@ -87,7 +89,7 @@ const InputRow = styled(Box)(({ theme }) => ({
   display: 'flex',
   gap: theme.spacing(1),
   marginTop: theme.spacing(2),
-  alignItems: 'flex-end',
+  alignItems: 'stretch',
 }));
 
 // 중복 제거 헬퍼 (question_id 기준)
@@ -110,7 +112,7 @@ const formatTime = (ts) => {
 };
 
 // QAItem: 각 질문별 "채팅" 형태 UI
-function QAItem({ reportId, qaItem, onAnswerSubmit, onDeepDive, index }) {
+function QAItem({ reportId, qaItem, onAnswerSubmit, onDeepDive, onRefreshQuestion, index }) {
   // messages: [{ id, role: 'ai'|'user', text, ts, loading? }]
   const initialMessages = [];
   if (qaItem.question) initialMessages.push({ id: `${qaItem.question_id}-q`, role: 'ai', text: qaItem.question, ts: Date.now() });
@@ -118,12 +120,13 @@ function QAItem({ reportId, qaItem, onAnswerSubmit, onDeepDive, index }) {
     initialMessages.push({ id: `${qaItem.question_id}-a`, role: 'user', text: qaItem.answer, ts: Date.now() - 1000 });
   }
 
-  // 기본적으로 펼쳐진 상태로 표시
   const [expanded, setExpanded] = useState(true);
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isDeepDiveLoading, setIsDeepDiveLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [hasSubmittedAnswer, setHasSubmittedAnswer] = useState(!!qaItem.answer);
   const [error, setError] = useState('');
 
   const msgsRef = useRef(null);
@@ -134,21 +137,35 @@ function QAItem({ reportId, qaItem, onAnswerSubmit, onDeepDive, index }) {
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [messages.length, expanded]);
 
-  const handleSend = async (text) => {
-    // 전송 요청은 서버에 저장만 하고, 대체 AI 안내 메시지는 더 이상 추가하지 않습니다.
-    if (!text || !text.trim()) return;
+  // 🆕 qaItem이 변경되면 messages를 업데이트 (새로고침 시)
+  useEffect(() => {
+    const newMessages = [];
+    if (qaItem.question) {
+      newMessages.push({ id: `${qaItem.question_id}-q`, role: 'ai', text: qaItem.question, ts: Date.now() });
+    }
+    if (qaItem.answer && qaItem.answer.trim()) {
+      newMessages.push({ id: `${qaItem.question_id}-a`, role: 'user', text: qaItem.answer, ts: Date.now() - 1000 });
+    }
+    setMessages(newMessages);
+    setHasSubmittedAnswer(!!qaItem.answer);
+  }, [qaItem.question_id, qaItem.question, qaItem.answer]);
+
+  const handleSubmitAnswer = async () => {
+    const text = input.trim();
+    if (!text) return;
+    
     setError('');
-    const userText = text.trim();
     const msgId = `${qaItem.question_id}-u-${Date.now()}`;
-    const userMsg = { id: msgId, role: 'user', text: userText, ts: Date.now() };
+    const userMsg = { id: msgId, role: 'user', text: text, ts: Date.now() };
     setMessages((m) => [...m, userMsg]);
     setIsSending(true);
+    setInput('');
 
     try {
-      const res = await submitAnswer(reportId, qaItem.question_id, userText);
-      onAnswerSubmit(qaItem.question_id, userText);
+      const res = await submitAnswer(reportId, qaItem.question_id, text);
+      onAnswerSubmit(qaItem.question_id, text);
+      setHasSubmittedAnswer(true);
 
-      // 서버가 assistant_reply를 반환하면 대화로 추가. 없으면 아무런 AI 안내문을 추가하지 않습니다.
       if (res && res.assistant_reply) {
         const aiId = `${qaItem.question_id}-ai-${Date.now()}`;
         setMessages((m) => [...m, { id: aiId, role: 'ai', text: res.assistant_reply, ts: Date.now() }]);
@@ -161,17 +178,17 @@ function QAItem({ reportId, qaItem, onAnswerSubmit, onDeepDive, index }) {
     }
   };
 
-  // 변경: 심화질문은 기존 대화창(같은 messages 배열)에 이어서 표시.
-  // 생성 중 표시를 위해 임시 로딩 메시지를 삽입하고, 결과로 교체/업데이트합니다.
   const handleDeepDive = async () => {
+    if (!hasSubmittedAnswer) return;
+    
     setError('');
     setIsDeepDiveLoading(true);
     const tempId = `${qaItem.question_id}-deep-temp-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
     const tempMsg = { id: tempId, role: 'ai', text: '심화 질문을 생성 중입니다...', ts: Date.now(), loading: true };
     setMessages((m) => [...m, tempMsg]);
+    
     try {
       const deepText = await onDeepDive(qaItem.question_id);
-      // 결과가 없으면 사용자에게 알림 텍스트로 대체
       const finalText = deepText || '심화 질문을 생성하지 못했습니다.';
       setMessages((m) => m.map(msg => msg.id === tempId ? { ...msg, text: finalText, loading: false, ts: Date.now() } : msg));
       setExpanded(true);
@@ -184,21 +201,28 @@ function QAItem({ reportId, qaItem, onAnswerSubmit, onDeepDive, index }) {
     }
   };
 
-  // Enter 키: 심화질문 실행 (Shift+Enter -> 줄바꿈)
+  const handleRefresh = async () => {
+    if (hasSubmittedAnswer) {
+      setError('이미 답변을 제출한 질문은 새로고침할 수 없습니다.');
+      return;
+    }
+
+    setIsRefreshing(true);
+    setError('');
+    
+    try {
+      await onRefreshQuestion(qaItem.question_id);
+    } catch (err) {
+      setError(err?.message || '질문 새로고침 중 오류가 발생했습니다.');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   const onKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      const text = input.trim();
-      if (text) {
-        // 먼저 사용자의 메모(입력)를 서버에 저장(옵션)하고, 그 후 심화질문 요청
-        handleSend(text).then(() => {
-          handleDeepDive();
-        });
-        setInput('');
-      } else {
-        // 입력이 비어있으면 바로 심화질문 요청 (기존 대화창에 이어짐)
-        handleDeepDive();
-      }
+      handleSubmitAnswer();
     }
   };
 
@@ -216,6 +240,19 @@ function QAItem({ reportId, qaItem, onAnswerSubmit, onDeepDive, index }) {
             {qaItem.topic || qaItem.category || ''}
           </Typography>
         </Box>
+
+        {/* 🆕 질문 새로고침 버튼 (답변 제출 전에만 표시) */}
+        {!hasSubmittedAnswer && (
+          <IconButton 
+            size="small" 
+            onClick={handleRefresh}
+            disabled={isRefreshing || isSending}
+            aria-label="질문 새로고침"
+            title="질문 새로고침"
+          >
+            {isRefreshing ? <CircularProgress size={20} /> : <RefreshIcon />}
+          </IconButton>
+        )}
 
         <IconButton size="small" onClick={() => setExpanded(!expanded)} aria-label={expanded ? '접기' : '펼치기'}>
           {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
@@ -257,29 +294,46 @@ function QAItem({ reportId, qaItem, onAnswerSubmit, onDeepDive, index }) {
             ))}
           </MessagesBox>
 
-          <InputRow>
-            <TextField
-              fullWidth
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={onKeyDown}
-              multiline
-              minRows={2}
-              disabled={isSending || isDeepDiveLoading}
-            />
+          <Box sx={{ mt: 2 }}>
+            <InputRow>
+              <TextField
+                fullWidth
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={onKeyDown}
+                placeholder="답변을 입력하세요"
+                multiline
+                minRows={2}
+                disabled={isSending || isDeepDiveLoading || isRefreshing}
+              />
 
-            <Box sx={{ display: { xs: 'none', sm: 'flex' }, alignItems: 'center' }}>
               <Button 
                 variant="contained" 
                 color="primary"
-                onClick={handleDeepDive} 
-                disabled={isDeepDiveLoading || isSending}
-                sx={{ minWidth: 160, height: 44 }}
+                onClick={handleSubmitAnswer} 
+                disabled={isSending || isDeepDiveLoading || !input.trim() || isRefreshing}
+                startIcon={isSending ? <CircularProgress size={18} color="inherit" /> : <SendIcon />}
+                sx={{ 
+                  minWidth: 120,
+                  alignSelf: 'stretch',
+                }}
               >
-                {isDeepDiveLoading ? <CircularProgress size={18} color="inherit" /> : '심화 질문'}
+                {isSending ? '전송 중...' : '답변 제출'}
               </Button>
-            </Box>
-          </InputRow>
+            </InputRow>
+
+            <Button 
+              fullWidth
+              variant="outlined" 
+              color="secondary"
+              onClick={handleDeepDive} 
+              disabled={!hasSubmittedAnswer || isDeepDiveLoading || isSending || isRefreshing}
+              startIcon={isDeepDiveLoading ? <CircularProgress size={18} color="inherit" /> : <AutoAwesomeIcon />}
+              sx={{ mt: 1, height: 44 }}
+            >
+              {isDeepDiveLoading ? '생성 중...' : '심화 질문 생성'}
+            </Button>
+          </Box>
 
           {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
         </>
@@ -296,15 +350,14 @@ function QAChat({
   questionsPoolCount, 
   isRefilling 
 }) {
-  // 초기 히스토리 중복 제거 (question_id 기준)
   const init = dedupeById(qaHistory || initialQuestions || []);
   const [history, setHistory] = useState(init);
-  const [poolCount, setPoolCount] = useState(questionsPoolCount || 0);
+  const [poolCount, setPoolCount] = useState(questionsPoolCount || 0); // 🆕 실제 pool 카운트
   const [isLoadingNext, setIsLoadingNext] = useState(false);
   const [isLoadingRefill, setIsLoadingRefill] = useState(isRefilling || false);
   const [error, setError] = useState('');
 
-  const handleNextQuestion = async () => {
+  const handleAddQuestion = async () => {
     setIsLoadingNext(true);
     setError('');
     try {
@@ -313,10 +366,10 @@ function QAChat({
       const exists = history.some(h => h.question_id === newQuestion.question_id);
       if (!exists) {
         setHistory((h) => [...h, newQuestion]);
-        setPoolCount((c) => Math.max(0, c - 1));
+        setPoolCount((c) => Math.max(0, c - 1)); // 🆕 pool 카운트 감소
       }
     } catch (err) {
-      setError(err?.message || '다음 질문을 불러오는 중 오류가 발생했습니다.');
+      setError(err?.message || '추가 질문을 불러오는 중 오류가 발생했습니다.');
     } finally {
       setIsLoadingNext(false);
     }
@@ -332,7 +385,6 @@ function QAChat({
     );
   };
 
-  // 심화질문: 텍스트를 반환하도록 하고 QAItem에서 같은 스레드에 추가 (부모는 새 항목 생성하지 않음)
   const handleDeepDive = useCallback(async (parentQuestionId) => {
     setError('');
     try {
@@ -341,6 +393,34 @@ function QAChat({
       return text || null;
     } catch (err) {
       setError(err?.message || '심화 질문 생성 중 오류가 발생했습니다.');
+      throw err;
+    }
+  }, [reportId]);
+
+  // 🆕 질문 새로고침 핸들러: pool을 유지하기 위해 백엔드에서 새 질문을 받아옴
+  const handleRefreshQuestion = useCallback(async (questionId) => {
+    setError('');
+    try {
+      // 백엔드에서 새 질문 가져오기
+      const newQuestion = await getNextQuestion(reportId);
+      if (!newQuestion) {
+        throw new Error('새 질문을 가져올 수 없습니다.');
+      }
+      
+      // 기존 질문을 새 질문으로 교체
+      setHistory((currentHistory) => 
+        currentHistory.map(item => 
+          item.question_id === questionId 
+            ? newQuestion 
+            : item
+        )
+      );
+      
+      // 🆕 pool 카운트 감소 (새로고침도 pool에서 가져오므로)
+      setPoolCount((c) => Math.max(0, c - 1));
+      
+    } catch (err) {
+      setError(err?.message || '질문 새로고침 중 오류가 발생했습니다.');
       throw err;
     }
   }, [reportId]);
@@ -354,7 +434,7 @@ function QAChat({
           </Avatar>
           <Box>
             <Typography variant="h6" sx={{ fontWeight: 800 }}>
-              대화형 Q&A
+              AITA와의 대화
             </Typography>
             <Typography variant="body2" color="text.secondary">
               질문 답변 후 심화 질문을 생성해 더욱 창의적인 아이디어를 얻으세요!
@@ -373,13 +453,14 @@ function QAChat({
               index={idx}
               onAnswerSubmit={handleAnswerSubmit}
               onDeepDive={handleDeepDive}
+              onRefreshQuestion={handleRefreshQuestion}
             />
           )) : (
             <Box sx={{ textAlign: 'center', py: 4 }}>
               <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
                 아직 질문이 없습니다.
               </Typography>
-              <Button variant="outlined" onClick={handleNextQuestion}>질문 생성</Button>
+              <Button variant="outlined" onClick={handleAddQuestion}>질문 생성</Button>
             </Box>
           )}
         </Stack>
@@ -389,13 +470,13 @@ function QAChat({
         <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 1 }}>
           <Button 
             variant="contained" 
-            onClick={handleNextQuestion}
+            onClick={handleAddQuestion}
             disabled={isLoadingNext || isLoadingRefill || poolCount === 0}
             sx={{ mr: 0, px: 3 }}
           >
             {isLoadingNext ? <CircularProgress size={20} color="inherit" /> :
              isLoadingRefill ? 'AI가 질문 리필 중...' : 
-             poolCount === 0 ? '남은 질문 없음' : `다음 질문 (${poolCount})`}
+             poolCount === 0 ? '남은 질문 없음' : `추가 질문 (${poolCount})`} {/* 🆕 실제 pool 카운트 표시 */}
           </Button>
 
           <Button 
