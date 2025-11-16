@@ -267,7 +267,7 @@ def login_with_password():
         
     # 5. 로그인 성공
     try:
-        token_expires_delta = timedelta(hours=1) 
+        token_expires_delta = timedelta(hours=24) 
         if user.email == DEV_EMAIL:
             token_expires_delta = False
             print(f"[Auth] Issuing non-expiring token for DEV_EMAIL: {user.email}")

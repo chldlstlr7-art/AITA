@@ -343,6 +343,62 @@ class CourseManagementService:
             })
             
         return assignments_list
+
+    def get_assignments_for_student(self, course_id, student_id):
+        """
+        [신규] 학생이 특정 과목의 과제 목록을 조회합니다.
+        (학생이 해당 과목을 수강 중인지 확인)
+        """
+        # 1. 과목 존재 여부 확인
+        course = self._get_course(course_id) # (내부 헬퍼 사용)
+        
+        # 2. 학생 수강 여부 확인
+        is_enrolled = db.session.query(course_enrollment).filter_by(
+            user_id=student_id,
+            course_id=course_id
+        ).first()
+        
+        if not is_enrolled:
+            raise ValueError("Student is not enrolled in this course.")
+            
+        # 3. 수강 중인 경우, TA가 사용하는 과제 목록 조회 함수 재사용
+        return self.get_assignments_for_course(course_id)
+
+    # --- [신규] 학생 리포트 제출 메서드 (student_api.py에서 사용) ---
+    def submit_report_to_assignment(self, report_id, assignment_id, student_id):
+        """
+        [신규] 학생이 분석 완료된 리포트를 과제에 제출합니다.
+        """
+        # 1. 리포트 및 과제 객체 조회
+        report = self._get_report(report_id)
+        assignment = self._get_assignment(assignment_id)
+        
+        # 2. [검증 1] 리포트 소유권 확인
+        if report.user_id != student_id:
+            raise ValueError("Access denied. You are not the owner of this report.")
+            
+        # 3. [검증 2] 리포트 분석 완료 상태 확인 (요청 사항)
+        if report.status != 'completed':
+            raise ValueError("Report analysis is not yet complete.")
+            
+        # 4. [검증 3] 이미 제출되었는지 확인
+        if report.assignment_id is not None:
+            raise ValueError("This report has already been submitted.")
+            
+        # 5. [검증 4] 해당 과제의 과목에 수강 중인지 확인
+        is_enrolled = db.session.query(course_enrollment).filter_by(
+            user_id=student_id,
+            course_id=assignment.course_id
+        ).first()
+        
+        if not is_enrolled:
+            raise ValueError("You are not enrolled in the course for this assignment.")
+            
+        # 6. 모든 검증 통과: 리포트에 과제 ID 연결
+        report.assignment_id = assignment_id
+        db.session.commit()
+        
+        return report
     # --- Helper Functions (오류 처리용) ---
     
     def _get_course(self, course_id):

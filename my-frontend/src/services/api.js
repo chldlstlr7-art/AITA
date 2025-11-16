@@ -50,6 +50,12 @@ export const login = async (email, password) => {
     });
     
     if (response.data && response.data.access_token) {
+      // ✅ 여기서 토큰 저장
+      localStorage.setItem('accessToken', response.data.access_token);
+
+      // (선택) 유저 정보도 같이 저장하고 싶으면
+      // localStorage.setItem('user', JSON.stringify(response.data.user));
+
       return response.data; 
     } else {
       throw new Error('로그인 응답이 올바르지 않습니다.');
@@ -59,6 +65,7 @@ export const login = async (email, password) => {
     throw new Error(error.response?.data?.error || '로그인에 실패했습니다.');
   }
 };
+
 
 export const analyzeReport = async (formData) => {
   try {
@@ -200,6 +207,49 @@ export const getTaCourses = async () => {
   }
 };
 
+// TA 과목 생성
+// POST /api/ta/courses
+export const createCourse = async ({ course_code, course_name }) => {
+  try {
+    const res = await apiClient.post('/api/ta/courses', {
+      course_code,
+      course_name,
+    });
+    return res.data;
+  } catch (error) {
+    console.error('TA 과목 생성 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '과목 생성에 실패했습니다.');
+  }
+};
+
+// TA 과목 정보 수정
+// PUT /api/ta/courses/<course_id>
+export const updateCourse = async (courseId, { course_code, course_name }) => {
+  try {
+    const res = await apiClient.put(`/api/ta/courses/${courseId}`, {
+      course_code,
+      course_name,
+    });
+    return res.data;
+  } catch (error) {
+    console.error('TA 과목 수정 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '과목 수정에 실패했습니다.');
+  }
+};
+
+// TA 과목 삭제
+// ⚠️ 백엔드 명세서에는 과목 삭제가 없어서,
+//    DELETE /api/ta/courses/<course_id> 엔드포인트가 있다고 가정합니다.
+export const deleteCourse = async (courseId) => {
+  try {
+    const res = await apiClient.delete(`/api/ta/courses/${courseId}`);
+    return res.data;
+  } catch (error) {
+    console.error('TA 과목 삭제 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '과목 삭제에 실패했습니다.');
+  }
+};
+
 // 과목 상세 정보 조회 (백엔드에 구현되어 있다면 사용, 없으면 에러 → 프론트에서 fallback)
 export const getCourseDetail = async (courseId) => {
   try {
@@ -222,5 +272,39 @@ export const getAssignmentsByCourse = async (courseId) => {
   } catch (error) {
     console.error('과제 목록 API 에러:', error.response || error);
     throw new Error(error.response?.data?.error || '과제 목록을 불러오지 못했습니다.');
+  }
+};
+
+// 특정 과제 상세 조회 (TA용)
+export const getAssignmentDetail = async (assignmentId) => {
+  try {
+    const res = await apiClient.get(`/api/ta/assignments/${assignmentId}`);
+    // 예상 응답: { id, assignment_name, description, due_date, criteria?, submissions? }
+    return res.data;
+  } catch (error) {
+    console.error('과제 상세 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '과제 상세를 불러오지 못했습니다.');
+  }
+};
+
+// 과제의 제출물 목록 조회
+export const getAssignmentSubmissions = async (assignmentId) => {
+  try {
+    const res = await apiClient.get(`/api/ta/assignments/${assignmentId}/submissions`);
+    return res.data;
+  } catch (error) {
+    console.error('제출물 목록 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '제출물 목록을 불러오지 못했습니다.');
+  }
+};
+
+// 과제 채점 기준 등록/수정
+export const putAssignmentCriteria = async (assignmentId, criteriaPayload) => {
+  try {
+    const res = await apiClient.put(`/api/ta/assignments/${assignmentId}/criteria`, criteriaPayload);
+    return res.data;
+  } catch (error) {
+    console.error('채점 기준 저장 API 에러:', error.response || error);
+    throw new Error(error.response?.data?.error || '채점 기준 저장에 실패했습니다.');
   }
 };

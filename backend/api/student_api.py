@@ -4,7 +4,7 @@ import json
 from flask import Blueprint, request, jsonify, Response
 from werkzeug.utils import secure_filename
 from flask import current_app
-
+import traceback
 # --- [유지] services 폴더의 로직 임포트 ---
 from services.parsing_service import extract_text
 from services.qa_service import generate_deep_dive_question
@@ -66,7 +66,8 @@ def analyze_report():
     POST /api/student/analyze
     프론트엔드에서 파일과 폼 데이터를 받아 분석을 '시작'시킴
     """
-    from app import background_analysis_step1
+    # [핵심 수정] app.py에 정의된 새 함수 이름을 임포트합니다.
+    from app import background_analysis_step1_analysis
     print("\n--- [Debug] /api/student/analyze ---")
     try:
         print(f"Request Headers: {request.headers}")
@@ -135,14 +136,15 @@ def analyze_report():
         return jsonify({"error": "Failed to initialize report in database"}), 500
     
     thread = threading.Thread(
-        target=background_analysis_step1,
+        # [핵심 수정] 새 백그라운드 함수 이름을 타겟으로 지정합니다.
+        target=background_analysis_step1_analysis,
         args=(
             report_id, 
             text, 
             doc_type, 
             original_filename,
-            JSON_SYSTEM_PROMPT,        # [신규] 5번째 인자
-            COMPARISON_SYSTEM_PROMPT   # [신규] 6번째 인자
+            JSON_SYSTEM_PROMPT,       # [신규] 5번째 인자
+            COMPARISON_SYSTEM_PROMPT  # [신규] 6번째 인자
         )
     )
     thread.start()
@@ -166,7 +168,7 @@ def get_report(report_id):
     if status == "error":
         return jsonify({"status": "error", "data": {"error": report.error_message}}), 500
         
-    # 'completed' 또는 'processing_questions'
+    # 'completed' 또는 'processing_comparison', 'processing_questions'
     
     # --- [유지] ---
     # DB의 JSON '문자열' 필드들을 파이썬 '객체'로 변환합니다.
@@ -234,7 +236,18 @@ def get_report(report_id):
 
     }
     
-    # status와 함께 최종 데이터를 반환합니다.
+    # [수정] processing_comparison 상태일 때 summary만 반환
+    if status == "processing_comparison":
+        return jsonify({
+            "status": status,
+            "data": {
+                "summary": summary_data,
+                "is_test": report.is_test,
+                "text_snippet": report.text_snippet
+            }
+        })
+
+    # status와 함께 최종 데이터를 반환합니다. (completed, processing_questions)
     return jsonify({"status": status, "data": data})
 
 @student_bp.route("/report/<report_id>/question/next", methods=["POST"])
@@ -356,12 +369,111 @@ def submit_answer(report_id):
     print(f"[{report_id}] Answer saved successfully for {question_id}.")
     return jsonify({"status": "success", "message": "Answer saved successfully"})
 
+def _background_generate_deep_dive(app_context, report_id, parent_question_id):
+    """[수정] 백그라운드에서 심화 질문을 생성하고 (동시성 문제 해결) DB에 저장"""
+    
+    # --- [1. Read Phase] ---
+    # AI 호출에 필요한 데이터를 DB에서 미리 읽습니다.
+    conversation_history_list = []
+    summary_data_dict = {}
+
+    with app_context.app_context():
+        print(f"[{report_id}] Deep-dive generation task starting for parent: {parent_question_id}")
+        report = db.session.get(AnalysisReport, report_id)
+        if not report:
+            print(f"[{report_id}] Deep-dive task ABORT: Report not found.")
+            return
+        
+        try:
+            qa_history_str = report.qa_history if report.qa_history else "[]"
+            qa_history = json.loads(qa_history_str)
+            summary_data_dict = json.loads(report.summary) if report.summary else {}
+        except json.JSONDecodeError as e:
+            print(f"[{report_id}] Deep-dive task ABORT: Failed to parse initial JSON data: {e}")
+            return
+
+        history_map = {item['question_id']: item for item in qa_history}
+        current_id = parent_question_id
+
+        while current_id is not None:
+            if current_id not in history_map:
+                print(f"[{report_id}] CRITICAL: History chain broken. ID {current_id} not found.")
+                break
+            
+            parent_qa = history_map[current_id]
+            
+            if parent_qa.get("answer") is None:
+                print(f"[{report_id}] Deep-dive task WARN: Parent answer not found (yet?).")
+                break # (안전하게 중단)
+
+            conversation_history_list.insert(0, {
+                "question": parent_qa.get("question"),
+                "answer": parent_qa.get("answer")
+            })
+            current_id = parent_qa.get("parent_question_id")
+    
+    if not conversation_history_list:
+            print(f"[{report_id}] Deep-dive task ABORT: Could not reconstruct history or parent not answered.")
+            return
+
+    # --- [2. Slow AI Call Phase] ---
+    # (DB 세션과 분리된 상태에서 느린 AI 호출 실행)
+    try:
+        deep_dive_question_text = generate_deep_dive_question(
+            conversation_history_list,
+            summary_data_dict
+        )
+    except Exception as e_ai:
+        print(f"[{report_id}] Deep-dive AI call FAILED: {e_ai}")
+        return
+
+    if not deep_dive_question_text:
+        print(f"[{report_id}] Deep-dive task FAILED: AI returned no text.")
+        return
+
+    # --- [3. Write Phase] ---
+    # (새 앱 컨텍스트를 열고, DB에서 최신 데이터를 다시 읽어서 쓰기)
+    with app_context.app_context():
+        try:
+            # 1. [RE-READ] DB에서 최신 리포트 정보를 다시 가져옵니다.
+            # (다른 스레드가 qa_history를 변경했을 수 있으므로)
+            report_fresh = db.session.get(AnalysisReport, report_id)
+            if not report_fresh:
+                print(f"[{report_id}] Deep-dive task FAILED: Report gone after AI call.")
+                return
+
+            # 2. 최신 qa_history를 파싱합니다.
+            latest_qa_history_str = report_fresh.qa_history if report_fresh.qa_history else "[]"
+            latest_qa_history = json.loads(latest_qa_history_str)
+
+            # 3. [MODIFY] 생성된 새 질문을 *최신* 히스토리에 추가합니다.
+            new_question_id = str(uuid.uuid4())
+            history_entry = {
+                "question_id": new_question_id,
+                "question": deep_dive_question_text,
+                "type": "deep_dive",
+                "answer": None,
+                "parent_question_id": parent_question_id
+            }
+            latest_qa_history.append(history_entry)
+
+            # 4. [WRITE] DB에 저장합니다.
+            report_fresh.qa_history = json.dumps(latest_qa_history)
+            db.session.commit()
+            
+            print(f"[{report_id}] Deep-dive task SUCCESS. New question {new_question_id} saved.")
+
+        except Exception as e_write:
+            print(f"[Deep-dive Task] CRITICAL: Report {report_id} 최종 쓰기 중 오류: {e_write}")
+            traceback.print_exc()
+            db.session.rollback()
+            
 @student_bp.route("/report/<report_id>/question/deep-dive", methods=["POST"])
 @jwt_required()
 def post_deep_dive_question(report_id):
     """
-    POST /api/student/report/<report_id>/question/deep-dive
-    'parent_question_id'를 받아, 전체 대화 맥락을 탐색하여 심화 질문을 생성
+    [수정] 'parent_question_id'를 받아, 심화 질문 생성을 '시작'시킵니다.
+    (AI 호출은 백그라운드 스레드에서 수행)
     """
     user_id = get_jwt_identity()
     report, error_response = get_report_or_404(report_id, user_id)
@@ -373,112 +485,113 @@ def post_deep_dive_question(report_id):
     if not parent_question_id:
         return jsonify({"error": "Missing parent_question_id to deep-dive from"}), 400
 
-    # 1. DB에서 히스토리 가져오기 및 JSON 파싱
-    # --- [수정] JSON 파싱 추가 ---
-    qa_history_str = report.qa_history if report.qa_history else "[]"
-    try:
-        qa_history = json.loads(qa_history_str)
-    except json.JSONDecodeError:
-        return jsonify({"error": "Corrupted qa_history data in database"}), 500
-    # --- [수정 완료] ---
+    # (선택적: 이미 생성 중인지 확인하는 플래그를 DB에 추가할 수 있음)
+    # (예: if report.is_generating_deep_dive: return 409)
 
-    # 2. 히스토리 재구성 (기존 로직 동일)
-    history_map = {item['question_id']: item for item in qa_history}
-    conversation_history_list = [] 
-    current_id = parent_question_id
-
-    while current_id is not None:
-        if current_id not in history_map:
-            print(f"[{report_id}] CRITICAL: History chain broken. ID {current_id} not found.")
-            break 
-        
-        parent_qa = history_map[current_id]
-        
-        if parent_qa.get("answer") is None:
-            if current_id == parent_question_id:
-                 return jsonify({"error": f"Parent question ID {parent_question_id} has not been answered yet."}), 400
-            break
-
-        conversation_history_list.insert(0, {
-            "question": parent_qa.get("question"),
-            "answer": parent_qa.get("answer")
-        })
-        
-        current_id = parent_qa.get("parent_question_id")
-
-    if not conversation_history_list:
-        return jsonify({"error": f"Could not reconstruct valid history for {parent_question_id}."}), 404
-
-    # 3. 심화 질문 생성 (서비스 호출)
-    try:
-        summary_data_dict = json.loads(report.summary) if report.summary else {}
-    except json.JSONDecodeError:
-        print(f"[{report_id}] CRITICAL: Deep-dive failed to parse report.summary JSON.")
-        return jsonify({"error": "Corrupted summary data in database"}), 500
-    
-    deep_dive_question_text = generate_deep_dive_question(
-        conversation_history_list,
-        summary_data_dict # [수정] 딕셔너리 전달
+    # --- [수정] ---
+    # 1. 백그라운드 작업 시작
+    app = current_app._get_current_object()
+    thread = threading.Thread(
+        target=_background_generate_deep_dive, # <-- 신규 백그라운드 함수
+        args=(app, report_id, parent_question_id)
     )
-    # --- [수정 완료] ---
+    thread.daemon = True
+    thread.start()
 
-    if not deep_dive_question_text:
-        return jsonify({"error": "Failed to generate deep-dive question"}), 500
+    # 2. 즉시 202 Accepted 반환
+    return jsonify({
+        "message": "Deep-dive question generation started. Please poll the report status."
+    }), 202
 
-    new_question_id = str(uuid.uuid4())
-    
-    history_entry = {
-        "question_id": new_question_id, 
-        "question": deep_dive_question_text,
-        "type": "deep_dive", 
-        "answer": None,
-        "parent_question_id": parent_question_id 
-    }
-    # qa_history는 이미 리스트(JSON 파싱됨)
-    qa_history.append(history_entry) 
-    report.qa_history = json.dumps(qa_history) # 변경 사항을 JSON 문자열로 DB에 저장
-    
-    db.session.commit()
-    # 5. 클라이언트 응답
-    client_response = {
-        "question_id": new_question_id,
-        "question": deep_dive_question_text
-    }
+def _background_generate_advancement(app_context, report_id):
+    """백그라운드에서 AI를 호출하고 DB에 저장하는 함수"""
+    with app_context.app_context():
+        print(f"[Advancement Task] Report {report_id} 발전 아이디어 생성 시작...")
+        report = None
+        try:
+            report = db.session.get(AnalysisReport, report_id)
+            if not report:
+                print(f"[Advancement Task] Report {report_id}를 찾을 수 없음.")
+                return
 
-    return jsonify(client_response)
+            # report.advancement_ideas가 이미 채워져 있으면 실행 중단 (중복 방지)
+            if report.advancement_ideas:
+                 print(f"[Advancement Task] Report {report_id}는 이미 아이디어가 있습니다.")
+                 return
+                 
+            # report.is_generating_advancement = True # (상태 플래그가 있다면)
+            # db.session.commit()
 
-@student_bp.route('/report/<report_id>/advancement', methods=['GET'])
+            # --- [느린 작업] ---
+            summary_dict = json.loads(report.summary)
+            qa_history_list = json.loads(report.qa_history)
+            snippet = report.text_snippet
+
+            ideas_json = generate_advancement_ideas(
+                summary_dict,
+                snippet,
+                qa_history_list
+            )
+            # --------------------
+
+            if ideas_json:
+                report.advancement_ideas = json.dumps(ideas_json)
+                print(f"[Advancement Task] Report {report_id} 아이디어 저장 완료.")
+            else:
+                 print(f"[Advancement Task] Report {report_id} 아이디어 생성 실패.")
+                 # (실패 시 에러 상태 저장도 가능)
+
+            # report.is_generating_advancement = False # (상태 플래그가 있다면)
+            db.session.commit()
+
+        except Exception as e:
+            print(f"[Advancement Task] CRITICAL: Report {report_id} 작업 중 오류: {e}")
+            db.session.rollback()
+            # (오류 상태 저장)
+            # if report:
+            #     report.is_generating_advancement = False 
+            #     db.session.commit()
+
+
+@student_bp.route('/report/<report_id>/advancement', methods=['POST']) # <-- GET에서 POST로 변경
 @jwt_required()
-def get_advancement_ideas(report_id):
-    # ... (사용자 인증 및 report 객체 로드) ...
-    report = db.session.get(AnalysisReport, report_id)
-    # ... (report 소유권 확인) ...
+def request_advancement_ideas(report_id):
+    """
+    [수정] 발전 아이디어 생성을 '요청'하고 백그라운드 작업을 시작합니다.
+    """
+    user_id = get_jwt_identity()
+    report, error_response = get_report_or_404(report_id, user_id)
+    if error_response:
+        return error_response
 
-    try:
-        summary_dict = json.loads(report.summary)
-        qa_history_list = json.loads(report.qa_history)
-        snippet = report.text_snippet
+    # 1. 이미 데이터가 있는지 확인
+    if report.advancement_ideas:
+        try:
+            # 이미 있으면 200 OK와 함께 즉시 데이터를 반환합니다.
+            ideas_json = json.loads(report.advancement_ideas)
+            return jsonify(ideas_json), 200
+        except json.JSONDecodeError:
+            # 데이터가 깨졌으면 재생성 유도 (혹은 500 에러)
+            pass # 아래로 내려가서 재생성
 
-        # 새로운 서비스 호출 (이제 ideas_json은 Python List 객체)
-        ideas_json = generate_advancement_ideas(
-            summary_dict,
-            snippet,
-            qa_history_list
-        )
+    # 2. (선택적) 이미 생성 중인지 확인 (is_generating_advancement 같은 플래그가 있다면)
+    # if report.is_generating_advancement:
+    #     return jsonify({"message": "Generation is already in progress."}), 409 # Conflict
+            
+    # 3. 백그라운드 작업 시작
+    app = current_app._get_current_object()
+    thread = threading.Thread(
+        target=_background_generate_advancement,
+        args=(app, report_id)
+    )
+    thread.daemon = True
+    thread.start()
 
-        if not ideas_json:
-            return jsonify({"error": "Failed to generate advancement ideas"}), 500
+    # 4. 즉시 202 Accepted 반환
+    return jsonify({
+        "message": "Advancement idea generation started. Please poll the report status."
+    }), 202
 
-        # [수정] DB에 저장 시: Python 객체 -> JSON 문자열로 변환
-        report.advancement_ideas = json.dumps(ideas_json) 
-        db.session.commit()
-
-        # [수정] 프론트엔드에 반환 시: Python 객체를 바로 jsonify
-        # (Flask가 자동으로 'application/json' 헤더와 함께 문자열로 변환해줌)
-        return jsonify(ideas_json), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 @student_bp.route("/report/<report_id>/flow-graph", methods=["GET"])
 @jwt_required()
@@ -495,7 +608,7 @@ def get_flow_graph(report_id):
         return error_response
 
     # 2. 리포트 상태 확인 (완료된 리포트인지)
-    if report.status not in ["completed", "processing_questions"]:
+    if report.status not in ["completed", "processing_questions", "processing_comparison"]:
         return jsonify({
             "error": "Graph cannot be generated. Report analysis is not complete."
         }), 409
@@ -584,3 +697,83 @@ def get_student_dashboard_by_id(target_student_id):
     except Exception as e:
         print(f"[Student API /dashboard/{target_student_id} GET] Error: {e}")
         return jsonify({"error": "대시보드 조회 중 서버 오류 발생"}), 500
+# --- [신규] 학생 리포트 과제 제출 API ---
+@student_bp.route("/report/<report_id>/submit", methods=["POST"])
+@jwt_required()
+def submit_report_to_assignment(report_id):
+    """
+    POST /api/student/report/<report_id>/submit
+    이미 분석이 완료된 리포트를 특정 과제에 '제출'합니다.
+    Request Body: {"assignment_id": <int>}
+    """
+    if not current_app.course_service:
+        return jsonify({"error": "서비스가 초기화되지 않았습니다."}), 503
+
+    try:
+        # 1. 토큰에서 학생 ID 가져오기
+        user_id_str = get_jwt_identity()
+        student_id = int(user_id_str)
+        
+        # 2. Request Body에서 과제 ID 가져오기
+        data = request.json
+        assignment_id = data.get("assignment_id")
+        
+        if not assignment_id:
+            return jsonify({"error": "Missing 'assignment_id' in request body"}), 400
+            
+        # 3. 서비스 로직 호출
+        report = current_app.course_service.submit_report_to_assignment(
+            report_id, 
+            assignment_id, 
+            student_id
+        )
+        
+        return jsonify({
+            "status": "success",
+            "message": "Report submitted successfully.",
+            "report_id": report.id,
+            "assignment_id": report.assignment_id
+        }), 200
+
+    except ValueError as e:
+        error_message = str(e)
+        if "Access denied" in error_message:
+            return jsonify({"error": error_message}), 403 # 금지됨
+        if "not found" in error_message:
+            return jsonify({"error": error_message}), 404 # 찾을 수 없음
+        if "not yet complete" in error_message or "already been submitted" in error_message:
+            return jsonify({"error": error_message}), 409 # 충돌 (Conflict)
+        if "not enrolled" in error_message:
+             return jsonify({"error": error_message}), 403 # 금지됨 (등록되지 않음)
+        
+        return jsonify({"error": error_message}), 400 # 기타 잘못된 요청
+    
+    except Exception as e:
+        print(f"[Student API /report/{report_id}/submit POST] Error: {e}")
+        return jsonify({"error": "An unexpected server error occurred."}), 500
+
+# --- [신규] 학생용 과제 목록 조회 API ---
+@student_bp.route('/courses/<int:course_id>/assignments', methods=['GET'])
+@jwt_required()
+def get_student_assignments_for_course(course_id):
+    """
+    [신규] 학생이 수강 중인 과목의 과제 목록을 조회합니다.
+    """
+    if not current_app.course_service:
+        return jsonify({"error": "서비스가 초기화되지 않았습니다."}), 503
+    
+    try:
+        user_id_str = get_jwt_identity()
+        user_id = int(user_id_str)
+        
+        # [신규] 학생이 수강 중인지 확인하는 서비스 로직 호출
+        assignments_list = current_app.course_service.get_assignments_for_student(course_id, user_id)
+        
+        return jsonify({"assignments": assignments_list}), 200
+    except ValueError as e:
+        # (예: "과목을 찾을 수 없습니다." 또는 "수강 중이 아닙니다.")
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        print(f"[Student API /courses/{course_id}/assignments GET] Error: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "과제 목록 조회 중 서버 오류 발생"}), 500

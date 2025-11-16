@@ -6,6 +6,7 @@ import google.generativeai as genai
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from time import sleep
+import traceback # 1단계 오류 핸들링을 위해 추가
 
 from extensions import db
 from models import AnalysisReport
@@ -18,7 +19,6 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 MAX_RETRIES = 3
 
 # [모델 설정]
-# (config.py의 프롬프트가 Gemini 2.5 Flash/Pro에 최적화되어 있다고 가정)
 ANALYSIS_MODEL_NAME = 'gemini-2.5-flash' # 1단계 분석/요약용
 COMPARISON_MODEL_NAME = 'gemini-2.5-flash' # 3단계 비교용
 EMBEDDING_MODEL_NAME = 'paraphrase-multilingual-MiniLM-L12-v2' # 2단계 S-BERT용
@@ -47,7 +47,6 @@ except Exception as e:
     embedding_model = None
 
 # [DB 설정]
-# (DB 로드 로직 삭제 -> Flask의 db 객체 사용)
 print("[Service Analysis] Ready. (DB will be accessed via Flask context)")
 
 # ----------------------------------------------------
@@ -58,8 +57,6 @@ def _llm_call_analysis(raw_text, system_prompt):
     """(1단계 분석용) Gemini 모델로 텍스트를 JSON 구조로 분석합니다."""
     if not llm_client_analysis: return None
     
-    # [수정] 새 프롬프트는 MIME-TYPE 대신 ```json ... ```을 사용하므로, 
-    # 일반 텍스트로 응답을 받고 re.search로 파싱합니다.
     config = genai.GenerationConfig(response_mime_type="text/plain") 
     
     prompt_content = f"{system_prompt}\n\nTarget Text: \n\n{raw_text[:10000]}..."
@@ -72,7 +69,6 @@ def _llm_call_analysis(raw_text, system_prompt):
             )
             if not response.text: raise Exception("Empty response (Analysis)")
             
-            # LLM 응답에서 JSON 코드 블록 추출
             match = re.search(r"```json\s*([\s\S]+?)\s*```", response.text)
             if not match:
                 print(f"[Service Analysis] LLM_ANALYSIS_FAILED: JSON 형식 응답을 찾지 못했습니다. Raw: {response.text[:200]}...")
@@ -90,7 +86,6 @@ def _llm_call_comparison(submission_json_str, candidate_json_str, system_prompt_
     """(3단계 비교용) Gemini 모델로 두 JSON을 1:1 비교합니다."""
     if not llm_client_comparison: return None
     
-    # [수정] 프롬프트 템플릿에 JSON 문자열을 주입합니다.
     user_prompt = system_prompt_template.format(
         submission_json_str=submission_json_str,
         candidate_json_str=candidate_json_str
@@ -131,7 +126,6 @@ def find_similar_documents(submission_id, sub_thesis_vec, sub_claim_vec, top_n=3
     is_test=False인 리포트만 비교 대조군으로 사용합니다.
     """
     
-    # 1. 제출된 벡터를 NumPy 배열로 변환
     try:
         sub_thesis_np = np.array(sub_thesis_vec).reshape(1, -1)
         sub_claim_np = np.array(sub_claim_vec).reshape(1, -1)
@@ -140,7 +134,7 @@ def find_similar_documents(submission_id, sub_thesis_vec, sub_claim_vec, top_n=3
         return []
         
     db_ids = []
-    db_summaries_json = [] # 비교용 요약본 (JSON 문자열)
+    db_summaries_json = [] 
     db_vectors_thesis_list = []
     db_vectors_claim_list = []
     db_original_filenames = []
@@ -148,17 +142,14 @@ def find_similar_documents(submission_id, sub_thesis_vec, sub_claim_vec, top_n=3
     db_vectors_thesis_np = None
     db_vectors_claim_np = None
 
-    # --- 2. 항상 실시간 모드 (SQL DB 쿼리) ---
     print(f"[find_similar_documents] Using Live DB Query (is_test=False, Excluding ID: {submission_id})")
     try:
-        # [CRITICAL] 'is_test=False'인 리포트만 비교 대조군으로 사용
         query = AnalysisReport.query.filter(
             AnalysisReport.embedding_keyconcepts_corethesis.isnot(None),
             AnalysisReport.embedding_keyconcepts_claim.isnot(None),
             AnalysisReport.is_test == False
         )
         
-        # '자기 자신 제외' 로직
         if submission_id:
              query = query.filter(AnalysisReport.id != submission_id)
         
@@ -168,11 +159,10 @@ def find_similar_documents(submission_id, sub_thesis_vec, sub_claim_vec, top_n=3
             print("[find_similar_documents] 비교할 DB 임베딩이 없습니다. (is_test=False 필터링됨)")
             return []
 
-        # 3. DB 결과에서 벡터 및 메타데이터 추출
         for report in all_reports:
             try:
                 db_ids.append(report.id)
-                db_summaries_json.append(report.summary) # JSON 문자열
+                db_summaries_json.append(report.summary) 
                 db_original_filenames.append(report.original_filename)
                 vec_thesis = json.loads(report.embedding_keyconcepts_corethesis)
                 vec_claim = json.loads(report.embedding_keyconcepts_claim)
@@ -187,20 +177,17 @@ def find_similar_documents(submission_id, sub_thesis_vec, sub_claim_vec, top_n=3
             print("[find_similar_documents] 유효한 DB 임베딩이 없습니다.")
             return []
 
-        # 4. DB 벡터 리스트를 NumPy 배열로 변환
         db_vectors_thesis_np = np.array(db_vectors_thesis_list)
         db_vectors_claim_np = np.array(db_vectors_claim_list)
 
     except Exception as e:
         print(f"[find_similar_documents] CRITICAL: Live DB 쿼리 중 오류: {e}")
         return []
-    # --- 쿼리 종료 ---
 
     if db_vectors_thesis_np is None or db_vectors_claim_np.shape[0] == 0:
         print("[find_similar_documents] DB 벡터가 준비되지 않았거나 비어있습니다.")
         return []
         
-    # 5. 유사도 계산 (가중합 0.6:0.4)
     sim_thesis = cosine_similarity(sub_thesis_np, db_vectors_thesis_np)[0]
     sim_claim = cosine_similarity(sub_claim_np, db_vectors_claim_np)[0]
 
@@ -208,34 +195,28 @@ def find_similar_documents(submission_id, sub_thesis_vec, sub_claim_vec, top_n=3
     WEIGHT_CLAIM = 0.4
     sim_weighted = WEIGHT_THESIS * sim_thesis + WEIGHT_CLAIM * sim_claim
     
-    # 6. 상위 N개 선정
-    
-    # (인덱스, 점수) 튜플 리스트 생성
     weighted_scores = list(enumerate(sim_weighted))
-    # 점수 기준으로 내림차순 정렬
     sorted_scores = sorted(weighted_scores, key=lambda item: item[1], reverse=True)
     
     top_candidates = []
-    # 정렬된 리스트에서 상위 N개 추출
     for index, score in sorted_scores: 
         candidate_id = db_ids[index]
         
-        # [중요] 자기 자신 제외 (DB 쿼리에서 이미 제외했지만, 이중 확인)
         if candidate_id == submission_id:
             continue
             
-        candidate_summary_json_str = db_summaries_json[index] # JSON 문자열
-        candidate_filename = db_original_filenames[index] # (필요시 사용 가능)
+        candidate_summary_json_str = db_summaries_json[index] 
+        candidate_filename = db_original_filenames[index] 
         
         top_candidates.append({
             "candidate_id": candidate_id,
             "weighted_similarity": score,
-            "candidate_summary_json_str": candidate_summary_json_str, # 4단계 비교를 위해 요약본 원본 전달
+            "candidate_summary_json_str": candidate_summary_json_str, 
             "candidate_filename": candidate_filename
         })
         
         if len(top_candidates) >= top_n:
-            break # 상위 N개만 선택
+            break 
 
     print(f"[find_similar_documents] 상위 {len(top_candidates)}개 후보 반환 완료.")
     return top_candidates
@@ -244,50 +225,27 @@ def find_similar_documents(submission_id, sub_thesis_vec, sub_claim_vec, top_n=3
 # --- 3. 메인 서비스 함수 (app.py에서 호출) ---
 # ----------------------------------------------------
 
-def perform_full_analysis_and_comparison(report_id, text, original_filename, json_prompt_template, comparison_prompt_template):
+def perform_step1_analysis_and_embedding(report_id, text, json_prompt_template):
     """
-    [수정] 전체 분석 및 비교 파이프라인 (새 프롬프트, 새 임베딩, DB 연동)
+    [신규] 1단계: LLM 분석 및 임베딩 생성
+    (app.py의 background_analysis_step1_analysis에서 호출)
     """
     
     # 0. 모델 로드 확인
     if not llm_client_analysis or not embedding_model:
         print("[Service Analysis] CRITICAL: Service dependencies (LLM, S-BERT) not loaded.")
         raise Exception("LLM or Embedding model not loaded.")
-    try:
-        print(f"[{report_id}] Starting full analysis and comparison...")
-        
-        submission_analysis_json = _llm_call_analysis(
-            raw_text=text,
-            system_prompt=json_prompt_template
-        )
-        if not submission_analysis_json:
-            raise Exception("LLM_ANALYSIS_FAILED: 분석 결과가 없습니다.")
-        print(f"[{report_id}] 1. LLM 분석 성공.")   
     
-    except Exception as e:
-        print(f"[{report_id}] 🚨 5. [FATAL] LLM 분석 중 심각한 오류 발생!")
-        print(f"[{report_id}] 🚨 오류 내용: {str(e)}")
-        traceback.print_exc() # <-- [필수] 콘솔에 정확한 오류 위치(스택 트레이스) 출력
-
-        # (DB 세션 롤백)
-        db.session.rollback()
-
-        # (프론트엔드가 무한 로딩에 빠지지 않도록 상태를 'error'로 업데이트)
-        try:
-            if report: # report 객체가 존재하면
-                report.status = 'error'
-                report.error_message = str(e)[:1000] # 오류 메시지 저장
-                db.session.commit()
-                print(f"[{report_id}] 6. DB 상태 'error'로 업데이트 완료.")
-            else:
-                print(f"[{report_id}] 6. [Error] Report 객체가 없어 DB 상태 업데이트 실패.")
-        except Exception as db_err:
-            # (DB 연결 자체가 끊겼을 최악의 경우)
-            print(f"[{report_id}] 🚨 7. [FATAL] 'error' 상태 업데이트마저 실패: {db_err}")
-            db.session.rollback()
-
-
+    print(f"[{report_id}] Starting Step 1: Analysis and Embedding...")
     
+    # --- 1단계: LLM 분석 ---
+    submission_analysis_json = _llm_call_analysis(
+        raw_text=text,
+        system_prompt=json_prompt_template
+    )
+    if not submission_analysis_json:
+        raise Exception("LLM_ANALYSIS_FAILED: 분석 결과가 없습니다.")
+    print(f"[{report_id}] 1. LLM 분석 성공.") 
     
     # --- 2단계: 2개의 임베딩 생성 (신규 0.6:0.4 로직) ---
     print(f"[{report_id}] 2. 임베딩 생성 시작...")
@@ -311,21 +269,42 @@ def perform_full_analysis_and_comparison(report_id, text, original_filename, jso
         print(f"[{report_id}] 2. 임베딩 생성 실패: {e}")
         raise # 2단계 실패 시 중단
 
+    # --- 3. 1단계 데이터 반환 ---
+    analysis_data = {
+        'summary_json': submission_analysis_json,      # (dict)
+        'embedding_thesis': embedding_thesis,          # (list)
+        'embedding_claim': embedding_claim,            # (list)
+    }
+    
+    print(f"[{report_id}] Step 1 (Analysis & Embedding) 완료. 데이터 반환.")
+    return analysis_data
+
+
+def perform_step2_comparison(report_id, embedding_thesis, embedding_claim, submission_json_str, comparison_prompt_template):
+    """
+    [신규] 2단계: 유사 문서 검색 및 LLM 정밀 비교
+    (app.py의 background_analysis_step2_comparison에서 호출)
+    """
+
+    if not llm_client_comparison:
+        print("[Service Analysis] CRITICAL: Comparison LLM not loaded.")
+        raise Exception("Comparison LLM not loaded.")
+
+    print(f"[{report_id}] Starting Step 2: Comparison...")
+
     # --- 3단계: 유사 문서 검색 (DB 쿼리) ---
     print(f"[{report_id}] 3. 유사 문서 검색 (가중합 0.6:0.4) 시작...")
     candidate_docs = find_similar_documents(
-        report_id, # [신규] 자기 자신을 제외하기 위해 ID 전달
+        report_id, 
         embedding_thesis, 
         embedding_claim, 
         top_n=3
     )
 
-    # --- 4단계: 후보 문서와 LLM 정밀 비교 (config.py의 COMPARISON_SYSTEM_PROMPT 사용) ---
+    # --- 4단계: 후보 문서와 LLM 정밀 비교 ---
     print(f"[{report_id}] 4. LLM 정밀 비교 (후보 {len(candidate_docs)}개) 시작...")
     comparison_results_list = []
     
-    submission_json_str = json.dumps(submission_analysis_json, ensure_ascii=False) # 비교용 (제출본 JSON 문자열)
-
     for candidate in candidate_docs:
         try:
             candidate_id = candidate["candidate_id"]
@@ -355,16 +334,11 @@ def perform_full_analysis_and_comparison(report_id, text, original_filename, jso
         except Exception as e:
             print(f"[{report_id}] 4. 후보 {candidate_id} 비교 중 오류: {e}")
 
-    # --- 5. 최종 데이터 반환 (app.py의 background_analysis_step1이 받을 형식) ---
-    analysis_data = {
-        'summary_json': submission_analysis_json,      # (dict)
-        'embedding_thesis': embedding_thesis,         # (list)
-        'embedding_claim': embedding_claim,           # (list)
-        'comparison_results_list': comparison_results_list # (list of dicts)
-    }
-    
-    print(f"[{report_id}] 5. 모든 분석 완료. 데이터 반환.")
-    return analysis_data
+    print(f"[{report_id}] Step 2 (Comparison) 완료. 비교 결과 반환.")
+    return comparison_results_list # (list of dicts)
+
+
+# --- (기존 perform_full_analysis_and_comparison 함수는 삭제됨) ---
 
 
 def _parse_comparison_scores(report_text):
@@ -406,7 +380,7 @@ def _parse_comparison_scores(report_text):
 
 def _filter_high_similarity_reports(comparison_results_list):
     high_similarity_reports = []
-    threshold = 20
+    threshold = 30
     for result in comparison_results_list:
         report_text = result.get("llm_comparison_report", "")
         total_score, scores_dict = _parse_comparison_scores(report_text)
