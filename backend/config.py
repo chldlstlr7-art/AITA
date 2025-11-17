@@ -1,19 +1,48 @@
 import os
 
+basedir = os.path.abspath(os.path.dirname(__file__))
+
+
 class Config:
     """
     Flask 애플리케이션 설정을 위한 기본 클래스.
-    환경 변수(GitHub Secrets)에서 값을 불러옵니다.
     """
     
     # --- 1. Flask & JWT 비밀 키 ---
-    # (터미널에서 python -c 'import secrets; print(secrets.token_hex(16))'로 생성)
     SECRET_KEY = os.environ.get('SECRET_KEY')
     JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY')
 
-    # --- 2. 데이터베이스 설정 ---
-    # (기본값: 'sqlite:///aita.db' - backend 폴더에 파일 생성)
-    SQLALCHEMY_DATABASE_URI = os.environ.get('SQLALCHEMY_DATABASE_URI', 'sqlite:///aita.db')
+    # --- 2. [수정] 데이터베이스 설정 (Render/로컬 자동 전환) ---
+    
+    # 2-1. 1순위: 'SQLALCHEMY_DATABASE_URI' 환경 변수 확인 (로컬 오버라이드용)
+    SQLALCHEMY_DATABASE_URI = os.environ.get('SQLALCHEMY_DATABASE_URI')
+
+    # 2-2. 2순위: 1순위가 없으면 'DATABASE_URL' 환경 변수 확인 (Render 배포용)
+    if not SQLALCHEMY_DATABASE_URI:
+        SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL')
+        
+        # [중요] Render의 DB URL 호환성 처리 (postgres:// -> postgresql://)
+        if SQLALCHEMY_DATABASE_URI and SQLALCHEMY_DATABASE_URI.startswith("postgres://"):
+            SQLALCHEMY_DATABASE_URI = SQLALCHEMY_DATABASE_URI.replace("postgres://", "postgresql://", 1)
+
+
+    # 2-3. 1, 2순위가 모두 없다면 (완전 로컬 환경이라면) SQLite로 대체
+    if not SQLALCHEMY_DATABASE_URI:
+        print("[Config] No DB URI env var found. Using local SQLite DB.")
+        
+        # 'instance' 폴더 경로 설정
+        instance_folder_path = os.path.join(basedir, 'instance')
+        
+        # 'instance' 폴더가 없으면 생성
+        os.makedirs(instance_folder_path, exist_ok=True)
+        
+        # 최종 DB 파일 경로 설정
+        db_file_path = os.path.join(instance_folder_path, 'aita.db')
+        
+        # Linux/Mac 기준 (절대 경로)
+        SQLALCHEMY_DATABASE_URI = f'sqlite:///{db_file_path}' 
+
+    
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # --- 3. [수정] 이메일(Gmail) 설정 ---
@@ -31,15 +60,6 @@ class Config:
     # (기본값: MAIL_USERNAME과 동일하게 설정)
     MAIL_DEFAULT_SENDER = os.environ.get('SNUAITA301@gmail.com', os.environ.get('MAIL_USERNAME'))
 
-    # 기존 SQLite 설정 (로컬 개발용)
-    default_db_uri = "sqlite:///./instance/aita.db" # (경로는 기존 설정에 맞게)
-
-    # Render에서 설정한 DATABASE_URL 환경 변수를 읽어옴
-    # 만약 환경 변수가 없으면(로컬이면) default_db_uri(SQLite)를 사용
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', default_db_uri)
-    
-    # (선택) SQLAlchemy 관련 경고 메시지 끄기
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
 
 
 # 1. 자료 분석 요약 프롬프트
