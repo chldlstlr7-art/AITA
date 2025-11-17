@@ -124,7 +124,7 @@ COMPARISON_SYSTEM_PROMPT = (
 "{candidate_json_str}\n\n"
 
 "Evaluate the pair by comparing their corresponding JSON fields according to the following ten logical-structural criteria. "
-"For each criterion, assign a similarity score from **1 to 5** (1 = completely different, 5 = almost identical) "
+"For each criterion, assign a similarity score from **1 to 10** (1 = completely different, 5 = almost identical) "
 "and briefly explain the reasoning behind your score.\n\n"
 
 "Evaluation Criteria:\n"
@@ -142,12 +142,12 @@ COMPARISON_SYSTEM_PROMPT = (
 "Please provide your evaluation strictly in the following format (in Korean):\n\n"
 "- **Overall Comment:** [A brief overall statement about logical/structural similarity]\n\n"
 "- **Detailed Scoring:**\n"
-"  1. Core Thesis Similarity: [Score 1–5] – [Reason in Korean]\n"
-"  2. Problem Framing Similarity: [Score 1–5] – [Reason in Korean]\n"
-"  3. Claim Similarity: [Score 1–5] – [Reason in Korean]\n"
-"  4. Reasoning Similarity: [Score 1–5] – [Reason in Korean]\n"
-"  5. Flow Pattern Similarity: [Score 1–5] – [Reason in Korean]\n"
-"  6. Conclusion Framing Similarity: [Score 1–5] – [Reason in Korean]\n"
+"  1. Core Thesis Similarity: [Score 1–10] – [Reason in Korean]\n"
+"  2. Problem Framing Similarity: [Score 1–10] – [Reason in Korean]\n"
+"  3. Claim Similarity: [Score 1–10] – [Reason in Korean]\n"
+"  4. Reasoning Similarity: [Score 1–10] – [Reason in Korean]\n"
+"  5. Flow Pattern Similarity: [Score 1–10] – [Reason in Korean]\n"
+"  6. Conclusion Framing Similarity: [Score 1–10] – [Reason in Korean]\n"
 
 "Answer in Korean."
 )

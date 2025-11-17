@@ -42,5 +42,6 @@ pypdf
 tqdm
 plotly
 
+
 psycopg2-binary
 kaleido==0.2.1
