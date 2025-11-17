@@ -1,3 +1,5 @@
+// [파일 경로] src/components/ReportDisplay.jsx
+
 import React, { useState } from 'react';
 import { 
   Paper, 
@@ -21,10 +23,12 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import LightbulbIcon from '@mui/icons-material/Lightbulb';
 import SearchIcon from '@mui/icons-material/Search';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
-import LogicFlowChart from './LogicFlowChart.jsx';
+// [수정] LogicFlowChart 대신 LogicFlowDiagram을 import 합니다.
+import LogicFlowDiagram from './LogicFlowDiagram.jsx';
 import { styled, alpha } from '@mui/material/styles';
 
 // 🔄 요약 필드 순서 및 메타데이터 정의
+// ... (설정 동일) ...
 const summaryFieldsConfig = [
   {
     key: 'assignment_type',
@@ -71,6 +75,7 @@ const summaryFieldsConfig = [
 ];
 
 // --- 스타일 컴포넌트 ---
+// ... (스타일 동일) ...
 const RootCard = styled(Card)(({ theme }) => ({
   borderRadius: theme.spacing(2.5),
   overflow: 'visible',
@@ -111,6 +116,7 @@ const GlassCard = styled(Paper)(({ theme }) => ({
   boxShadow: `0 8px 32px ${alpha(theme.palette.primary.main, 0.08)}`,
 }));
 
+// ... (copyToClipboard 함수 동일) ...
 const copyToClipboard = (text) => {
   try {
     navigator.clipboard.writeText(text);
@@ -124,7 +130,9 @@ const copyToClipboard = (text) => {
   }
 };
 
-function ReportDisplay({ data, userAssignmentType }) {
+
+// [수정] prop으로 reportId를 받습니다.
+function ReportDisplay({ data, userAssignmentType, reportId }) {
   if (!data) return null;
 
   const { summary = {} } = data;
@@ -134,6 +142,7 @@ function ReportDisplay({ data, userAssignmentType }) {
       <Fade in timeout={600}>
         <RootCard elevation={0}>
           <CardContent sx={{ p: 4 }}>
+            {/* ... (헤더 및 요약 필드 렌더링 동일) ... */}
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 4 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                 <Avatar 
@@ -169,10 +178,8 @@ function ReportDisplay({ data, userAssignmentType }) {
               </Tooltip>
             </Box>
 
-            {/* 정렬된 순서로 요약 필드 렌더링 */}
             <Stack spacing={3}>
               {summaryFieldsConfig.map((field) => {
-                // 🎯 과제 유형: 사용자가 선택한 값이 있으면 그것을 사용, 없으면 백엔드 값
                 let value = summary[field.key];
                 if (field.key === 'assignment_type') {
                   value = userAssignmentType || summary[field.key] || 'AI 자동 판단';
@@ -239,7 +246,7 @@ function ReportDisplay({ data, userAssignmentType }) {
               })}
             </Stack>
 
-            {/* Flow_Pattern 차트 */}
+            {/* [수정] Flow_Pattern 차트 섹션 */}
             {summary.Flow_Pattern && (
               <>
                 <Divider sx={{ my: 4 }} />
@@ -270,7 +277,10 @@ function ReportDisplay({ data, userAssignmentType }) {
                   </Box>
                 </Box>
                 <GlassCard elevation={0}>
-                  <LogicFlowChart flowData={summary} />
+                  {/* [수정] LogicFlowChart 대신 LogicFlowDiagram을 사용하고, 
+                    prop으로 'reportId'를 전달합니다.
+                  */}
+                  <LogicFlowDiagram reportId={reportId} />
                 </GlassCard>
               </>
             )}

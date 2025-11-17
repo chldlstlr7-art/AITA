@@ -20,6 +20,15 @@ import {
   Fade,
   Slide,
   Divider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Snackbar,
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
@@ -29,12 +38,20 @@ import {
   ExpandMore as ExpandMoreIcon,
   Lightbulb as LightbulbIcon,
   TipsAndUpdates as TipsIcon,
-  AddCircleOutline as NewReportIcon,
-  List as ListIcon,
   Send as SubmitIcon,
+  CheckCircle as SuccessIcon,
 } from '@mui/icons-material';
 import { styled, alpha } from '@mui/material/styles';
-import { getReportStatus, requestAdvancementIdeas } from '../services/api';
+import { 
+  getReportStatus, 
+  requestAdvancementIdeas,
+  submitReportToAssignment,
+  getStudentCourseAssignments,
+  getStudentDashboard,
+} from '../services/api';
+
+// 🔥 마무리 버튼 컴포넌트 import
+import AdvancementActions from '../components/AdvancementActions';
 
 // ==================== Styled Components ====================
 
@@ -81,67 +98,6 @@ const StyledAccordion = styled(Accordion)(({ theme }) => ({
     margin: `${theme.spacing(2)} 0`,
     boxShadow: `0 12px 40px ${alpha(theme.palette.primary.main, 0.15)}`,
   },
-}));
-
-const ActionButton = styled(Button)(({ theme, variant: buttonVariant }) => {
-  const isPrimary = buttonVariant === 'primary';
-  const isSecondary = buttonVariant === 'secondary';
-  
-  return {
-    padding: theme.spacing(2, 4),
-    fontSize: '1rem',
-    fontWeight: 600,
-    borderRadius: theme.spacing(2),
-    textTransform: 'none',
-    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-    minHeight: 56,
-    
-    ...(isPrimary && {
-      background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
-      color: 'white',
-      boxShadow: `0 4px 20px ${alpha(theme.palette.primary.main, 0.4)}`,
-      
-      '&:hover': {
-        background: `linear-gradient(135deg, ${theme.palette.secondary.main} 0%, ${theme.palette.primary.main} 100%)`,
-        transform: 'translateY(-3px)',
-        boxShadow: `0 8px 28px ${alpha(theme.palette.primary.main, 0.5)}`,
-      },
-    }),
-    
-    ...(isSecondary && {
-      background: alpha(theme.palette.primary.main, 0.08),
-      color: theme.palette.primary.main,
-      border: `2px solid ${alpha(theme.palette.primary.main, 0.2)}`,
-      
-      '&:hover': {
-        background: alpha(theme.palette.primary.main, 0.15),
-        borderColor: alpha(theme.palette.primary.main, 0.3),
-        transform: 'translateY(-3px)',
-        boxShadow: `0 8px 24px ${alpha(theme.palette.primary.main, 0.2)}`,
-      },
-    }),
-    
-    ...(!isPrimary && !isSecondary && {
-      background: 'white',
-      color: theme.palette.text.primary,
-      border: `2px solid ${theme.palette.divider}`,
-      
-      '&:hover': {
-        background: alpha(theme.palette.primary.main, 0.05),
-        borderColor: theme.palette.primary.main,
-        transform: 'translateY(-3px)',
-        boxShadow: `0 8px 24px ${alpha(theme.palette.primary.main, 0.15)}`,
-      },
-    }),
-  };
-});
-
-const ActionsContainer = styled(Paper)(({ theme }) => ({
-  padding: theme.spacing(4),
-  marginTop: theme.spacing(4),
-  background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.02)} 0%, ${alpha(theme.palette.secondary.main, 0.02)} 100%)`,
-  borderRadius: theme.spacing(3),
-  border: `1px solid ${alpha(theme.palette.primary.main, 0.1)}`,
 }));
 
 const LoadingBox = styled(Box)(({ theme }) => ({
@@ -212,7 +168,38 @@ function AdvancementPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [pollingAttempts, setPollingAttempts] = useState(0);
   
+  // 🔥 과제 제출 다이얼로그 관련 상태
+  const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
+  const [courses, setCourses] = useState([]);
+  const [selectedCourseId, setSelectedCourseId] = useState('');
+  const [assignments, setAssignments] = useState([]);
+  const [selectedAssignmentId, setSelectedAssignmentId] = useState('');
+  const [loadingCourses, setLoadingCourses] = useState(false);
+  const [loadingAssignments, setLoadingAssignments] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  
   const pollingTimerRef = useRef(null);
+
+  // 🔥 사용자 ID 가져오기 헬퍼
+  const getUserId = () => {
+    const userData = JSON.parse(localStorage.getItem('user') || '{}');
+    let userId = userData.user_id || userData.id;
+    
+    if (!userId) {
+      const token = localStorage.getItem('accessToken');
+      if (token) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          userId = payload.sub || payload.user_id || payload.id;
+        } catch (e) {
+          console.error('[getUserId] JWT 파싱 실패:', e);
+        }
+      }
+    }
+    
+    return userId;
+  };
 
   // 초기 리포트 데이터 로드
   useEffect(() => {
@@ -224,16 +211,12 @@ function AdvancementPage() {
         if (response.status === 'completed' || response.status === 'processing_questions') {
           setReportData(response.data);
           
-          // 🔥 이미 생성된 아이디어가 있으면 자동 표시
           if (response.data?.advancement_ideas) {
             const parsed = typeof response.data.advancement_ideas === 'string'
               ? JSON.parse(response.data.advancement_ideas)
               : response.data.advancement_ideas;
             setIdeas(parsed);
-            console.log('[AdvancementPage] ✅ 기존 아이디어 로드:', parsed);
           } else {
-            // 🔥 없으면 자동 생성 시작
-            console.log('[AdvancementPage] 💡 아이디어가 없습니다. 자동 생성을 시작합니다.');
             handleGenerateIdeas();
           }
         } else {
@@ -261,13 +244,10 @@ function AdvancementPage() {
   // 폴링 로직
   const pollForIdeas = async () => {
     try {
-      console.log(`[AdvancementPage] 📡 폴링 시도 ${pollingAttempts + 1}/${MAX_POLLING_ATTEMPTS}`);
-      
       const response = await getReportStatus(reportId);
       const advancementIdeas = response.data?.advancement_ideas;
 
       if (advancementIdeas) {
-        console.log('[AdvancementPage] ✅ 아이디어 생성 완료!');
         const parsed = typeof advancementIdeas === 'string'
           ? JSON.parse(advancementIdeas)
           : advancementIdeas;
@@ -279,8 +259,7 @@ function AdvancementPage() {
         setPollingAttempts(prev => prev + 1);
         
         if (pollingAttempts + 1 >= MAX_POLLING_ATTEMPTS) {
-          console.error('[AdvancementPage] ⏱️ 폴링 타임아웃');
-          setError('아이디어 생성 시간이 초과되었습니다. 나중에 다시 시도해주세요.');
+          setError('아이디어 생성 시간이 초과되었습니다.');
           setIsGenerating(false);
         } else {
           pollingTimerRef.current = setTimeout(pollForIdeas, POLLING_INTERVAL);
@@ -300,20 +279,16 @@ function AdvancementPage() {
       setError('');
       setPollingAttempts(0);
       
-      console.log('[AdvancementPage] 🚀 발전 아이디어 생성 요청 시작');
       const response = await requestAdvancementIdeas(reportId);
-      
-      console.log('[AdvancementPage] 📥 응답 데이터:', response);
 
-      if (response.message && typeof response.message === 'string') {
-        console.log('[AdvancementPage] ⏳ 202 Accepted - 백그라운드 작업 시작');
+      if (response.status === 'processing') {
         pollingTimerRef.current = setTimeout(pollForIdeas, POLLING_INTERVAL);
+      } else if (response.status === 'completed' && response.data) {
+        setIdeas(response.data);
+        setIsGenerating(false);
       } else if (Array.isArray(response)) {
-        console.log('[AdvancementPage] ✅ 200 OK - 이미 생성된 아이디어 반환');
         setIdeas(response);
         setIsGenerating(false);
-      } else {
-        throw new Error('예상치 못한 응답 형식입니다.');
       }
     } catch (err) {
       console.error('[AdvancementPage] 생성 실패:', err);
@@ -326,17 +301,121 @@ function AdvancementPage() {
     navigate(`/report/${reportId}`);
   };
 
-  // 🔥 마무리 버튼 핸들러들
+  // 🔥 새로운 보고서 분석하기
   const handleNewReport = () => {
-    navigate('/'); // 🔥 홈(=새 분석)으로 이동
+    navigate('/');
   };
 
-  const handleViewSubmissions = () => {
-    navigate('/dashboard'); // 🔥 대시보드로 이동
+  // 🔥 학생 대시보드 보기
+  const handleViewDashboard = () => {
+    const userId = getUserId();
+    
+    if (userId) {
+      navigate(`/dashboard/${userId}`);
+    } else {
+      setSnackbar({
+        open: true,
+        message: '로그인 정보를 찾을 수 없습니다.',
+        severity: 'error',
+      });
+    }
   };
 
-  const handleSubmitAssignment = () => {
-    alert('과제 제출 기능은 준비 중입니다.');
+  // 🔥 과제 제출 다이얼로그 열기
+  const handleOpenSubmitDialog = async () => {
+    try {
+      setLoadingCourses(true);
+      setSubmitDialogOpen(true);
+      
+      const userId = getUserId();
+      if (!userId) {
+        throw new Error('로그인 정보를 찾을 수 없습니다.');
+      }
+      
+      const dashboardData = await getStudentDashboard(userId);
+      
+      const coursesData = dashboardData.courses_with_submissions?.map(course => ({
+        id: course.course_id,
+        course_code: course.course_code,
+        course_name: course.course_name,
+      })) || [];
+      
+      setCourses(coursesData);
+      
+    } catch (err) {
+      console.error('[AdvancementPage] 과목 목록 조회 실패:', err);
+      setSnackbar({
+        open: true,
+        message: err.message || '과목 목록을 불러오는 데 실패했습니다.',
+        severity: 'error',
+      });
+    } finally {
+      setLoadingCourses(false);
+    }
+  };
+
+  // 🔥 과목 선택
+  const handleCourseSelect = async (courseId) => {
+    try {
+      setSelectedCourseId(courseId);
+      setSelectedAssignmentId('');
+      setAssignments([]);
+      
+      if (!courseId) return;
+      
+      setLoadingAssignments(true);
+      const response = await getStudentCourseAssignments(courseId);
+      setAssignments(response || []);
+      
+    } catch (err) {
+      console.error('[AdvancementPage] 과제 목록 조회 실패:', err);
+      setSnackbar({
+        open: true,
+        message: err.message || '과제 목록을 불러오는 데 실패했습니다.',
+        severity: 'error',
+      });
+    } finally {
+      setLoadingAssignments(false);
+    }
+  };
+
+  // 🔥 과제 제출
+  const handleSubmitToAssignment = async () => {
+    if (!selectedAssignmentId) {
+      setSnackbar({
+        open: true,
+        message: '과제를 선택해주세요.',
+        severity: 'warning',
+      });
+      return;
+    }
+    
+    try {
+      setSubmitting(true);
+      await submitReportToAssignment(reportId, selectedAssignmentId);
+      
+      setSnackbar({
+        open: true,
+        message: '과제가 성공적으로 제출되었습니다!',
+        severity: 'success',
+      });
+      
+      setSubmitDialogOpen(false);
+      
+      setTimeout(() => {
+        handleViewDashboard();
+      }, 3000);
+      
+    } catch (err) {
+      console.error('[AdvancementPage] 과제 제출 실패:', err);
+      setSnackbar({
+        open: true,
+        message: err.message || '과제 제출에 실패했습니다.',
+        severity: 'error',
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // evidence 데이터 안전하게 렌더링
@@ -492,12 +571,7 @@ function AdvancementPage() {
             {/* 생성 중 */}
             {isGenerating && (
               <LoadingBox>
-                <CircularProgress 
-                  size={60} 
-                  sx={{ 
-                    color: 'primary.main',
-                  }} 
-                />
+                <CircularProgress size={60} sx={{ color: 'primary.main' }} />
                 <Typography variant="h6" sx={{ fontWeight: 600 }}>
                   AI가 발전 아이디어를 생성하고 있습니다
                 </Typography>
@@ -609,80 +683,158 @@ function AdvancementPage() {
           </ContentPaper>
         </Slide>
 
-        {/* 🔥 마무리 액션 버튼들 */}
+        {/* 🔥 마무리 액션 버튼들 (컴포넌트 분리) */}
         {ideas && !isGenerating && (
-          <Fade in timeout={1000}>
-            <ActionsContainer elevation={0}>
-              <Box sx={{ mb: 3 }}>
-                <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>
-                  ✨ 마무리
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  발전 아이디어를 확인했다면 다음 단계를 진행하세요
-                </Typography>
-              </Box>
-
-              <Divider sx={{ mb: 3 }} />
-
-              <Stack 
-                direction={{ xs: 'column', md: 'row' }} 
-                spacing={2}
-                sx={{ width: '100%' }}
-              >
-                {/* 새로운 보고서 분석하기 */}
-                <ActionButton
-                  variant="secondary"
-                  fullWidth
-                  startIcon={<NewReportIcon />}
-                  onClick={handleNewReport}
-                >
-                  <Box sx={{ textAlign: 'left' }}>
-                    <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                      새로운 보고서 분석하기
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      다른 과제의 보고서를 분석합니다
-                    </Typography>
-                  </Box>
-                </ActionButton>
-
-                {/* 나의 제출 목록 보기 */}
-                <ActionButton
-                  fullWidth
-                  startIcon={<ListIcon />}
-                  onClick={handleViewSubmissions}
-                >
-                  <Box sx={{ textAlign: 'left' }}>
-                    <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                      나의 제출 목록 보기
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      제출한 과제 목록을 확인합니다
-                    </Typography>
-                  </Box>
-                </ActionButton>
-
-                {/* 해당 과제 제출하기 */}
-                <ActionButton
-                  variant="primary"
-                  fullWidth
-                  startIcon={<SubmitIcon />}
-                  onClick={handleSubmitAssignment}
-                >
-                  <Box sx={{ textAlign: 'left' }}>
-                    <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                      해당 과제 제출하기
-                    </Typography>
-                    <Typography variant="caption" sx={{ opacity: 0.9 }}>
-                      최종 보고서를 제출합니다
-                    </Typography>
-                  </Box>
-                </ActionButton>
-              </Stack>
-            </ActionsContainer>
-          </Fade>
+          <AdvancementActions
+            onNewReport={handleNewReport}
+            onViewDashboard={handleViewDashboard}
+            onSubmit={handleOpenSubmitDialog}
+          />
         )}
       </Container>
+
+      {/* 🔥 과제 제출 다이얼로그 */}
+      <Dialog
+        open={submitDialogOpen}
+        onClose={() => !submitting && setSubmitDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            boxShadow: (theme) => `0 8px 32px ${alpha(theme.palette.primary.main, 0.15)}`,
+          }
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 700, fontSize: '1.5rem' }}>
+          📤 과제 제출
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <FormControl fullWidth sx={{ mb: 3 }}>
+              <InputLabel id="course-select-label">과목 선택</InputLabel>
+              <Select
+                labelId="course-select-label"
+                value={selectedCourseId}
+                onChange={(e) => handleCourseSelect(e.target.value)}
+                label="과목 선택"
+                disabled={loadingCourses || submitting}
+              >
+                {loadingCourses ? (
+                  <MenuItem disabled>
+                    <CircularProgress size={20} sx={{ mr: 1 }} />
+                    로딩 중...
+                  </MenuItem>
+                ) : courses.length === 0 ? (
+                  <MenuItem disabled>수강 중인 과목이 없습니다</MenuItem>
+                ) : (
+                  courses.map((course) => (
+                    <MenuItem key={course.id} value={course.id}>
+                      {course.course_code} - {course.course_name}
+                    </MenuItem>
+                  ))
+                )}
+              </Select>
+            </FormControl>
+
+            {selectedCourseId && (
+              <FormControl fullWidth>
+                <InputLabel id="assignment-select-label">과제 선택</InputLabel>
+                <Select
+                  labelId="assignment-select-label"
+                  value={selectedAssignmentId}
+                  onChange={(e) => setSelectedAssignmentId(e.target.value)}
+                  label="과제 선택"
+                  disabled={loadingAssignments || submitting}
+                >
+                  {loadingAssignments ? (
+                    <MenuItem disabled>
+                      <CircularProgress size={20} sx={{ mr: 1 }} />
+                      로딩 중...
+                    </MenuItem>
+                  ) : assignments.length === 0 ? (
+                    <MenuItem disabled>등록된 과제가 없습니다</MenuItem>
+                  ) : (
+                    assignments.map((assignment) => (
+                      <MenuItem key={assignment.id} value={assignment.id}>
+                        {assignment.assignment_name}
+                        {assignment.due_date && (
+                          <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                            (마감: {new Date(assignment.due_date).toLocaleDateString()})
+                          </Typography>
+                        )}
+                      </MenuItem>
+                    ))
+                  )}
+                </Select>
+              </FormControl>
+            )}
+
+            {selectedCourseId && selectedAssignmentId && (
+              <Alert 
+                severity="info" 
+                icon={<SuccessIcon />}
+                sx={{ mt: 3 }}
+              >
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  제출 준비 완료
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  선택한 과제에 현재 리포트를 제출합니다.
+                </Typography>
+              </Alert>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ p: 3, pt: 1 }}>
+          <Button 
+            onClick={() => setSubmitDialogOpen(false)}
+            disabled={submitting}
+            sx={{ 
+              borderRadius: 2,
+              textTransform: 'none',
+              fontWeight: 600,
+            }}
+          >
+            취소
+          </Button>
+          <Button 
+            onClick={handleSubmitToAssignment}
+            variant="contained"
+            disabled={!selectedAssignmentId || submitting}
+            startIcon={submitting ? <CircularProgress size={20} /> : <SubmitIcon />}
+            sx={{
+              borderRadius: 2,
+              textTransform: 'none',
+              fontWeight: 600,
+              background: (theme) => `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+              boxShadow: (theme) => `0 4px 12px ${alpha(theme.palette.primary.main, 0.3)}`,
+            }}
+          >
+            {submitting ? '제출 중...' : '제출하기'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 🔥 스낵바 (알림) */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert 
+          onClose={() => setSnackbar({ ...snackbar, open: false })} 
+          severity={snackbar.severity}
+          sx={{ 
+            width: '100%',
+            borderRadius: 2,
+            fontWeight: 600,
+          }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </PageContainer>
   );
 }

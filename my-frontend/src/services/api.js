@@ -87,6 +87,42 @@ export const getReportStatus = async (reportId) => {
   }
 };
 
+/**
+ * 🔥 [신규] 논리 흐름도 PNG 이미지 조회
+ * @param {string} reportId - 리포트 ID
+ * @returns {Promise<Blob>} PNG 이미지 Blob 객체
+ */
+export const getFlowGraphImage = async (reportId) => {
+  try {
+    const response = await apiClient.get(
+      `/api/student/report/${reportId}/flow-graph`,
+      {
+        // [중요] 응답을 JSON이 아닌 Blob(바이너리)으로 받도록 설정
+        responseType: 'blob', 
+      }
+    );
+    // 성공 시 response.data는 Blob 객체입니다.
+    return response.data;
+
+  } catch (error) {
+    console.error('흐름도 이미지 API 에러:', error.response || error);
+    
+    // [중요] 오류 응답(JSON)을 파싱하기 위한 처리
+    if (error.response && error.response.data instanceof Blob) {
+      try {
+        // Blob을 텍스트로 읽고 JSON으로 파싱
+        const errorText = await error.response.data.text();
+        const errorJson = JSON.parse(errorText);
+        throw new Error(errorJson.message || errorJson.error || '그래프 로딩 실패');
+      } catch (parseError) {
+        throw new Error(error.response?.statusText || '그래프를 불러오지 못했습니다.');
+      }
+    }
+    
+    throw new Error(error.response?.data?.error || error.response?.data?.message || '그래프를 불러오지 못했습니다.');
+  }
+};
+
 // ==================== QA 관련 ====================
 
 export const submitAnswer = async (reportId, questionId, userAnswer) => {
