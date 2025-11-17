@@ -7,7 +7,7 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from time import sleep
 import traceback # 1단계 오류 핸들링을 위해 추가
-
+import math
 from extensions import db
 from models import AnalysisReport
 
@@ -355,6 +355,7 @@ def _parse_comparison_scores(report_text):
     }
     try:
         for key_name, mapped_key in key_mapping.items():
+            # 점수 파싱 로직은 그대로 유지합니다.
             pattern = rf"{re.escape(key_name)}.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]"
             match = re.search(pattern, report_text, re.IGNORECASE | re.DOTALL)
             if match:
@@ -363,24 +364,57 @@ def _parse_comparison_scores(report_text):
                 parsed_count += 1
             else:
                 print(f"[_parse_comparison_scores] DEBUG: Failed to parse score for key: '{key_name}'")
+        
         if parsed_count < 6:
             print(f"[_parse_comparison_scores] WARNING: Parsed {parsed_count}/6 scores.")
-        scores["Core Thesis"] = scores["Core Thesis"] * 3
-        scores["Claim"] = scores["Claim"] * 3
-        scores["Reasoning"] = scores["Reasoning"] * 2
-        scores["Flow Pattern"] = scores["Flow Pattern"] * 1
-        scores["Problem Framing"] = scores["Problem Framing"] * 1
-        scores["Conclusion Framing"] = scores["Conclusion Framing"] * 0
-        total_score = sum(scores.values())
+
+        # 2. 새로운 점수 변환 로직 적용
+
+        # Core Thesis: (점수 - 8, 음수면 0)의 제곱 * 2    
+        original_ct = scores["Core Thesis"]
+        scores["Core Thesis"] = max(0, original_ct - 8) ** 2 * 2
+        
+        # Claim: (점수 - 8, 음수면 0)의 제곱 * 2   
+        original_claim = scores["Claim"]
+        scores["Claim"] = max(0, original_claim - 8) ** 2 * 2
+
+        # Reasoning: (점수 - 5, 음수면 0)의 1.5승 * 2 를 정수 처리 
+        original_reasoning = scores["Reasoning"]
+        scores["Reasoning"] = int(math.pow(max(0, original_reasoning - 5), 1.5) * 2)
+
+        # Flow Pattern: (점수 - 6, 음수면 0)의 제곱 * 2  
+        original_fp = scores["Flow Pattern"]
+        scores["Flow Pattern"] = max(0, original_fp - 6) ** 2 * 2
+        
+        # Problem Framing: (점수 - 5, 음수면 0) * 2   
+        original_pf = scores["Problem Framing"]
+        scores["Problem Framing"] = max(0, original_pf - 5) * 2
+
+        # Conclusion Framing: (점수 - 5, 음수면 0) * 2  
+        original_cf = scores["Conclusion Framing"]
+        scores["Conclusion Framing"] = max(0, original_cf - 5) * 2
+        
+        # 3. 총점 계산
+        total_score_converted = sum(scores.values())
+        
+        # 4. 100점 만점으로 환산 후 정수 처리
+        if MAX_TOTAL_SCORE > 0:
+            # 📌 최종 점수에 int() 적용
+            final_score_100 = int((total_score_converted / MAX_TOTAL_SCORE) * 100)
+        else:
+            final_score_100 = 0
+            
     except Exception as e:
         print(f"[_parse_comparison_scores] 파싱 중 에러: {e}")
         return 0, scores
-    return total_score, scores
+    
+    return final_score_100, scores
+
 
 
 def _filter_high_similarity_reports(comparison_results_list):
     high_similarity_reports = []
-    threshold = 30
+    threshold = 60
     for result in comparison_results_list:
         report_text = result.get("llm_comparison_report", "")
         total_score, scores_dict = _parse_comparison_scores(report_text)
