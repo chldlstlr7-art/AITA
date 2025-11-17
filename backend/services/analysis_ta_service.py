@@ -15,7 +15,7 @@ from time import sleep
 # [중요] Flask 앱 컨텍스트(db)가 필요합니다.
 from extensions import db
 from models import AnalysisReport, User
-
+from analysis_service import _parse_comparison_scores, _filter_high_similarity_reports
 # --------------------------------------------------------------------------------------
 # --- 1. 전역 설정 및 모델 로드 (Flask 앱 시작 시 1회 실행) ---
 # --------------------------------------------------------------------------------------
@@ -50,73 +50,7 @@ except Exception as e:
 
 print("[Service Analysis] TA Service Ready. (DB will be accessed via Flask context)")
 
-def _parse_comparison_scores(report_text):
-    """
-    LLM이 생성한 비교 리포트 텍스트에서 6개 항목의 점수를 파싱하고
-    가중합(총점)을 계산합니다.
-    """
-    scores = {
-        "Core Thesis": 0, "Problem Framing": 0, "Claim": 0,
-        "Reasoning": 0, "Flow Pattern": 0, "Conclusion Framing": 0,
-    }
-    total_score = 0
-    parsed_count = 0
-    key_mapping = {
-        "Core Thesis": "Core Thesis", "Problem Framing": "Problem Framing",
-        "Claim": "Claim", "Reasoning": "Reasoning",
-        "Flow Pattern": "Flow Pattern", "Conclusion Framing": "Conclusion Framing",
-    }
-    try:
-        for key_name, mapped_key in key_mapping.items():
-            pattern = rf"{re.escape(key_name)}.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]"
-            match = re.search(pattern, report_text, re.IGNORECASE | re.DOTALL)
-            if match:
-                score = int(match.group(1))
-                scores[mapped_key] = score
-                parsed_count += 1
-            else:
-                print(f"[_parse_comparison_scores] DEBUG: Failed to parse score for key: '{key_name}'")
-        
-        if parsed_count < 6:
-            print(f"[_parse_comparison_scores] WARNING: Parsed {parsed_count}/6 scores.")
-        
-        # 가중치 적용
-        scores["Core Thesis"] = scores["Core Thesis"] * 3
-        scores["Claim"] = scores["Claim"] * 3
-        scores["Reasoning"] = scores["Reasoning"] * 2
-        scores["Flow Pattern"] = scores["Flow Pattern"] * 1
-        scores["Problem Framing"] = scores["Problem Framing"] * 1
-        scores["Conclusion Framing"] = scores["Conclusion Framing"] * 0
-        
-        total_score = sum(scores.values())
-        
-    except Exception as e:
-        print(f"[_parse_comparison_scores] 파싱 중 에러: {e}")
-        return 0, scores
-        
-    return total_score, scores
 
-def _filter_high_similarity_reports(comparison_results_list):
-    """
-    전체 비교 결과 리스트를 받아, 총점이 20점 이상인 리포트만 필터링합니다.
-    필터링된 각 항목에 'plagiarism_score'와 'scores_detail' 키를 추가합니다.
-    """
-    high_similarity_reports = []
-    threshold = 20
-    
-    for result in comparison_results_list:
-        report_text = result.get("llm_comparison_report", "")
-        total_score, scores_dict = _parse_comparison_scores(report_text)
-        
-        if total_score >= threshold:
-            # 원본 result 딕셔너리(복사본)에 점수 정보를 추가
-            # 얕은 복사로 원본 리스트에 영향을 주지 않도록 할 수 있으나,
-            # 이 서비스에서는 원본 리스트를 수정해도 무방함 (app.py 로직과 동일하게)
-            result['plagiarism_score'] = total_score
-            result['scores_detail'] = scores_dict
-            high_similarity_reports.append(result)
-            
-    return high_similarity_reports
 # --------------------------------------------------------------------------------------
 # --- 2. TA 분석 서비스 클래스 (핵심 로직) ---
 # --------------------------------------------------------------------------------------
@@ -490,7 +424,6 @@ class AnalysisTAService:
             "filename": report.original_filename,
             "status": report.status,
             "summary_data": json.loads(report.summary) if report.summary else None,
-            # 12. [필드명 수정] comparison_results -> similarity_details
             "comparison_data": json.loads(report.similarity_details) if report.similarity_details else None,
             "error_message": report.error_message,
             "auto_score_details": report.auto_score_details
