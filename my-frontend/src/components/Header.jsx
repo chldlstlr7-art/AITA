@@ -1,140 +1,120 @@
-import React, { useState } from 'react';
-import { Link as RouterLink, useLocation } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext.jsx';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   AppBar,
   Toolbar,
   Typography,
   Button,
   Box,
+  Container,
+  IconButton,
+  Tooltip,
   Avatar,
   Menu,
   MenuItem,
   Divider,
-  IconButton,
-  Drawer,
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemText,
+  ListItemIcon,
 } from '@mui/material';
+import {
+  Logout as LogoutIcon,
+  Dashboard as DashboardIcon,
+  Login as LoginIcon,
+  Home as HomeIcon,
+  Person as PersonIcon,
+  Settings as SettingsIcon,
+  School as SchoolIcon,
+} from '@mui/icons-material';
 import { styled, alpha } from '@mui/material/styles';
-import { Menu as MenuIcon, Close as CloseIcon, Logout as LogoutIcon } from '@mui/icons-material';
+import { isTokenValid } from '../utils/jwtHelper';
 
-// 🎨 테마 색상 기반 Styled Components
 const StyledAppBar = styled(AppBar)(({ theme }) => ({
-  background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
-  boxShadow: `0 4px 12px ${alpha(theme.palette.primary.main, 0.25)}`,
-  backdropFilter: 'blur(10px)',
-  borderBottom: `1px solid ${alpha(theme.palette.common.white, 0.1)}`,
+  background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+  boxShadow: `0 4px 20px ${alpha(theme.palette.primary.main, 0.3)}`,
 }));
 
-const StyledToolbar = styled(Toolbar)(({ theme }) => ({
-  display: 'flex',
-  justifyContent: 'space-between',
-  padding: '12px 24px',
-  [theme.breakpoints.down('sm')]: {
-    padding: '8px 16px',
+const NavButton = styled(Button, {
+  shouldForwardProp: (prop) => prop !== 'isActive',
+})(({ theme, isActive }) => ({
+  marginLeft: theme.spacing(2),
+  color: 'white',
+  fontWeight: 600,
+  textTransform: 'none',
+  padding: theme.spacing(1, 2.5),
+  borderRadius: theme.spacing(1.5),
+  transition: 'all 0.3s ease',
+  background: isActive ? alpha('#fff', 0.2) : 'transparent',
+
+  '&:hover': {
+    background: alpha('#fff', 0.25),
+    transform: 'translateY(-2px)',
   },
 }));
 
-const LogoBox = styled(Box)(({ theme }) => ({
-  display: 'flex',
-  alignItems: 'center',
-  gap: theme.spacing(1.5),
+const LogoText = styled(Typography)(({ theme }) => ({
+  fontWeight: 900,
+  fontSize: '1.5rem',
   cursor: 'pointer',
-  transition: 'all 0.3s ease',
-  textDecoration: 'none',
+  textShadow: '0 2px 8px rgba(0,0,0,0.2)',
+  transition: 'transform 0.3s ease',
+
   '&:hover': {
     transform: 'scale(1.05)',
   },
 }));
 
-const Logo = styled(Typography)(({ theme }) => ({
-  fontWeight: 900,
-  fontSize: '1.6rem',
-  background: `linear-gradient(135deg, ${theme.palette.common.white} 0%, ${alpha(theme.palette.common.white, 0.85)} 100%)`,
-  backgroundClip: 'text',
-  WebkitBackgroundClip: 'text',
-  WebkitTextFillColor: 'transparent',
-  fontFamily: '"Inter", "Segoe UI", "Roboto", sans-serif',
-  letterSpacing: '-1px',
-  textShadow: `0 2px 8px ${alpha(theme.palette.common.black, 0.1)}`,
-  [theme.breakpoints.down('sm')]: {
-    fontSize: '1.3rem',
-  },
-}));
-
-const NavBox = styled(Box)(({ theme }) => ({
-  display: 'flex',
-  alignItems: 'center',
-  gap: theme.spacing(1.5),
-  [theme.breakpoints.down('sm')]: {
-    display: 'none',
-  },
-}));
-
-const StyledButton = styled(Button)(({ theme }) => ({
-  borderRadius: theme.spacing(1.5),
-  padding: '10px 20px',
-  fontSize: '0.95rem',
-  fontWeight: 600,
-  textTransform: 'none',
-  transition: 'all 0.3s ease',
-  '&:hover': {
-    transform: 'translateY(-2px)',
-    boxShadow: `0 6px 20px ${alpha(theme.palette.common.black, 0.15)}`,
-  },
-}));
-
-const UserSection = styled(Box)(({ theme }) => ({
-  display: 'flex',
-  alignItems: 'center',
-  gap: theme.spacing(2),
-  [theme.breakpoints.down('sm')]: {
-    gap: theme.spacing(1),
-  },
-}));
-
-const UserEmail = styled(Typography)(({ theme }) => ({
-  color: theme.palette.common.white,
-  fontSize: '0.9rem',
-  fontWeight: 500,
-  opacity: 0.95,
-  [theme.breakpoints.down('sm')]: {
-    display: 'none',
-  },
-}));
-
-const StyledAvatar = styled(Avatar)(({ theme }) => ({
-  width: 42,
-  height: 42,
-  background: alpha(theme.palette.common.white, 0.2),
-  border: `2px solid ${alpha(theme.palette.common.white, 0.3)}`,
-  color: theme.palette.common.white,
-  cursor: 'pointer',
-  fontWeight: 700,
-  fontSize: '1.1rem',
-  transition: 'all 0.3s ease',
-  backdropFilter: 'blur(8px)',
-  '&:hover': {
-    background: alpha(theme.palette.common.white, 0.3),
-    borderColor: alpha(theme.palette.common.white, 0.5),
-    transform: 'scale(1.08)',
-    boxShadow: `0 4px 16px ${alpha(theme.palette.common.black, 0.2)}`,
-  },
-}));
-
 function Header() {
-  const { isAuthenticated, user, logout } = useAuth();
+  const navigate = useNavigate();
   const location = useLocation();
-  const [anchorEl, setAnchorEl] = useState(null);
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const isLoggedIn = isTokenValid();
 
-  // 로그인/회원가입 페이지에서는 Header를 표시하지 않음
-  if (location.pathname === '/login' || location.pathname === '/register') {
-    return null;
-  }
+  // 🔥 사용자 정보 상태
+  const [userInfo, setUserInfo] = useState(null);
+  const [anchorEl, setAnchorEl] = useState(null);
+  const menuOpen = Boolean(anchorEl);
+
+  // 🔥 JWT 토큰에서 사용자 정보 추출
+  useEffect(() => {
+    if (isLoggedIn) {
+      try {
+        const token = localStorage.getItem('accessToken');
+        if (token) {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          setUserInfo({
+            id: payload.sub || payload.user_id || payload.identity,
+            email: payload.email || 'user@example.com',
+            role: payload.role || 'student',
+          });
+        }
+      } catch (e) {
+        console.error('[Header] JWT 파싱 실패:', e);
+      }
+    } else {
+      setUserInfo(null);
+    }
+  }, [isLoggedIn]);
+
+  const handleLogout = () => {
+    localStorage.removeItem('accessToken');
+    setUserInfo(null);
+    handleMenuClose();
+    navigate('/login');
+  };
+
+  const handleLogoClick = () => {
+    navigate('/');
+  };
+
+  const handleDashboard = () => {
+    navigate('/dashboard');
+  };
+
+  const handleTADashboard = () => {
+    navigate('/ta/dashboard');
+  };
+
+  const handleLogin = () => {
+    navigate('/login');
+  };
 
   const handleMenuOpen = (event) => {
     setAnchorEl(event.currentTarget);
@@ -144,245 +124,203 @@ function Header() {
     setAnchorEl(null);
   };
 
-  const handleLogout = () => {
-    handleMenuClose();
-    logout();
+  const isActive = (path) => location.pathname === path;
+
+  // 🔥 TA/Admin 권한 확인
+  const isTAOrAdmin = userInfo?.role === 'ta' || userInfo?.role === 'admin';
+
+  // 🔥 사용자 이름의 첫 글자 (아바타용)
+  const getInitial = () => {
+    if (userInfo?.email) {
+      return userInfo.email.charAt(0).toUpperCase();
+    }
+    return 'U';
   };
 
-  const getAvatarInitials = (email) => {
-    if (!email) return 'U';
-    const parts = email.split('@');
-    return parts[0].charAt(0).toUpperCase();
+  // 🔥 역할 뱃지 색상
+  const getRoleBadgeColor = () => {
+    switch (userInfo?.role) {
+      case 'ta':
+        return '#FF6B6B';
+      case 'admin':
+        return '#FFD93D';
+      default:
+        return '#6BCF7F';
+    }
   };
 
   return (
-    <StyledAppBar position="sticky">
-      <StyledToolbar>
-        {/* 🆕 개선된 로고 */}
-        <LogoBox component={RouterLink} to="/">
-          <Typography
-            sx={{
-              fontSize: '2rem',
-              fontWeight: 700,
-              background: (theme) => `linear-gradient(135deg, ${theme.palette.common.white} 0%, ${alpha(theme.palette.secondary.light, 1)} 100%)`,
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))',
-            }}
+    <StyledAppBar position="sticky" elevation={0}>
+      <Container maxWidth="lg">
+        <Toolbar disableGutters sx={{ py: 1 }}>
+          {/* 로고 */}
+          <LogoText
+            variant="h6"
+            onClick={handleLogoClick}
           >
-            📊
-          </Typography>
-          <Logo variant="h6">AITA</Logo>
-        </LogoBox>
+            AITA
+          </LogoText>
 
-        {/* 🆕 테마 색상 기반 데스크톱 네비게이션 */}
-        <NavBox>
-          {isAuthenticated ? (
-            <UserSection>
-              <UserEmail>{user?.email}</UserEmail>
-              <StyledAvatar onClick={handleMenuOpen}>
-                {getAvatarInitials(user?.email)}
-              </StyledAvatar>
+          <Box sx={{ flexGrow: 1 }} />
 
-              {/* 🆕 테마 색상 기반 프로필 메뉴 */}
-              <Menu
-                anchorEl={anchorEl}
-                open={Boolean(anchorEl)}
-                onClose={handleMenuClose}
-                anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-                transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-                PaperProps={{
-                  sx: {
-                    boxShadow: (theme) => `0 8px 32px ${alpha(theme.palette.common.black, 0.12)}`,
-                    borderRadius: 2,
-                    mt: 1,
-                    minWidth: 200,
-                    border: (theme) => `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-                  },
-                }}
-              >
-                <MenuItem disabled>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-                    {user?.email}
-                  </Typography>
-                </MenuItem>
-                <Divider sx={{ my: 1 }} />
-                <MenuItem
-                  onClick={handleLogout}
+          {/* 네비게이션 버튼들 */}
+          {isLoggedIn ? (
+            <>
+              {/* 홈 버튼 */}
+              <Tooltip title="새 보고서 분석하기" arrow>
+                <NavButton
+                  startIcon={<HomeIcon />}
+                  onClick={handleLogoClick}
+                  isActive={isActive('/')}
+                >
+                  홈
+                </NavButton>
+              </Tooltip>
+
+              {/* 대시보드 버튼 */}
+              <Tooltip title="나의 대시보드 보기" arrow>
+                <NavButton
+                  startIcon={<DashboardIcon />}
+                  onClick={handleDashboard}
+                  isActive={isActive('/dashboard')}
+                >
+                  대시보드
+                </NavButton>
+              </Tooltip>
+
+              {/* 🔥 TA/Admin 전용 TA 대시보드 버튼 */}
+              {isTAOrAdmin && (
+                <Tooltip title="과목 및 과제 관리" arrow>
+                  <NavButton
+                    startIcon={<SchoolIcon />}
+                    onClick={handleTADashboard}
+                    isActive={isActive('/ta/dashboard')}
+                  >
+                    TA 관리
+                  </NavButton>
+                </Tooltip>
+              )}
+
+              {/* 🔥 프로필 아바타 */}
+              <Tooltip title="프로필 메뉴" arrow>
+                <IconButton
+                  onClick={handleMenuOpen}
                   sx={{
-                    color: 'error.main',
-                    py: 1.5,
-                    borderRadius: 1,
-                    mx: 1,
+                    ml: 2,
+                    border: `2px solid ${alpha('#fff', 0.3)}`,
                     '&:hover': {
-                      background: (theme) => alpha(theme.palette.error.main, 0.08),
+                      background: alpha('#fff', 0.15),
+                      borderColor: alpha('#fff', 0.5),
                     },
                   }}
                 >
-                  <LogoutIcon sx={{ mr: 1.5, fontSize: '1.3rem' }} />
-                  <Typography variant="body2" fontWeight={600}>
-                    로그아웃
+                  <Avatar
+                    sx={{
+                      width: 36,
+                      height: 36,
+                      bgcolor: getRoleBadgeColor(),
+                      fontWeight: 700,
+                      fontSize: '1rem',
+                    }}
+                  >
+                    {getInitial()}
+                  </Avatar>
+                </IconButton>
+              </Tooltip>
+
+              {/* 🔥 프로필 드롭다운 메뉴 */}
+              <Menu
+                anchorEl={anchorEl}
+                open={menuOpen}
+                onClose={handleMenuClose}
+                onClick={handleMenuClose}
+                PaperProps={{
+                  elevation: 3,
+                  sx: {
+                    mt: 1.5,
+                    minWidth: 220,
+                    borderRadius: 2,
+                    overflow: 'visible',
+                    filter: 'drop-shadow(0px 2px 8px rgba(0,0,0,0.15))',
+                    '& .MuiAvatar-root': {
+                      width: 32,
+                      height: 32,
+                      ml: -0.5,
+                      mr: 1,
+                    },
+                  },
+                }}
+                transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+                anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+              >
+                {/* 사용자 정보 헤더 */}
+                <Box sx={{ px: 2, py: 1.5 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    {userInfo?.email || 'Loading...'}
                   </Typography>
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      color: getRoleBadgeColor(),
+                      fontWeight: 600,
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    {userInfo?.role === 'ta' ? 'TA' : userInfo?.role === 'admin' ? 'Admin' : 'Student'}
+                  </Typography>
+                </Box>
+
+                <Divider />
+
+                {/* 메뉴 항목 */}
+                <MenuItem onClick={() => navigate('/dashboard')}>
+                  <ListItemIcon>
+                    <PersonIcon fontSize="small" />
+                  </ListItemIcon>
+                  내 대시보드
+                </MenuItem>
+
+                {/* 🔥 TA/Admin 전용 메뉴 */}
+                {isTAOrAdmin && (
+                  <MenuItem onClick={handleTADashboard}>
+                    <ListItemIcon>
+                      <SchoolIcon fontSize="small" />
+                    </ListItemIcon>
+                    TA 관리
+                  </MenuItem>
+                )}
+
+                <MenuItem onClick={handleMenuClose}>
+                  <ListItemIcon>
+                    <SettingsIcon fontSize="small" />
+                  </ListItemIcon>
+                  설정 (준비 중)
+                </MenuItem>
+
+                <Divider />
+
+                <MenuItem onClick={handleLogout}>
+                  <ListItemIcon>
+                    <LogoutIcon fontSize="small" />
+                  </ListItemIcon>
+                  로그아웃
                 </MenuItem>
               </Menu>
-            </UserSection>
+            </>
           ) : (
-            <UserSection>
-              <StyledButton
-                component={RouterLink}
-                to="/login"
-                variant="outlined"
-                sx={{
-                  borderColor: (theme) => alpha(theme.palette.common.white, 0.5),
-                  color: 'common.white',
-                  borderWidth: '2px',
-                  '&:hover': {
-                    borderColor: 'common.white',
-                    borderWidth: '2px',
-                    background: (theme) => alpha(theme.palette.common.white, 0.15),
-                  },
-                }}
+            <>
+              {/* 로그인 버튼 */}
+              <NavButton
+                startIcon={<LoginIcon />}
+                onClick={handleLogin}
+                isActive={isActive('/login')}
               >
                 로그인
-              </StyledButton>
-              <StyledButton
-                component={RouterLink}
-                to="/register"
-                variant="contained"
-                sx={{
-                  background: 'common.white',
-                  color: 'primary.main',
-                  fontWeight: 700,
-                  boxShadow: (theme) => `0 4px 14px ${alpha(theme.palette.common.black, 0.15)}`,
-                  '&:hover': {
-                    background: (theme) => alpha(theme.palette.common.white, 0.95),
-                    transform: 'translateY(-2px)',
-                    boxShadow: (theme) => `0 6px 20px ${alpha(theme.palette.common.black, 0.2)}`,
-                  },
-                }}
-              >
-                회원가입
-              </StyledButton>
-            </UserSection>
-          )}
-        </NavBox>
-
-        {/* 🆕 테마 색상 기반 모바일 메뉴 버튼 */}
-        <Box sx={{ display: { xs: 'flex', sm: 'none' }, alignItems: 'center', gap: 1.5 }}>
-          {isAuthenticated && (
-            <StyledAvatar onClick={handleMenuOpen}>
-              {getAvatarInitials(user?.email)}
-            </StyledAvatar>
-          )}
-          <IconButton
-            color="inherit"
-            onClick={() => setMobileOpen(!mobileOpen)}
-            sx={{
-              color: 'common.white',
-              '&:hover': {
-                background: (theme) => alpha(theme.palette.common.white, 0.15),
-              },
-            }}
-          >
-            {mobileOpen ? <CloseIcon /> : <MenuIcon />}
-          </IconButton>
-        </Box>
-      </StyledToolbar>
-
-      {/* 🆕 테마 색상 기반 모바일 드로어 */}
-      <Drawer
-        anchor="top"
-        open={mobileOpen}
-        onClose={() => setMobileOpen(false)}
-        sx={{
-          '& .MuiDrawer-paper': {
-            background: (theme) => `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
-            marginTop: '64px',
-            boxShadow: (theme) => `0 8px 32px ${alpha(theme.palette.common.black, 0.2)}`,
-          },
-        }}
-      >
-        <List sx={{ p: 2 }}>
-          {isAuthenticated ? (
-            <>
-              <ListItem>
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    color: 'common.white', 
-                    opacity: 0.9,
-                    fontWeight: 500 
-                  }}
-                >
-                  {user?.email}
-                </Typography>
-              </ListItem>
-              <Divider sx={{ my: 1.5, borderColor: (theme) => alpha(theme.palette.common.white, 0.2) }} />
-              <ListItemButton
-                onClick={handleLogout}
-                sx={{
-                  borderRadius: 1.5,
-                  color: 'error.light',
-                  mb: 1,
-                  py: 1.5,
-                  '&:hover': {
-                    background: (theme) => alpha(theme.palette.error.main, 0.15),
-                  },
-                }}
-              >
-                <LogoutIcon sx={{ mr: 2 }} />
-                <ListItemText 
-                  primary="로그아웃" 
-                  primaryTypographyProps={{ fontWeight: 600 }}
-                />
-              </ListItemButton>
-            </>
-          ) : (
-            <>
-              <ListItemButton
-                component={RouterLink}
-                to="/login"
-                onClick={() => setMobileOpen(false)}
-                sx={{
-                  borderRadius: 1.5,
-                  color: 'common.white',
-                  mb: 1.5,
-                  py: 1.5,
-                  background: (theme) => alpha(theme.palette.common.white, 0.15),
-                  '&:hover': {
-                    background: (theme) => alpha(theme.palette.common.white, 0.25),
-                  },
-                }}
-              >
-                <ListItemText 
-                  primary="로그인" 
-                  primaryTypographyProps={{ fontWeight: 600 }}
-                />
-              </ListItemButton>
-              <ListItemButton
-                component={RouterLink}
-                to="/register"
-                onClick={() => setMobileOpen(false)}
-                sx={{
-                  borderRadius: 1.5,
-                  color: 'primary.main',
-                  py: 1.5,
-                  background: 'common.white',
-                  '&:hover': {
-                    background: (theme) => alpha(theme.palette.common.white, 0.95),
-                  },
-                }}
-              >
-                <ListItemText 
-                  primary="회원가입" 
-                  primaryTypographyProps={{ fontWeight: 700 }}
-                />
-              </ListItemButton>
+              </NavButton>
             </>
           )}
-        </List>
-      </Drawer>
+        </Toolbar>
+      </Container>
     </StyledAppBar>
   );
 }

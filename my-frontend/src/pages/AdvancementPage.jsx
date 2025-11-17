@@ -328,11 +328,11 @@ function AdvancementPage() {
 
   // 🔥 마무리 버튼 핸들러들
   const handleNewReport = () => {
-    navigate('/'); // 🔥 홈(=대시보드)으로 이동
+    navigate('/'); // 🔥 홈(=새 분석)으로 이동
   };
 
   const handleViewSubmissions = () => {
-    navigate('/'); // 🔥 홈(=대시보드)으로 이동
+    navigate('/dashboard'); // 🔥 대시보드로 이동
   };
 
   const handleSubmitAssignment = () => {

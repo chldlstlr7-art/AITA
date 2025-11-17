@@ -21,12 +21,13 @@ import LoginPage from './pages/LoginPage.jsx'
 import RegisterPage from './pages/RegisterPage.jsx' 
 import ReportPage from './pages/ReportPage.jsx';
 import AdvancementPage from './pages/AdvancementPage.jsx';
+import StudentDashboard from './pages/StudentDashboard.jsx';
 
 import TADashboard from './pages/ta/TADashboard.jsx';
 import TACourseDetail from './pages/ta/TACourseDetail.jsx';
 import TAAssignmentDetail from './pages/ta/TAAssignmentDetail.jsx';
 
-// 🔥 에러 페이지 추가
+// 🔥 에러 페이지
 function ErrorPage() {
   const error = useRouteError();
   console.error('🔴 Router Error:', error);
@@ -65,24 +66,28 @@ const router = createBrowserRouter([
   {
     path: "/",
     element: <App />,
-    errorElement: <ErrorPage />, // 🔥 전역 에러 핸들러
+    errorElement: <ErrorPage />,
     children: [
       { path: "/", element: <HomePage /> },
       { path: "/login", element: <LoginPage /> },
       { path: "/register", element: <RegisterPage /> },
       
+      // 🔥 학생 대시보드
+      { path: "/dashboard", element: <StudentDashboard /> },
+      
       // 발전 아이디어 페이지
       { 
         path: "/report/:reportId/advancement", 
         element: <AdvancementPage />,
-        errorElement: <ErrorPage /> // 🔥 개별 에러 핸들러
+        errorElement: <ErrorPage />
       },
       
       // 리포트 페이지
       { path: "/report/:reportId", element: <ReportPage /> },
 
-      // TA용 라우트
+      // 🔥 TA용 라우트 (수정)
       { path: "/ta", element: <TADashboard /> },
+      { path: "/ta/dashboard", element: <TADashboard /> }, // 🔥 추가
       { path: "/ta/course/:courseId", element: <TACourseDetail /> },
       { path: "/ta/course/:courseId/assignment/:assignmentId", element: <TAAssignmentDetail /> },
     ],
