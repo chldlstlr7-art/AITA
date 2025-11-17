@@ -305,88 +305,74 @@ class CourseManagementService:
         }
 
     def get_student_dashboard_details(self, student_id):
-        """학생 대시보드 데이터 조회 (수강 과목, 제출 리포트)"""
+        """ 특정 학생의 상세 정보(수강 과목, 제출 리포트)를 조회합니다. """
         try:
             from models import User, Course, AnalysisReport, Assignment
             from sqlalchemy.orm import joinedload
             
-            # 1. 학생 조회
             student = db.session.get(User, student_id)
+            
             if not student:
                 raise ValueError("학생을 찾을 수 없습니다.")
             if student.role != 'student':
                 raise ValueError("해당 사용자는 학생이 아닙니다.")
+                
+            student_info = {
+                "id": student.id,
+                "email": student.email,
+                "username": student.username or student.email.split('@')[0]
+            }
+
+            # 🔥 수정: 직접 쿼리로 수강 과목 조회 (order_by 문제 해결)
+            enrolled_courses = db.session.query(Course).join(
+                course_enrollment, (course_enrollment.c.course_id == Course.id)
+            ).filter(
+                course_enrollment.c.user_id == student_id
+            ).order_by(Course.course_name).all()
             
-            # 2. 수강 과목 조회 (안전한 처리)
-            enrolled_courses = []
-            try:
-                # 🔥 수정: Query 객체를 직접 사용
-                courses_query = db.session.query(Course).join(
-                    course_enrollment, (course_enrollment.c.course_id == Course.id)
-                ).filter(
-                    course_enrollment.c.user_id == student_id
-                ).order_by(Course.course_name).all()
+            courses_list = [
+                {
+                    "course_id": course.id,  # 🔥 수정: "id" → "course_id"
+                    "course_name": course.course_name,
+                    "course_code": course.course_code
+                } for course in enrolled_courses
+            ]
+
+            # 🔥 수정: joinedload로 N+1 쿼리 방지
+            student_reports = AnalysisReport.query.filter_by(user_id=student_id)\
+                .options(joinedload(AnalysisReport.assignment))\
+                .order_by(AnalysisReport.created_at.desc())\
+                .all()
                 
-                for course in courses_query:
-                    enrolled_courses.append({
-                        "course_id": course.id,
-                        "course_name": course.course_name,
-                        "course_code": course.course_code,
+            reports_list = []
+            for report in student_reports:
+                try:
+                    assignment_name = "과제 미제출"
+                    assignment_id = None
+                    
+                    if report.assignment:
+                        assignment_name = report.assignment.assignment_name
+                        assignment_id = report.assignment.id
+                    
+                    reports_list.append({
+                        "report_id": report.id,  # 🔥 수정: "id" → "report_id"
+                        "report_title": report.report_title or "제목 없음",
+                        "status": report.status,
+                        "created_at": report.created_at.isoformat() if report.created_at else None,
+                        "assignment_id": assignment_id,
+                        "assignment_name": assignment_name
                     })
-            except Exception as e:
-                print(f"[CourseService] 수강 과목 조회 실패: {e}")
-                import traceback
-                traceback.print_exc()
-        
-            # 3. 제출 리포트 조회 (assignment와 조인)
-            submitted_reports = []
-            try:
-                reports = AnalysisReport.query\
-                    .filter_by(user_id=student_id)\
-                    .options(joinedload(AnalysisReport.assignment))\
-                    .order_by(AnalysisReport.created_at.desc())\
-                    .all()
-                
-                for report in reports:
-                    try:
-                        report_data = {
-                            "report_id": report.id,
-                            "status": report.status,
-                            "created_at": report.created_at.isoformat() if report.created_at else None,
-                            "report_title": report.report_title or "제목 없음",
-                        }
-                        
-                        # assignment 정보 추가 (없을 수도 있음)
-                        if report.assignment:
-                            report_data["assignment_id"] = report.assignment.id
-                            report_data["assignment_name"] = report.assignment.assignment_name
-                        else:
-                            report_data["assignment_id"] = None
-                            report_data["assignment_name"] = "과제 미제출"
-                        
-                        submitted_reports.append(report_data)
-                        
-                    except Exception as e:
-                        print(f"[CourseService] 리포트 {report.id} 처리 오류: {e}")
-                        continue
-                        
-            except Exception as e:
-                print(f"[CourseService] 제출 리포트 조회 실패: {e}")
-                import traceback
-                traceback.print_exc()
-        
-            # 4. 결과 반환
+                except Exception as e:
+                    print(f"[CourseService] 리포트 {report.id} 처리 중 오류: {e}")
+                    continue
+
             result = {
-                "student": {
-                    "id": student.id,
-                    "email": student.email,
-                    "username": student.username or student.email.split('@')[0],
-                },
-                "courses": enrolled_courses,
-                "submitted_reports": submitted_reports,
+                "student": student_info,
+                "courses": courses_list,  # 🔥 수정: "enrolled_courses" → "courses"
+                "submitted_reports": reports_list
             }
             
-            print(f"[CourseService] ✅ 대시보드 조회 성공: {len(enrolled_courses)}개 과목, {len(submitted_reports)}개 리포트")
+            print(f"[CourseService] ✅ 대시보드 조회 성공: {len(courses_list)}개 과목, {len(reports_list)}개 리포트")
             return result
             
         except ValueError as e:
@@ -398,10 +384,7 @@ class CourseManagementService:
             raise Exception("대시보드 조회 중 서버 오류가 발생했습니다.")
 
     def get_courses_for_ta(self, ta_id):
-        """ 
-        특정 TA ID에 연결된 모든 과목 목록을 반환합니다.
-        (N+1 쿼리 최적화)
-        """
+        """ [수정] 특정 TA ID에 연결된 모든 과목 목록을 반환합니다. (성능 최적화) """
         ta = db.session.get(User, ta_id)
         
         if not ta:
@@ -409,30 +392,24 @@ class CourseManagementService:
         if ta.role != 'ta' and not ta.is_admin:
             raise ValueError("조회 권한이 없습니다. (TA 또는 Admin이 아님)")
 
-        # 🔥 단일 쿼리로 과제 수와 학생 수를 함께 조회
-        from sqlalchemy import func as sql_func
+        courses_query = db.session.query(Course).order_by(Course.course_code)
         
-        courses_query = db.session.query(
-            Course,
-            sql_func.count(Assignment.id.distinct()).label('assignment_count'),
-            sql_func.count(course_enrollment.c.user_id.distinct()).label('student_count')
-        ).outerjoin(
-            Assignment, Course.id == Assignment.course_id
-        ).outerjoin(
-            course_enrollment, Course.id == course_enrollment.c.course_id
-        )
-        
-        # Admin이 아닌 TA는 본인 과목만 조회
+        # Admin이 아닌 TA는 M:N 테이블을 조인하여 본인 과목만 조회
         if not ta.is_admin:
             courses_query = courses_query.join(
                 course_assistant, (course_assistant.c.course_id == Course.id)
             ).filter(course_assistant.c.user_id == ta_id)
-        
-        courses_query = courses_query.group_by(Course.id).order_by(Course.course_code)
+            
         courses = courses_query.all()
 
         courses_list = []
-        for course, assignment_count, student_count in courses:
+        for course in courses:
+            # [최적화] len(relationship) 대신 count() 쿼리 사용
+            assignment_count = db.session.query(Assignment.id).filter_by(course_id=course.id).count()
+            
+            # 'students'는 lazy='dynamic'이므로 .count()가 정석
+            student_count = course.students.count()
+
             courses_list.append({
                 "id": course.id,
                 "course_name": course.course_name,
@@ -565,37 +542,32 @@ class CourseManagementService:
         [신규 Helper] TA가 과목에 대한 권한이 있는지 확인합니다.
         (Admin은 항상 통과)
         """
-        try:
-            ta = db.session.get(User, ta_user_id)
-            if not ta:
-                raise ValueError("TA 사용자를 찾을 수 없습니다.")
-            
-            if ta.is_admin:
-                return True # Admin은 모든 과목에 대한 권한을 가짐
+        ta = db.session.get(User, ta_user_id)
+        if not ta:
+            raise ValueError("TA 사용자를 찾을 수 없습니다.")
+        
+        if ta.is_admin:
+            return True # Admin은 모든 과목에 대한 권한을 가짐
 
-            is_assistant = db.session.query(course_assistant).filter_by(
-                user_id=ta_user_id,
-                course_id=course_id
-            ).first()
+        is_assistant = db.session.query(course_assistant).filter_by(
+            user_id=ta_user_id,
+            course_id=course_id
+        ).first()
+        
+        if not is_assistant:
+            raise ValueError("해당 과목에 대한 조교 권한이 없습니다.")
             
-            if not is_assistant:
-                raise ValueError("해당 과목에 대한 조교 권한이 없습니다.")
-                
-            return True
-        except Exception as e:
-            # 세션 롤백은 호출한 쪽에서 처리하도록 예외 전파
-            raise
+        return True
 
     def _parse_iso_due_date(self, date_str):
         """
-        ISO 8601 형식의 날짜 문자열(UTC 'Z' 포함)을
+        [신규 Helper] ISO 8601 형식의 날짜 문자열(UTC 'Z' 포함)을
         Python datetime 객체로 변환합니다.
         """
-        if date_str is None or date_str == "":
+        if date_str is None:
             return None
-            
         try:
-            # 'Z' (UTC)를 '+00:00'으로 변경
+            # 'Z' (UTC)를 'datetime.fromisoformat'이 인식하는 +00:00으로 변경
             if date_str.endswith('Z'):
                 date_str = date_str[:-1] + '+00:00'
             
@@ -603,14 +575,10 @@ class CourseManagementService:
             
             # Naive datetime으로 DB에 저장 (UTC 기준)
             if parsed_date.tzinfo:
-                return parsed_date.astimezone(timezone.utc).replace(tzinfo=None)
+                 return parsed_date.astimezone(timezone.utc).replace(tzinfo=None)
             else:
-                # 표준 시간대 정보가 없는 경우, UTC로 가정
-                return parsed_date
+                 # 표준 시간대 정보가 없는 경우, 그대로 사용 (서버 시간대 가정)
+                 return parsed_date
             
-        except (ValueError, TypeError, AttributeError) as e:
-            print(f"[CourseService] 날짜 파싱 실패: '{date_str}' - {e}")
-            raise ValueError(
-                f"날짜 형식이 올바르지 않습니다. "
-                f"ISO 8601 형식(예: 2025-12-31T23:59:59Z)을 사용하세요."
-            )
+        except (ValueError, TypeError):
+            raise ValueError(f"날짜 형식이 올바르지 않습니다. '{date_str}' (ISO format-YYYY-MM-DDTHH:MM:SSZ- 필요)")
