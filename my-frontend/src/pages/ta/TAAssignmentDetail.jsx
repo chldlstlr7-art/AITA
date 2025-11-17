@@ -1,5 +1,6 @@
+// src/pages/ta/TAAssignmentDetail.jsx
 import React, { useEffect, useState } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -20,58 +21,127 @@ import {
   IconButton,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
-import { useNavigate } from 'react-router-dom';
+
 import {
   getAssignmentDetail,
   getAssignmentSubmissions,
   putAssignmentCriteria,
+  updateAssignment,
+  getAssignmentCriteria,
+  deleteAssignment,
+  getTaCourses,
 } from '../../services/api';
-import { getAssignmentCriteria } from '../../services/api';
-import { deleteAssignment } from '../../services/api';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
-import { getTaCourses } from '../../services/api';
+
+const SIDEBAR_WIDTH = { xs: '180px', sm: '220px', md: '260px' };
+const MAIN_LEFT_MARGIN = { xs: '150px', sm: '200px', md: '220px' };
+
+// 상단 헤더 카드
+const HeaderPaper = styled(Paper)(({ theme }) => ({
+  padding: theme.spacing(3),
+  marginBottom: theme.spacing(3),
+  borderRadius: theme.spacing(2),
+  backgroundColor: '#fff',
+}));
+
+// 제출된 리포트 리스트 카드
+const AssignmentListPaper = styled(Paper)(({ theme }) => ({
+  padding: theme.spacing(2),
+  borderRadius: theme.spacing(2),
+  minHeight: 280,
+  backgroundColor: '#fff',
+}));
 
 function TAAssignmentDetail() {
   const { courseId, assignmentId } = useParams();
   const location = useLocation();
-  const courseFromState = location.state?.course || null;
-  const assignmentFromState = location.state?.assignment || null;
   const navigate = useNavigate();
 
+  const courseFromState = location.state?.course || null;
+  const assignmentFromState = location.state?.assignment || null;
+
+  // 사이드바의 TA 과목 목록
   const [taCourses, setTaCourses] = useState([]);
   const [loadingCourses, setLoadingCourses] = useState(true);
   const [coursesError, setCoursesError] = useState('');
-  const SIDEBAR_WIDTH = { xs: '180px', sm: '220px', md: '260px' };
-  const MAIN_LEFT_MARGIN = { xs: '150px', sm: '200px', md: '220px' };
 
-  const HeaderPaper = styled(Paper)(({ theme }) => ({
-    padding: theme.spacing(3),
-    marginBottom: theme.spacing(3),
-    borderRadius: theme.spacing(2),
-    backgroundColor: '#fff',
-  }));
-
-  const AssignmentListPaper = styled(Paper)(({ theme }) => ({
-    padding: theme.spacing(2),
-    borderRadius: theme.spacing(2),
-    minHeight: 280,
-    backgroundColor: '#fff',
-  }));
-
+  // 메인 과제/제출 데이터
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [assignment, setAssignment] = useState(null);
   const [criteria, setCriteria] = useState(null);
   const [submissions, setSubmissions] = useState([]);
+
+  // 채점 기준 다이얼로그
   const [dialogOpen, setDialogOpen] = useState(false);
   const [criteriaText, setCriteriaText] = useState('');
   const [criteriaRows, setCriteriaRows] = useState([]);
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [criteriaLoading, setCriteriaLoading] = useState(false);
 
+  // 과제 삭제
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // 과제 정보 수정 다이얼로그
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editDueDate, setEditDueDate] = useState(''); // datetime-local value
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
+
+  // ===== 공통 유틸 =====
+  const formatDateString = (d) => {
+    if (!d) return '미정';
+    try {
+      const dt = new Date(d);
+      if (isNaN(dt.getTime())) return d;
+      return dt.toLocaleString('ko-KR');
+    } catch (e) {
+      return d;
+    }
+  };
+
+  const isoToLocalInput = (iso) => {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      const pad = (n) => String(n).padStart(2, '0');
+      const yyyy = d.getFullYear();
+      const mm = pad(d.getMonth() + 1);
+      const dd = pad(d.getDate());
+      const hh = pad(d.getHours());
+      const mi = pad(d.getMinutes());
+      return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+    } catch (e) {
+      return '';
+    }
+  };
+
+  const submittedCount = submissions?.length ?? 0;
+  const gradedCount = (submissions || []).filter((s) => {
+    const status = String(s?.status || s?.state || '').toLowerCase();
+    return (
+      s &&
+      (s.graded === true ||
+        s.score != null ||
+        status === 'graded' ||
+        status === 'completed')
+    );
+  }).length;
+
+  const courseName =
+    courseFromState?.course_name ||
+    courseFromState?.name ||
+    courseFromState?.course_code ||
+    assignmentFromState?.course_name ||
+    assignment?.course_name ||
+    '과목명 없음';
+
+  // ===== 초기 데이터 로딩: 과제 상세 + 제출 목록 =====
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -83,7 +153,6 @@ function TAAssignmentDetail() {
 
         const criteriaData = a.criteria || data.criteria || null;
         setCriteria(criteriaData);
-        // 기준이 없으면 빈 문자열, 있으면 예쁘게 포매팅
         setCriteriaText(criteriaData ? JSON.stringify(criteriaData, null, 2) : '');
 
         const subs = a.submissions || data.submissions || null;
@@ -100,9 +169,12 @@ function TAAssignmentDetail() {
       }
     };
 
-    fetchData();
+    if (assignmentId) {
+      fetchData();
+    }
   }, [assignmentId]);
 
+  // ===== TA 과목 목록 로딩 (사이드바) =====
   useEffect(() => {
     const fetchTaCourseList = async () => {
       setLoadingCourses(true);
@@ -120,23 +192,8 @@ function TAAssignmentDetail() {
     fetchTaCourseList();
   }, []);
 
-  const formatDateString = (d) => {
-    if (!d) return '미정';
-    try {
-      const dt = new Date(d);
-      if (isNaN(dt.getTime())) return d;
-      return dt.toLocaleString('ko-KR');
-    } catch (e) {
-      return d;
-    }
-  };
-
-  const submittedCount = submissions?.length ?? 0;
-  const gradedCount = (submissions || []).filter((s) => s && (s.graded === true || s.score != null || String(s.status || s.state || '').toLowerCase() === 'graded' || String(s.status || s.state || '').toLowerCase() === 'completed')).length;
-
-  // 🔹 “보기” 버튼: 항상 수정 가능한 다이얼로그 오픈
+  // ===== 채점 기준 보기/수정 다이얼로그 =====
   const handleOpenCriteriaDialog = () => {
-    // 최신 과제 상세를 다시 불러와서 채점 기준을 반영하고 다이얼로그를 엽니다.
     (async () => {
       if (!assignmentId) {
         alert('과제 정보가 없습니다.');
@@ -144,20 +201,30 @@ function TAAssignmentDetail() {
       }
       setCriteriaLoading(true);
       try {
-        const data = await getAssignmentDetail(assignmentId);
-        const a = data.assignment || data;
-        const criteriaData = a.criteria || data.criteria || null;
+        // 우선 신규 엔드포인트에서 기준을 조회
+        let criteriaData = null;
+        try {
+          criteriaData = await getAssignmentCriteria(assignmentId);
+        } catch (err) {
+          // 폴백: assignment 상세에서 criteria를 찾아본다
+          console.warn('GET /criteria 실패, 폴백 시도:', err);
+          const data = await getAssignmentDetail(assignmentId);
+          const a = data.assignment || data;
+          criteriaData = a.criteria || data.criteria || null;
+        }
+
         setCriteria(criteriaData);
         setCriteriaText(criteriaData ? JSON.stringify(criteriaData, null, 2) : '');
 
-        // criteriaData -> criteriaRows 변환 (object 또는 array 형태 지원)
         if (criteriaData) {
+          // 백엔드: { "A": { name: "논리성", max_score: 30 }, ... }
+          // UI 매핑: '채점 항목' -> key (A), '채점 기준 설명' -> value.name, '배점' -> value.max_score
           if (Array.isArray(criteriaData)) {
             setCriteriaRows(
               criteriaData.map((v, i) => ({
                 key: v.key || `criteria_${i + 1}`,
-                name: v.name || v.title || '',
-                description: v.description || v.criteria || '',
+                name: v.key || v.name || `criteria_${i + 1}`,
+                description: v.name || v.title || v.description || '',
                 max_score: v.max_score ?? v.maxScore ?? v.score ?? 0,
               }))
             );
@@ -165,9 +232,11 @@ function TAAssignmentDetail() {
             setCriteriaRows(
               Object.entries(criteriaData).map(([k, v], i) => ({
                 key: k,
-                name: v?.name || v?.title || '',
-                description: v?.description || v?.criteria || '',
-                max_score: v?.max_score ?? v?.maxScore ?? v?.score ?? 0,
+                // '채점 항목' 표시에는 key(A/B/C)을 보여줍니다.
+                name: k,
+                // 실제 설명은 서버의 value.name 필드입니다.
+                description: (v && (v.name || v.title)) || '',
+                max_score: (v && (v.max_score ?? v.maxScore ?? v.score)) ?? 0,
               }))
             );
           } else {
@@ -188,7 +257,10 @@ function TAAssignmentDetail() {
   };
 
   const handleAddRow = () => {
-    setCriteriaRows((prev) => [...prev, { name: '', description: '', max_score: 0 }]);
+    setCriteriaRows((prev) => [
+      ...prev,
+      { name: '', description: '', max_score: 0 },
+    ]);
   };
 
   const handleRemoveRow = (index) => {
@@ -205,9 +277,10 @@ function TAAssignmentDetail() {
 
   const handleSaveCriteria = async () => {
     try {
-      // criteriaRows -> object 변환
+      if (!assignmentId) return;
+
+      // 아무 항목도 없으면 기준 삭제
       if (!criteriaRows || criteriaRows.length === 0) {
-        // 빈값은 null 로 보냄
         await putAssignmentCriteria(assignmentId, null);
         setCriteria(null);
         setCriteriaText('');
@@ -220,17 +293,16 @@ function TAAssignmentDetail() {
       criteriaRows.forEach((r, i) => {
         const key = r.key || `criteria_${i + 1}`;
         const maxScore = Number(r.max_score) || 0;
+        // 서버 명세: value should contain 'name' (설명) and 'max_score'
         payload[key] = {
-          name: r.name || '',
-          description: r.description || '',
+          name: r.description || '',
           max_score: maxScore,
         };
       });
 
-      // 저장 요청
       await putAssignmentCriteria(assignmentId, payload);
 
-      // 다시 상세 정보 받아와서 state 갱신 (helper 사용, 실패 시 fallback)
+      // 최신 기준 다시 조회
       const criteriaData = await (async () => {
         try {
           return await getAssignmentCriteria(assignmentId);
@@ -242,16 +314,17 @@ function TAAssignmentDetail() {
       })();
 
       setCriteria(criteriaData);
-      setCriteriaText(criteriaData ? JSON.stringify(criteriaData, null, 2) : '');
+      setCriteriaText(
+        criteriaData ? JSON.stringify(criteriaData, null, 2) : ''
+      );
 
-      // 새로 받은 criteriaData -> rows 변환
       if (criteriaData) {
         if (Array.isArray(criteriaData)) {
           setCriteriaRows(
             criteriaData.map((v, i) => ({
               key: v.key || `criteria_${i + 1}`,
-              name: v.name || v.title || '',
-              description: v.description || v.criteria || '',
+              name: v.key || v.name || `criteria_${i + 1}`,
+              description: v.name || v.title || v.description || '',
               max_score: v.max_score ?? v.maxScore ?? v.score ?? 0,
             }))
           );
@@ -259,8 +332,8 @@ function TAAssignmentDetail() {
           setCriteriaRows(
             Object.entries(criteriaData).map(([k, v], i) => ({
               key: k,
-              name: v?.name || v?.title || '',
-              description: v?.description || v?.criteria || '',
+              name: k,
+              description: v?.name || v?.title || '',
               max_score: v?.max_score ?? v?.maxScore ?? v?.score ?? 0,
             }))
           );
@@ -273,22 +346,106 @@ function TAAssignmentDetail() {
     }
   };
 
-  const courseName =
-    courseFromState?.course_name ||
-    courseFromState?.name ||
-    courseFromState?.course_code ||
-    assignmentFromState?.course_name ||
-    assignment?.course_name ||
-    '과목명 없음';
+  // ===== 과제 정보 수정 다이얼로그 =====
+  const handleOpenEditDialog = () => {
+    (async () => {
+      setEditError('');
+      try {
+        let a = assignment;
+
+        // 현재 state에 과제 정보가 없으면 먼저 한번 가져오기
+        if (!a || !a.id) {
+          const data = await getAssignmentDetail(assignmentId);
+          a = data.assignment || data;
+          setAssignment(a);
+        } else {
+          // 그래도 최신 정보로 한 번 더 시도
+          try {
+            const data = await getAssignmentDetail(assignmentId);
+            a = data.assignment || data;
+            setAssignment(a);
+          } catch (e) {
+            // 실패해도 기존 assignment 사용
+          }
+        }
+
+        setEditName(a?.assignment_name || a?.name || '');
+        setEditDescription(a?.description || '');
+        setEditDueDate(isoToLocalInput(a?.due_date));
+        setEditDialogOpen(true);
+      } catch (e) {
+        console.error('과제 정보를 불러오지 못해 수정창을 열 수 없습니다.', e);
+        setEditError(
+          '과제 정보를 불러오는 중 오류가 발생했습니다. 잠시 후 다시 시도하세요.'
+        );
+      }
+    })();
+  };
+
+  const handleCloseEditDialog = () => {
+    if (editSaving) return;
+    setEditDialogOpen(false);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!assignmentId) return;
+    setEditSaving(true);
+    setEditError('');
+    try {
+      const payload = {
+        assignment_name: editName,
+        description: editDescription,
+        due_date: editDueDate ? new Date(editDueDate).toISOString() : null,
+      };
+
+      await updateAssignment(assignmentId, payload);
+
+      // 저장 후 최신 과제 상세 재조회
+      const data = await getAssignmentDetail(assignmentId);
+      const a = data.assignment || data;
+      setAssignment(a);
+      setEditDialogOpen(false);
+    } catch (e) {
+      console.error('과제 수정 실패:', e);
+      setEditError(e.message || '과제 수정에 실패했습니다.');
+    } finally {
+      setEditSaving(false);
+    }
+  };
 
   return (
     <Box sx={{ mt: 4, px: { xs: 1, md: 1 }, boxSizing: 'border-box' }}>
       {/* Sidebar: TA courses */}
-      <Box sx={{ width: SIDEBAR_WIDTH, position: 'fixed', left: 0, top: '64px', height: `calc(100vh - 64px)`, p: 2, boxSizing: 'border-box', zIndex: 1200 }}>
-        <Paper sx={{ p: 2, borderRadius: 1.5, backgroundColor: '#fff', height: '100%', overflowY: 'auto' }} elevation={1}>
+      <Box
+        sx={{
+          width: SIDEBAR_WIDTH,
+          position: 'fixed',
+          left: 0,
+          top: '64px',
+          height: `calc(100vh - 64px)`,
+          p: 2,
+          boxSizing: 'border-box',
+          zIndex: 1200,
+        }}
+      >
+        <Paper
+          sx={{
+            p: 2,
+            borderRadius: 1.5,
+            backgroundColor: '#fff',
+            height: '100%',
+            overflowY: 'auto',
+          }}
+          elevation={1}
+        >
           <Typography
             variant="subtitle1"
-            sx={{ fontWeight: 700, mb: 1, cursor: 'pointer', '&:hover': { color: 'primary.main' } }}
+            sx={{
+              fontWeight: 700,
+              mb: 1,
+              cursor: 'pointer',
+              '&:hover': { color: 'primary.main' },
+            }}
             onClick={() => navigate('/ta')}
           >
             내 과목
@@ -296,61 +453,110 @@ function TAAssignmentDetail() {
           {loadingCourses ? (
             <Typography variant="body2">불러오는 중...</Typography>
           ) : coursesError ? (
-            <Typography variant="body2" color="error">{coursesError}</Typography>
+            <Typography variant="body2" color="error">
+              {coursesError}
+            </Typography>
           ) : taCourses.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">담당 과목이 없습니다.</Typography>
+            <Typography variant="body2" color="text.secondary">
+              담당 과목이 없습니다.
+            </Typography>
           ) : (
-            <List disablePadding sx={{ overflowY: 'auto', maxHeight: 'calc(100% - 32px)' }}>
-              {taCourses.map((c) => (
-                <ListItemButton
-                  key={c.id}
-                  onClick={() => navigate(`/ta/course/${c.id}`, { state: { course: c } })}
-                  sx={{
-                    justifyContent: 'flex-start',
-                    alignItems: 'flex-start',
-                    py: 1.1,
-                    backgroundColor: 'transparent',
-                    '&.Mui-selected': { backgroundColor: 'transparent' },
-                    '&:hover': { backgroundColor: 'transparent' },
-                  }}
-                >
-                  <ListItemText
-                    primary={
-                      <Typography
-                        variant="subtitle2"
-                        noWrap
-                        sx={{
-                          fontWeight: String(c.id) === String(courseFromState?.id) || String(c.id) === String(assignment?.course_id) ? 700 : 400,
-                          textDecoration: String(c.id) === String(courseFromState?.id) || String(c.id) === String(assignment?.course_id) ? 'underline' : 'none',
-                          color: 'text.primary',
-                        }}
-                      >
-                        {c.course_name || c.course_code || '무명'}
-                      </Typography>
+            <List
+              disablePadding
+              sx={{ overflowY: 'auto', maxHeight: 'calc(100% - 32px)' }}
+            >
+              {taCourses.map((c) => {
+                const isCurrentCourse =
+                  String(c.id) === String(courseFromState?.id) ||
+                  String(c.id) === String(assignment?.course_id);
+                return (
+                  <ListItemButton
+                    key={c.id}
+                    onClick={() =>
+                      navigate(`/ta/course/${c.id}`, { state: { course: c } })
                     }
-                    secondary={
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {c.semester_label || c.semester_text || c.semester}
-                      </Typography>
-                    }
-                  />
-                </ListItemButton>
-              ))}
+                    sx={{
+                      justifyContent: 'flex-start',
+                      alignItems: 'flex-start',
+                      py: 1.1,
+                      backgroundColor: 'transparent',
+                      '&.Mui-selected': { backgroundColor: 'transparent' },
+                      '&:hover': { backgroundColor: 'transparent' },
+                    }}
+                  >
+                    <ListItemText
+                      primary={
+                        <Typography
+                          variant="subtitle2"
+                          noWrap
+                          sx={{
+                            fontWeight: isCurrentCourse ? 700 : 400,
+                            textDecoration: isCurrentCourse
+                              ? 'underline'
+                              : 'none',
+                            color: 'text.primary',
+                          }}
+                        >
+                          {c.course_name || c.course_code || '무명'}
+                        </Typography>
+                      }
+                      secondary={
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{
+                            display: 'block',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {c.semester_label ||
+                            c.semester_text ||
+                            c.semester}
+                        </Typography>
+                      }
+                    />
+                  </ListItemButton>
+                );
+              })}
             </List>
           )}
         </Paper>
       </Box>
+
       {/* 상단 과목 / 과제 정보 */}
-      <HeaderPaper elevation={2} sx={{ mx: 'auto', maxWidth: '1100px', ml: MAIN_LEFT_MARGIN }}>
+      <HeaderPaper
+        elevation={2}
+        sx={{ mx: 'auto', maxWidth: '1100px', ml: MAIN_LEFT_MARGIN }}
+      >
         <Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
               <Typography
                 variant="h5"
-                sx={{ fontWeight: 400, mb: 1, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', color: 'text.secondary' }}
+                sx={{
+                  fontWeight: 400,
+                  mb: 1,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  color: 'text.secondary',
+                }}
                 onClick={() => navigate(-1)}
               >
-                <Box component="span" sx={{ fontWeight: 400, color: 'text.disabled', mr: 0.5 }}>{'<'}</Box>
+                <Box
+                  component="span"
+                  sx={{ fontWeight: 400, color: 'text.disabled', mr: 0.5 }}
+                >
+                  {'<'}
+                </Box>
                 {courseName}
               </Typography>
             </Box>
@@ -359,8 +565,11 @@ function TAAssignmentDetail() {
                 variant="outlined"
                 size="small"
                 startIcon={<EditIcon sx={{ color: '#274472' }} />}
-                onClick={() => { /* API not implemented yet */ }}
-                sx={{ color: '#274472', borderColor: 'rgba(39,68,114,0.12)' }}
+                onClick={handleOpenEditDialog}
+                sx={{
+                  color: '#274472',
+                  borderColor: 'rgba(39,68,114,0.12)',
+                }}
               >
                 수정
               </Button>
@@ -369,7 +578,10 @@ function TAAssignmentDetail() {
                 size="small"
                 startIcon={<DeleteIcon sx={{ color: '#6b7280' }} />}
                 onClick={() => setConfirmDeleteOpen(true)}
-                sx={{ color: '#6b7280', borderColor: 'rgba(107,114,128,0.12)' }}
+                sx={{
+                  color: '#6b7280',
+                  borderColor: 'rgba(107,114,128,0.12)',
+                }}
               >
                 삭제
               </Button>
@@ -379,7 +591,10 @@ function TAAssignmentDetail() {
           <Box sx={{ mb: 0 }}>
             <Typography
               variant="h4"
-              sx={{ fontWeight: 700, fontSize: { xs: '1.5rem', md: '1.6rem' } }}
+              sx={{
+                fontWeight: 700,
+                fontSize: { xs: '1.5rem', md: '1.6rem' },
+              }}
             >
               {assignment?.assignment_name ||
                 assignment?.name ||
@@ -388,7 +603,9 @@ function TAAssignmentDetail() {
             </Typography>
             <Typography variant="body1" sx={{ mt: 1, color: '#000' }}>
               제출기한:{' '}
-              {assignment?.due_date ? formatDateString(assignment.due_date) : '미정'}
+              {assignment?.due_date
+                ? formatDateString(assignment.due_date)
+                : '미정'}
             </Typography>
             {assignment?.description && (
               <Typography
@@ -404,9 +621,18 @@ function TAAssignmentDetail() {
         </Box>
       </HeaderPaper>
 
-      {/* 아래: 좌 3 / 우 1 (메인 캔버스 중앙 정렬) */}
-      <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', mx: 'auto', maxWidth: '1100px', ml: MAIN_LEFT_MARGIN }}>
-        {/* 왼쪽: 제출된 리포트 (3) */}
+      {/* 아래: 좌 3 / 우 1 */}
+      <Box
+        sx={{
+          display: 'flex',
+          gap: 2,
+          alignItems: 'flex-start',
+          mx: 'auto',
+          maxWidth: '1100px',
+          ml: MAIN_LEFT_MARGIN,
+        }}
+      >
+        {/* 왼쪽: 제출된 리포트 */}
         <Box sx={{ flex: 3 }}>
           <AssignmentListPaper elevation={1}>
             <Typography variant="h6" sx={{ mb: 1 }}>
@@ -420,11 +646,25 @@ function TAAssignmentDetail() {
             ) : submissions && submissions.length > 0 ? (
               <List>
                 {submissions.map((s, idx) => (
-                  <React.Fragment key={s.id || s.report_id || idx}>
-                    <ListItem sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <React.Fragment
+                    key={s.id || s.report_id || idx}
+                  >
+                    <ListItem
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                      }}
+                    >
                       <ListItemText
-                        primary={s.student_name || s.student_email || `제출자 ${idx + 1}`}
-                        secondary={`리포트 ID: ${s.id || s.report_id || '-'}`}
+                        primary={
+                          s.student_name ||
+                          s.student_email ||
+                          `제출자 ${idx + 1}`
+                        }
+                        secondary={`리포트 ID: ${
+                          s.id || s.report_id || '-'
+                        }`}
                         primaryTypographyProps={{
                           noWrap: true,
                           sx: {
@@ -447,11 +687,19 @@ function TAAssignmentDetail() {
                       />
 
                       <Box sx={{ ml: 2 }}>
-                        {String(s.status || s.state || '').toLowerCase() === 'completed' ? (
+                        {String(
+                          s.status || s.state || ''
+                        ).toLowerCase() === 'completed' ? (
                           <Button
                             variant="contained"
                             size="small"
-                            onClick={() => navigate(`/ta/course/${courseId}/assignment/${assignmentId}/report/${s.id || s.report_id}/analysis`)}
+                            onClick={() =>
+                              navigate(
+                                `/ta/course/${courseId}/assignment/${assignmentId}/report/${
+                                  s.id || s.report_id
+                                }/analysis`
+                              )
+                            }
                           >
                             분석 결과
                           </Button>
@@ -459,7 +707,13 @@ function TAAssignmentDetail() {
                           <Button
                             variant="outlined"
                             size="small"
-                            onClick={() => navigate(`/ta/course/${courseId}/assignment/${assignmentId}/report/${s.id || s.report_id}/aita`)}
+                            onClick={() =>
+                              navigate(
+                                `/ta/course/${courseId}/assignment/${assignmentId}/report/${
+                                  s.id || s.report_id
+                                }/aita`
+                              )
+                            }
                           >
                             AITA분석
                           </Button>
@@ -478,11 +732,15 @@ function TAAssignmentDetail() {
           </AssignmentListPaper>
         </Box>
 
-        {/* 오른쪽: 채점 기준 + 채점 관리 (1) */}
+        {/* 오른쪽: 채점 기준 + 채점 관리 */}
         <Box sx={{ flex: 1, minWidth: 260 }}>
           {/* 채점 기준 카드 */}
           <Paper sx={{ p: 2, mb: 2, borderRadius: 2 }} elevation={1}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Stack
+              direction="row"
+              justifyContent="space-between"
+              alignItems="center"
+            >
               <Box>
                 <Typography variant="h6">채점 기준</Typography>
                 <Typography variant="body2" color="text.secondary">
@@ -506,8 +764,13 @@ function TAAssignmentDetail() {
             <Typography variant="h6" sx={{ mb: 1 }}>
               채점 관리
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              제출된 리포트에 대한 점수 입력 및 채점 현황을 관리하는 영역입니다.
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ mb: 2 }}
+            >
+              제출된 리포트에 대한 점수 입력 및 채점 현황을 관리하는
+              영역입니다.
             </Typography>
             <Stack spacing={1}>
               <Typography variant="body2">
@@ -520,78 +783,133 @@ function TAAssignmentDetail() {
                 • 채점 기준 상태: {criteria ? '등록됨' : '미등록'}
               </Typography>
             </Stack>
-                <Box sx={{ mt: 2, textAlign: 'right' }}>
-                  <Button
-                    variant="contained"
-                    size="small"
-                    onClick={() => navigate(`/ta/course/${courseId}/assignment/${assignmentId}/grading`, { state: { course: courseFromState, assignment } })}
-                    sx={(theme) => ({
-                      backgroundColor: theme.palette.primary.main,
-                      color: '#fff',
-                      '&:hover': {
-                        backgroundColor: theme.palette.primary.dark,
-                      },
-                    })}
-                  >
-                    채점 페이지로 이동
-                  </Button>
-                </Box>
+            <Box sx={{ mt: 2, textAlign: 'right' }}>
+              <Button
+                variant="contained"
+                size="small"
+                onClick={() =>
+                  navigate(
+                    `/ta/course/${courseId}/assignment/${assignmentId}/grading`,
+                    { state: { course: courseFromState, assignment } }
+                  )
+                }
+                sx={(theme) => ({
+                  backgroundColor: theme.palette.primary.main,
+                  color: '#fff',
+                  '&:hover': {
+                    backgroundColor: theme.palette.primary.dark,
+                  },
+                })}
+              >
+                채점 페이지로 이동
+              </Button>
+            </Box>
           </Paper>
         </Box>
       </Box>
 
-      {/* 채점 기준 JSON 다이얼로그 (항상 수정 가능) */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="lg">
+      {/* 채점 기준 다이얼로그 */}
+      <Dialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        fullWidth
+        maxWidth="lg"
+      >
         <DialogTitle>채점 기준 보기/수정</DialogTitle>
         <DialogContent>
           {criteriaLoading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+            <Box
+              sx={{
+                display: 'flex',
+                justifyContent: 'center',
+                p: 4,
+              }}
+            >
               <CircularProgress />
             </Box>
           ) : (
             <Stack spacing={2}>
               {(!criteriaRows || criteriaRows.length === 0) && (
-                <Typography color="text.secondary">채점 항목이 없습니다. 새 항목을 추가하세요.</Typography>
+                <Typography color="text.secondary">
+                  채점 항목이 없습니다. 새 항목을 추가하세요.
+                </Typography>
               )}
 
               <Box sx={{ pt: 2 }}>
                 {criteriaRows.map((row, idx) => (
-                  <Box key={idx} sx={{ display: 'flex', gap: 1, alignItems: 'stretch', mb: 1 }}>
+                  <Box
+                    key={idx}
+                    sx={{
+                      display: 'flex',
+                      gap: 1,
+                      alignItems: 'stretch',
+                      mb: 1,
+                    }}
+                  >
                     <TextField
                       label="채점 항목"
                       value={row.name}
-                      onChange={(e) => handleChangeRow(idx, 'name', e.target.value)}
+                      onChange={(e) =>
+                        handleChangeRow(idx, 'name', e.target.value)
+                      }
                       variant="outlined"
                       fullWidth
-                      sx={{ flex: 1, '& .MuiInputBase-root': { minHeight: 56 } }}
+                      sx={{
+                        flex: 1,
+                        '& .MuiInputBase-root': { minHeight: 56 },
+                      }}
                     />
                     <TextField
                       label="채점 기준 설명"
                       value={row.description}
-                      onChange={(e) => handleChangeRow(idx, 'description', e.target.value)}
+                      onChange={(e) =>
+                        handleChangeRow(idx, 'description', e.target.value)
+                      }
                       variant="outlined"
                       multiline
-                      //minRows={3}
                       fullWidth
-                      sx={{ flex: 2, '& .MuiInputBase-root': { minHeight: 56, alignItems: 'flex-start', paddingTop: '10px' } }}
+                      sx={{
+                        flex: 2,
+                        '& .MuiInputBase-root': {
+                          minHeight: 56,
+                          alignItems: 'flex-start',
+                          paddingTop: '10px',
+                        },
+                      }}
                     />
                     <TextField
                       label="배점"
                       value={row.max_score}
-                      onChange={(e) => handleChangeRow(idx, 'max_score', e.target.value)}
+                      onChange={(e) =>
+                        handleChangeRow(idx, 'max_score', e.target.value)
+                      }
                       variant="outlined"
                       type="number"
-                      sx={{ width: 110, '& .MuiInputBase-root': { minHeight: 56, justifyContent: 'center' }, '& input': { textAlign: 'center' } }}
+                      sx={{
+                        width: 110,
+                        '& .MuiInputBase-root': {
+                          minHeight: 56,
+                          justifyContent: 'center',
+                        },
+                        '& input': { textAlign: 'center' },
+                      }}
                     />
-                    <IconButton onClick={() => handleRemoveRow(idx)} aria-label="삭제" sx={{ alignSelf: 'center' }}>
+                    <IconButton
+                      onClick={() => handleRemoveRow(idx)}
+                      aria-label="삭제"
+                      sx={{ alignSelf: 'center' }}
+                    >
                       <DeleteIcon />
                     </IconButton>
                   </Box>
                 ))}
-
               </Box>
+
               <Box>
-                <Button startIcon={<AddCircleOutlineIcon />} onClick={handleAddRow}>
+                <Button
+                  startIcon={<AddCircleOutlineIcon />}
+                  onClick={handleAddRow}
+                >
                   항목 추가
                 </Button>
               </Box>
@@ -606,12 +924,75 @@ function TAAssignmentDetail() {
         </DialogActions>
       </Dialog>
 
+      {/* 과제 정보 수정 다이얼로그 */}
+      <Dialog
+        open={editDialogOpen}
+        onClose={handleCloseEditDialog}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>과제 정보 수정</DialogTitle>
+        <DialogContent>
+          {editError && (
+            <Typography color="error" sx={{ mb: 1 }}>
+              {editError}
+            </Typography>
+          )}
+          <TextField
+            label="과제 이름"
+            fullWidth
+            margin="dense"
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+          />
+          <TextField
+            label="설명"
+            fullWidth
+            margin="dense"
+            multiline
+            minRows={3}
+            value={editDescription}
+            onChange={(e) => setEditDescription(e.target.value)}
+          />
+          <TextField
+            label="마감일"
+            type="datetime-local"
+            fullWidth
+            margin="dense"
+            value={editDueDate}
+            onChange={(e) => setEditDueDate(e.target.value)}
+            InputLabelProps={{ shrink: true }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseEditDialog} disabled={editSaving}>
+            취소
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleSaveEdit}
+            disabled={editSaving}
+          >
+            {editSaving ? '저장중...' : '저장'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* 과제 삭제 확인 다이얼로그 */}
-      <Dialog open={confirmDeleteOpen} onClose={() => setConfirmDeleteOpen(false)}>
+      <Dialog
+        open={confirmDeleteOpen}
+        onClose={() => setConfirmDeleteOpen(false)}
+      >
         <DialogTitle>과제 삭제 확인</DialogTitle>
         <DialogContent>
-          <Typography>정말 이 과제를 삭제하시겠습니까? 삭제하면 복구할 수 없습니다.</Typography>
-          <Typography sx={{ mt: 1, fontWeight: 700 }}>{assignment?.assignment_name || assignment?.name || '과제명'}</Typography>
+          <Typography>
+            정말 이 과제를 삭제하시겠습니까? 삭제하면 복구할 수 없습니다.
+          </Typography>
+          <Typography sx={{ mt: 1, fontWeight: 700 }}>
+            {assignment?.assignment_name ||
+              assignment?.name ||
+              '과제명'}
+          </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setConfirmDeleteOpen(false)}>취소</Button>
@@ -623,11 +1004,12 @@ function TAAssignmentDetail() {
               setDeleting(true);
               try {
                 await deleteAssignment(assignmentId);
-                // 이동: 과목 페이지로
                 navigate(`/ta/course/${courseId}`);
               } catch (e) {
                 console.error('과제 삭제 실패:', e);
-                alert('과제 삭제에 실패했습니다: ' + (e?.message || e));
+                alert(
+                  '과제 삭제에 실패했습니다: ' + (e?.message || e)
+                );
               } finally {
                 setDeleting(false);
                 setConfirmDeleteOpen(false);
