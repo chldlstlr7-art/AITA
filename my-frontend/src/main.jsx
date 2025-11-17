@@ -27,6 +27,7 @@ import TADashboard from './pages/ta/TADashboard.jsx';
 import TACourseDetail from './pages/ta/TACourseDetail.jsx';
 import TAAssignmentDetail from './pages/ta/TAAssignmentDetail.jsx';
 import TAGradingDetail from './pages/ta/TAGradingDetail.jsx';
+import TAReportPage from './pages/ta/TAReportPage.jsx';
 
 // 🔥 에러 페이지
 function ErrorPage() {
@@ -91,7 +92,8 @@ const router = createBrowserRouter([
       { path: "/ta/dashboard", element: <TADashboard /> }, // 🔥 추가
       { path: "/ta/course/:courseId", element: <TACourseDetail /> },
       { path: "/ta/course/:courseId/assignment/:assignmentId", element: <TAAssignmentDetail /> },
-      {path: "/ta/course/:courseId/assignment/:assignmentId/grading", element: <TAGradingDetail /> ,},
+      { path: "/ta/course/:courseId/assignment/:assignmentId/grading", element: <TAGradingDetail /> },
+      { path: "/ta/course/:courseId/assignment/:assignmentId/report/:reportId/analysis", element: <TAReportPage /> },
 
     ],
   },

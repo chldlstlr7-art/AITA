@@ -697,7 +697,14 @@ function TAAssignmentDetail() {
                               navigate(
                                 `/ta/course/${courseId}/assignment/${assignmentId}/report/${
                                   s.id || s.report_id
-                                }/analysis`
+                                }/analysis`,
+                                {
+                                  state: {
+                                    course: courseFromState,
+                                    assignment: assignment || assignmentFromState,
+                                    student: s,
+                                  },
+                                }
                               )
                             }
                           >
@@ -711,7 +718,14 @@ function TAAssignmentDetail() {
                               navigate(
                                 `/ta/course/${courseId}/assignment/${assignmentId}/report/${
                                   s.id || s.report_id
-                                }/aita`
+                                }/aita`,
+                                {
+                                  state: {
+                                    course: courseFromState,
+                                    assignment: assignment || assignmentFromState,
+                                    student: s,
+                                  },
+                                }
                               )
                             }
                           >
@@ -816,106 +830,106 @@ function TAAssignmentDetail() {
         maxWidth="lg"
       >
         <DialogTitle>채점 기준 보기/수정</DialogTitle>
-        <DialogContent>
-          {criteriaLoading ? (
-            <Box
-              sx={{
-                display: 'flex',
-                justifyContent: 'center',
-                p: 4,
-              }}
-            >
-              <CircularProgress />
-            </Box>
-          ) : (
-            <Stack spacing={2}>
-              {(!criteriaRows || criteriaRows.length === 0) && (
-                <Typography color="text.secondary">
-                  채점 항목이 없습니다. 새 항목을 추가하세요.
-                </Typography>
-              )}
+          <DialogContent>
+            {criteriaLoading ? (
+              <Box
+                sx={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  p: 4,
+                }}
+              >
+                <CircularProgress />
+              </Box>
+            ) : (
+              <Stack spacing={2}>
+                {(!criteriaRows || criteriaRows.length === 0) && (
+                  <Typography color="text.secondary">
+                    채점 항목이 없습니다. 새 항목을 추가하세요.
+                  </Typography>
+                )}
 
-              <Box sx={{ pt: 2 }}>
-                {criteriaRows.map((row, idx) => (
-                  <Box
-                    key={idx}
-                    sx={{
-                      display: 'flex',
-                      gap: 1,
-                      alignItems: 'stretch',
-                      mb: 1,
-                    }}
-                  >
-                    <TextField
-                      label="채점 항목"
-                      value={row.name}
-                      onChange={(e) =>
-                        handleChangeRow(idx, 'name', e.target.value)
-                      }
-                      variant="outlined"
-                      fullWidth
+                <Box sx={{ pt: 2 }}>
+                  {criteriaRows.map((row, idx) => (
+                    <Box
+                      key={idx}
                       sx={{
-                        flex: 1,
-                        '& .MuiInputBase-root': { minHeight: 56 },
+                        display: 'flex',
+                        gap: 1,
+                        alignItems: 'stretch',
+                        mb: 1,
                       }}
-                    />
-                    <TextField
-                      label="채점 기준 설명"
-                      value={row.description}
-                      onChange={(e) =>
-                        handleChangeRow(idx, 'description', e.target.value)
-                      }
-                      variant="outlined"
-                      multiline
-                      fullWidth
-                      sx={{
-                        flex: 2,
-                        '& .MuiInputBase-root': {
-                          minHeight: 56,
-                          alignItems: 'flex-start',
-                          paddingTop: '10px',
-                        },
-                      }}
-                    />
-                    <TextField
-                      label="배점"
-                      value={row.max_score}
-                      onChange={(e) =>
-                        handleChangeRow(idx, 'max_score', e.target.value)
-                      }
-                      variant="outlined"
-                      type="number"
-                      sx={{
-                        width: 110,
-                        '& .MuiInputBase-root': {
-                          minHeight: 56,
-                          justifyContent: 'center',
-                        },
-                        '& input': { textAlign: 'center' },
-                      }}
-                    />
-                    <IconButton
-                      onClick={() => handleRemoveRow(idx)}
-                      aria-label="삭제"
-                      sx={{ alignSelf: 'center' }}
                     >
-                      <DeleteIcon />
-                    </IconButton>
-                  </Box>
-                ))}
-              </Box>
+                      <TextField
+                        label="채점 항목"
+                        value={row.name}
+                        onChange={(e) =>
+                          handleChangeRow(idx, 'name', e.target.value)
+                        }
+                        variant="outlined"
+                        fullWidth
+                        sx={{
+                          flex: 1,
+                          '& .MuiInputBase-root': { minHeight: 56 },
+                        }}
+                      />
+                      <TextField
+                        label="채점 기준 설명"
+                        value={row.description}
+                        onChange={(e) =>
+                          handleChangeRow(idx, 'description', e.target.value)
+                        }
+                        variant="outlined"
+                        multiline
+                        fullWidth
+                        sx={{
+                          flex: 2,
+                          '& .MuiInputBase-root': {
+                            minHeight: 56,
+                            alignItems: 'flex-start',
+                            paddingTop: '10px',
+                          },
+                        }}
+                      />
+                      <TextField
+                        label="배점"
+                        value={row.max_score}
+                        onChange={(e) =>
+                          handleChangeRow(idx, 'max_score', e.target.value)
+                        }
+                        variant="outlined"
+                        type="number"
+                        sx={{
+                          width: 110,
+                          '& .MuiInputBase-root': {
+                            minHeight: 56,
+                            justifyContent: 'center',
+                          },
+                          '& input': { textAlign: 'center' },
+                        }}
+                      />
+                      <IconButton
+                        onClick={() => handleRemoveRow(idx)}
+                        aria-label="삭제"
+                        sx={{ alignSelf: 'center' }}
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    </Box>
+                  ))}
+                </Box>
 
-              <Box>
-                <Button
-                  startIcon={<AddCircleOutlineIcon />}
-                  onClick={handleAddRow}
-                >
-                  항목 추가
-                </Button>
-              </Box>
-            </Stack>
-          )}
-        </DialogContent>
+                <Box>
+                  <Button
+                    startIcon={<AddCircleOutlineIcon />}
+                    onClick={handleAddRow}
+                  >
+                    항목 추가
+                  </Button>
+                </Box>
+              </Stack>
+            )}
+          </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>닫기</Button>
           <Button variant="contained" onClick={handleSaveCriteria}>

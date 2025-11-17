@@ -480,6 +480,40 @@ export const putAssignmentCriteria = async (assignmentId, criteriaPayload) => {
   }
 };
 
+// ==================== TA 리포트 자동 채점 ====================
+// POST /api/ta/reports/<report_id>/auto-grade
+export const autoGradeReport = async (reportId) => {
+  try {
+    const res = await apiClient.post(`/api/ta/reports/${reportId}/auto-grade`);
+    // 202 Accepted -> background task started
+    if (res.status === 202) {
+      return { status: 'processing', message: res.data?.message };
+    }
+    return res.data;
+  } catch (error) {
+    console.error('리포트 자동 채점 API 에러:', error.response || error);
+    if (error.response) {
+      throw new Error(error.response.data?.error || `HTTP ${error.response.status}`);
+    }
+    throw new Error(error.message || '자동 채점 요청에 실패했습니다.');
+  }
+};
+
+// ==================== TA 수동 채점 저장 ====================
+// POST /api/ta/reports/<report_id>/grade
+export const submitTaGrade = async (reportId, body) => {
+  try {
+    const res = await apiClient.post(`/api/ta/reports/${reportId}/grade`, body);
+    return res.data;
+  } catch (error) {
+    console.error('TA 채점 저장 API 에러:', error.response || error);
+    if (error.response) {
+      throw new Error(error.response.data?.error || `HTTP ${error.response.status}`);
+    }
+    throw new Error(error.message || 'TA 채점 저장에 실패했습니다.');
+  }
+};
+
 // ==================== Axios Interceptor ====================
 
 apiClient.interceptors.request.use((config) => {
