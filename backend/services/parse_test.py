@@ -3,12 +3,12 @@ import math
 # --- 1. 초기 점수 설정 (여기를 수정하세요) ---
 # 각 항목에 대해 10점 만점 등의 '원점수'를 입력합니다.
 scores = {
-    "Core Thesis": 10,
-    "Claim": 10,
-    "Reasoning": 10,
-    "Flow Pattern": 10,
-    "Problem Framing": 10,
-    "Conclusion Framing": 10
+    "Core Thesis": 9,
+    "Claim": 9,
+    "Reasoning": 9,
+    "Flow Pattern": 9,
+    "Problem Framing": 9,
+    "Conclusion Framing": 9
 }
 
 # 계산된 점수를 저장할 딕셔너리 및 총합 변수 초기화
@@ -31,7 +31,7 @@ calculated_scores["Core Thesis"] = calculated_ct
 original_claim = scores["Claim"]
 calculated_claim = min(1, max(0, original_claim - 7))*7 + max(0, original_claim - 7)*3
 calculated_scores["Claim"] = calculated_claim
-
+ 
 # Reasoning: (점수 - 5, 음수면 0)의 1.5승 * 2 를 정수 처리
 original_reasoning = scores["Reasoning"]
 calculated_reasoning = int(math.pow(max(0, original_reasoning - 5), 1.5) * 2)
