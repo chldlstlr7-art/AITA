@@ -207,14 +207,63 @@ export const getAdvancementIdeas = async (reportId) => {
 
 // ==================== 학생 대시보드 ====================
 
-// 🔥 [수정] 경로 수정: /api/student/dashboard/<student_id>
+/**
+ * 🔥 학생 대시보드 데이터 조회
+ * @param {number} studentId - 학생 ID
+ * @returns {Promise<Object>} 대시보드 데이터
+ */
 export const getStudentDashboard = async (studentId) => {
   try {
-    const response = await apiClient.get(`/api/student/dashboard/${studentId}`);
+    console.log(`[API] 📡 대시보드 조회 요청: studentId=${studentId}`);
+    
+    const token = localStorage.getItem('accessToken');
+    if (!token) {
+      throw new Error('로그인 정보가 없습니다.');
+    }
+    
+    const response = await apiClient.get(`/api/student/dashboard/${studentId}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      }
+    });
+    
+    console.log(`[API] ✅ 대시보드 조회 성공:`, response.data);
+    
+    // 🔥 데이터 구조 검증
+    if (!response.data) {
+      throw new Error('서버 응답이 비어있습니다.');
+    }
+    
     return response.data;
+    
   } catch (error) {
-    console.error('학생 대시보드 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '대시보드를 불러오지 못했습니다.');
+    console.error('[API] ❌ 학생 대시보드 조회 실패:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+    });
+    
+    if (error.response) {
+      const status = error.response.status;
+      const errorData = error.response.data;
+      
+      if (status === 500) {
+        throw new Error(`서버 오류: ${errorData?.error || '내부 서버 오류'}`);
+      } else if (status === 404) {
+        throw new Error('학생 정보를 찾을 수 없습니다.');
+      } else if (status === 401) {
+        throw new Error('로그인이 만료되었습니다. 다시 로그인해주세요.');
+      } else if (status === 403) {
+        throw new Error('접근 권한이 없습니다.');
+      } else {
+        throw new Error(errorData?.error || `HTTP ${status} 오류`);
+      }
+    } else if (error.request) {
+      throw new Error('서버에 연결할 수 없습니다.');
+    } else {
+      throw error;
+    }
   }
 };
 

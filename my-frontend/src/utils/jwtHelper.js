@@ -1,37 +1,38 @@
 /**
  * JWT 토큰에서 user_id를 추출하는 헬퍼 함수
+ * @returns {number|null} 사용자 ID
  */
 export const getUserIdFromToken = () => {
   try {
     const token = localStorage.getItem('accessToken');
     if (!token) {
-      console.warn('[jwtHelper] 토큰이 없습니다.');
+      console.warn('[JWT] 토큰이 없습니다.');
       return null;
     }
 
-    // JWT는 "header.payload.signature" 형태
+    // JWT 구조: header.payload.signature
     const parts = token.split('.');
     if (parts.length !== 3) {
-      console.error('[jwtHelper] 잘못된 JWT 형식');
+      console.error('[JWT] 잘못된 토큰 형식');
       return null;
     }
 
-    // payload는 Base64로 인코딩되어 있음
+    // payload 디코딩
     const payload = JSON.parse(atob(parts[1]));
     
-    // Flask-JWT-Extended는 'sub' 필드에 identity를 저장
-    const userId = payload.sub;
+    // 다양한 필드명 시도
+    const userId = payload.sub || payload.user_id || payload.identity || payload.id;
     
     if (!userId) {
-      console.error('[jwtHelper] payload에 sub(user_id)가 없습니다.');
+      console.error('[JWT] 토큰에 사용자 ID가 없습니다:', payload);
       return null;
     }
 
-    console.log('[jwtHelper] ✅ user_id 추출 성공:', userId);
-    return parseInt(userId, 10); // 정수로 변환
+    // 문자열이면 숫자로 변환
+    return typeof userId === 'string' ? parseInt(userId, 10) : userId;
     
-  } catch (error) {
-    console.error('[jwtHelper] 토큰 파싱 실패:', error);
+  } catch (e) {
+    console.error('[JWT] 사용자 ID 추출 실패:', e);
     return null;
   }
 };
