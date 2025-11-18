@@ -7,22 +7,28 @@ import math
 import plotly.graph_objects as go
 import plotly.io as pio
 
-
 try:
-    # [수정] 홈 디렉토리가 아니라, 프로젝트 루트(현재 작업 경로)에서 찾습니다.
-    # Render에서 실행 시 os.getcwd()는 /opt/render/project/src 입니다.
-    project_root = os.getcwd()
-    font_conf_path = os.path.join(project_root, "fonts.conf")
+    # [수정] 헷갈리는 상대 경로 대신, Render의 "절대 경로"를 박아버립니다.
+    # Render에서 소스 코드는 무조건 이 위치에 있습니다.
+    PROJECT_ROOT = "/opt/render/project/src"
     
+    # 1. fonts.conf 파일 위치 지정
+    font_conf_path = os.path.join(PROJECT_ROOT, "fonts.conf")
+    
+    # 2. 혹시 파일이 없다면, 백엔드 폴더 안쪽도 한번 찾아봅니다 (보험용)
+    if not os.path.exists(font_conf_path):
+        print(f"[Init] 루트에서 못 찾음. 백엔드 폴더 확인 중...")
+        font_conf_path = os.path.join(PROJECT_ROOT, "backend", "fonts.conf")
+
     if os.path.exists(font_conf_path):
         # 환경 변수 강제 주입
         os.environ["FONTCONFIG_FILE"] = font_conf_path
-        os.environ["FONTCONFIG_PATH"] = project_root
+        os.environ["FONTCONFIG_PATH"] = os.path.dirname(font_conf_path)
         print(f"[Init] FONTCONFIG_FILE 강제 설정 완료: {font_conf_path}")
     else:
-        print(f"[Init] [CRITICAL] fonts.conf가 여전히 없습니다: {font_conf_path}")
-        # 디버깅: 현재 폴더 파일 목록 출력
-        print(f"[Debug] Current Dir Files: {os.listdir(project_root)}")
+        # [디버깅] 파일이 진짜 어디 갔는지 확인
+        print(f"[Init] [CRITICAL] fonts.conf 실종! 탐색 경로: {font_conf_path}")
+        print(f"[Debug] Root Files: {os.listdir(PROJECT_ROOT) if os.path.exists(PROJECT_ROOT) else 'Root Not Found'}")
 
 except Exception as e:
     print(f"[Init] 환경 변수 설정 중 오류: {e}")
