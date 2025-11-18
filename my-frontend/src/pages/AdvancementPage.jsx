@@ -40,7 +40,7 @@ import {
   TipsAndUpdates as TipsIcon,
   Send as SubmitIcon,
   CheckCircle as SuccessIcon,
-} from '@mui/icons-material';
+} from '@mui/icons-material'; // <-- [수정] 오타 수정
 import { styled, alpha } from '@mui/material/styles';
 import { 
   getReportStatus, 
@@ -200,6 +200,8 @@ function AdvancementPage() {
     
     return userId;
   };
+  
+  const currentStudentId = getUserId();
 
   // 초기 리포트 데이터 로드
   useEffect(() => {
@@ -308,10 +310,8 @@ function AdvancementPage() {
 
   // 🔥 학생 대시보드 보기
   const handleViewDashboard = () => {
-    const userId = getUserId();
-    
-    if (userId) {
-      navigate(`/dashboard/${userId}`);
+    if (currentStudentId) {
+      navigate(`/dashboard/${currentStudentId}`);
     } else {
       setSnackbar({
         open: true,
@@ -327,12 +327,11 @@ function AdvancementPage() {
       setLoadingCourses(true);
       setSubmitDialogOpen(true);
       
-      const userId = getUserId();
-      if (!userId) {
+      if (!currentStudentId) {
         throw new Error('로그인 정보를 찾을 수 없습니다.');
       }
       
-      const dashboardData = await getStudentDashboard(userId);
+      const dashboardData = await getStudentDashboard(currentStudentId);
       
       const coursesData = dashboardData.courses_with_submissions?.map(course => ({
         id: course.course_id,
@@ -442,14 +441,20 @@ function AdvancementPage() {
     return String(evidence);
   };
 
-  // 로딩 화면
+  // 로딩 화면 (개선된 버전 유지)
   if (loading) {
     return (
       <PageContainer>
         <Container maxWidth="lg">
-          <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
-            <CircularProgress size={60} />
-          </Box>
+          <LoadingBox sx={{ mt: 4, minHeight: '60vh' }}>
+            <CircularProgress size={60} sx={{ color: 'primary.main' }} />
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              리포트 데이터를 불러오는 중...
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              분석 완료 여부를 확인하고 있습니다. 잠시만 기다려주세요.
+            </Typography>
+          </LoadingBox>
         </Container>
       </PageContainer>
     );
@@ -689,6 +694,11 @@ function AdvancementPage() {
             onNewReport={handleNewReport}
             onViewDashboard={handleViewDashboard}
             onSubmit={handleOpenSubmitDialog}
+            
+            // --- 👇 [수정] 이 두 props를 전달합니다 ---
+            studentId={currentStudentId} 
+            reportId={reportId}
+            // --- 👆 [수정] ---
           />
         )}
       </Container>
@@ -703,7 +713,8 @@ function AdvancementPage() {
           sx: {
             borderRadius: 3,
             boxShadow: (theme) => `0 8px 32px ${alpha(theme.palette.primary.main, 0.15)}`,
-          }
+          },
+          tabIndex: -1, // 접근성 경고 수정
         }}
       >
         <DialogTitle sx={{ fontWeight: 700, fontSize: '1.5rem' }}>
@@ -729,6 +740,7 @@ function AdvancementPage() {
                   <MenuItem disabled>수강 중인 과목이 없습니다</MenuItem>
                 ) : (
                   courses.map((course) => (
+                    // [수정] courses 데이터 구조 변경 (id, course_code, course_name)
                     <MenuItem key={course.id} value={course.id}>
                       {course.course_code} - {course.course_name}
                     </MenuItem>
@@ -756,6 +768,7 @@ function AdvancementPage() {
                     <MenuItem disabled>등록된 과제가 없습니다</MenuItem>
                   ) : (
                     assignments.map((assignment) => (
+                      // [수정] assignments 데이터 구조 변경 (id, assignment_name)
                       <MenuItem key={assignment.id} value={assignment.id}>
                         {assignment.assignment_name}
                         {assignment.due_date && (

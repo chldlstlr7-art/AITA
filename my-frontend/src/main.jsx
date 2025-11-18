@@ -75,6 +75,7 @@ const router = createBrowserRouter([
       
       // 🔥 학생 대시보드
       { path: "/dashboard", element: <StudentDashboard /> },
+      { path: "/dashboard/:userId", element: <StudentDashboard /> }, // 🔥 개발자용 학생 ID 파라미터 지원
       
       // 발전 아이디어 페이지
       { 
@@ -86,13 +87,13 @@ const router = createBrowserRouter([
       // 리포트 페이지
       { path: "/report/:reportId", element: <ReportPage /> },
 
-      // 🔥 TA용 라우트 (수정)
+      // 🔥 TA용 라우트
       { path: "/ta", element: <TADashboard /> },
-      { path: "/ta/dashboard", element: <TADashboard /> }, // 🔥 추가
+      { path: "/ta/dashboard", element: <TADashboard /> },
+      { path: "/ta/grading", element: <TAGradingDetail /> }, // 🔥 TA 채점 관리 페이지 (메인)
       { path: "/ta/course/:courseId", element: <TACourseDetail /> },
       { path: "/ta/course/:courseId/assignment/:assignmentId", element: <TAAssignmentDetail /> },
-      {path: "/ta/course/:courseId/assignment/:assignmentId/grading", element: <TAGradingDetail /> ,},
-
+      { path: "/ta/course/:courseId/assignment/:assignmentId/grading", element: <TAGradingDetail /> }, // 🔥 특정 과제 채점 페이지
     ],
   },
 ]);
