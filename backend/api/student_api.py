@@ -809,7 +809,7 @@ def get_flow_graph(report_id):
         return jsonify({"status": "error", "message": "An error occurred while generating the graph image."}), 500
 
 
-@app.route('/debug/font')
+@student_bp.route('/debug/font')
 def debug_font():
     # 브라우저에서 JSON으로 폰트 상태를 봅니다.
     return jsonify(check_system_fonts_debug())
