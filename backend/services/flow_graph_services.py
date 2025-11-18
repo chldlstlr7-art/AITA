@@ -32,7 +32,7 @@ _SPACING = {
     "level_gap_scale": 2.0,
     "center_jitter_amp": 0.06
 }
-font_family = "NanumGothic, 'Nanum Gothic', sans-serif"
+font_family = "NanumGothic, 'Nanum Gothic'"
 
 # ------------------ HTML/텍스트 유틸 ------------------
 
