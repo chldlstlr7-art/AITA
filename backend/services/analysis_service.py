@@ -341,34 +341,28 @@ def perform_step2_comparison(report_id, embedding_thesis, embedding_claim, submi
 # --- (기존 perform_full_analysis_and_comparison 함수는 삭제됨) ---
 
 def _parse_comparison_scores(report_text):
+    # 1. 점수 컨테이너 초기화
     scores = {
-        "Core Thesis Similarity": 0, "Problem Framing Similarity": 0, "Claim Similarity": 0,
-        "Reasoning Similarity": 0, "Flow Pattern Similarity": 0, "Conclusion Framing Similarity": 0,
-    }
-    # total_score 변수는 이제 사용하지 않으므로 제거합니다.
-    parsed_count = 0
-    key_mapping = {
-        "Core Thesis Similarity": "Core Thesis Similarity",
-        "Problem Framing Similarity": "Problem Framing Similarity",
-        "Claim Similarity": "Claim Similarity", 
-        "Reasoning Similarity": "Reasoning Similarity",
-        "Flow Pattern Similarity": "Flow Pattern Similarity", 
-        "Conclusion Framing Similarity": "Conclusion Framing Similarity",
+        "Core Thesis Similarity": 0, 
+        "Problem Framing Similarity": 0, 
+        "Claim Similarity": 0,
+        "Reasoning Similarity": 0, 
+        "Flow Pattern Similarity": 0, 
+        "Conclusion Framing Similarity": 0,
     }
     
-    # 변환된 점수를 저장할 임시 딕셔너리를 초기화합니다.
-    calculated_scores = {} 
+    parsed_count = 0
     
     try:
+        # 2. 파싱 로직 (강력한 Regex 적용)
         for key_name in scores.keys():
-            # [수정된 정규식의 핵심]
-            # 1. re.escape(key_name): 키 이름 전체 매칭 (예: "Core Thesis Similarity")
-            # 2. \s*:\s*: 콜론(:)과 앞뒤 공백 매칭
-            # 3. (?:\*\*)?: 숫자가 볼드(**) 처리되어 있을 경우 무시
-            # 4. (\d+): 숫자 추출 (1자리 이상)
-            # 5. 중요: 뒤에 오는 문자([--]) 검사 로직을 삭제하여 유연성 확보
-            
-            pattern = rf"{re.escape(key_name)}\s*:\s*(?:\*\*)?(\d+)"
+            # [Regex 설명]
+            # re.escape(key_name) : 키워드 매칭
+            # .*?                 : 중간에 잡다한 문자 비탐욕적 허용
+            # :                   : 콜론 필수
+            # [\s\*]* : 공백이나 별표(*)가 0개 이상 섞여 있어도 무시
+            # (\d+)               : 숫자 추출
+            pattern = rf"{re.escape(key_name)}.*?:\s*[\s\*]*(\d+)"
             
             match = re.search(pattern, report_text, re.IGNORECASE)
             if match:
@@ -376,10 +370,13 @@ def _parse_comparison_scores(report_text):
                 scores[key_name] = score
                 parsed_count += 1
             else:
-                # 디버깅을 위해 못 찾았을 때만 출력
                 print(f"[_parse_comparison_scores] Warning: Could not find score for '{key_name}'")
 
-        final_score = sum(scores.values())
+        # 3. [수정] 가중치 적용하여 총점 계산
+        # 기본 총합(sum)에 'Reasoning Similarity'를 한 번 더 더해주면 2배 가중치가 됩니다.
+        # (Reasoning은 중요하므로 x2)
+        
+        final_score = sum(scores.values()) + scores["Reasoning Similarity"]
 
     except Exception as e:
         print(f"[_parse_comparison_scores] Parsing Error: {e}")
@@ -390,7 +387,7 @@ def _parse_comparison_scores(report_text):
 
 def _filter_high_similarity_reports(comparison_results_list):
     high_similarity_reports = []
-    threshold = 30
+    threshold = 50
     for result in comparison_results_list:
         report_text = result.get("llm_comparison_report", "")
         total_score, scores_dict,  = _parse_comparison_scores(report_text)

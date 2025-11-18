@@ -32,6 +32,7 @@ _SPACING = {
     "level_gap_scale": 2.0,
     "center_jitter_amp": 0.06
 }
+font_family = "NanumGothic, 'Nanum Gothic', sans-serif"
 
 # ------------------ HTML/텍스트 유틸 ------------------
 
@@ -347,8 +348,7 @@ def _create_flow_graph_figure(nodes, edges,
         text=[labels[n] for n in node_ids],
         textposition="middle center",
         hoverinfo="text",
-        textfont=dict(family="NanumGothic, sans-serif",
-                      size=_FONT_SIZE, color="#0f172a")
+        textfont=dict(family=font_family, size=_FONT_SIZE, color="#0f172a")
     ))
 
     # 4) 레이아웃
@@ -370,7 +370,7 @@ def _create_flow_graph_figure(nodes, edges,
                    range=[min(xs)-pad_x, max(xs)+pad_x]),
         yaxis=dict(visible=False, showgrid=False, zeroline=False,
                    range=[min(ys)-pad_y, max(ys)+pad_y]),
-        font=dict(family="NanumGothic, sans-serif")
+        font=dict(family=font_family)
     )
 
     # API로 전송하기 위해 fig 객체 반환

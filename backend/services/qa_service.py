@@ -120,7 +120,7 @@ def generate_initial_questions(summary_dict, high_similarity_reports_list, snipp
             comment = report.get('llm_comparison_report', " ")
             plagiarism_info += f" - 후보 {i+1} ({comment})\n"
     else:
-        plagiarism_info = "참고: 총점 30점 이상의 구조적 유사성을 보이는 문서는 발견되지 않았습니다."
+        plagiarism_info = "참고: 총점 50점 이상의 구조적 유사성을 보이는 문서는 발견되지 않았습니다."
 
     # 2. 제출된 리포트 요약 (텍스트)
     summary_text = f"""
