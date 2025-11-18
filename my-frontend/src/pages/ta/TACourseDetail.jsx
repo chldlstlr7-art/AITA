@@ -603,8 +603,8 @@ export default function TACourseDetail() {
                           clickable
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (!a?.id) return;
-                            navigate(`/ta/course/${courseId}/assignment/${a.id}/grading`, { state: { course, assignment: a } });
+                            // 과목 단위 Grading으로 이동
+                            navigate(`/ta/course/${courseId}/grading`, { state: { course } });
                           }}
                           sx={(theme) => ({
                             cursor: 'pointer',

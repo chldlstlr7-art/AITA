@@ -12,7 +12,6 @@ import {
   IconButton,
   Tooltip,
   Divider,
-  LinearProgress,
   Avatar,
   Button,
   Collapse,
@@ -27,7 +26,7 @@ import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import { styled, alpha } from '@mui/material/styles';
 
 // ==================== Styled Components ====================
-
+// (스타일 코드는 변경 없음)
 const GlassCard = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
   borderRadius: theme.spacing(2),
@@ -50,20 +49,70 @@ const StyledAccordion = styled(Accordion)(({ theme }) => ({
   },
 }));
 
+// ==================== [신규] 백엔드 로직 (JS) ====================
+
+// 🔥 백엔드 _parse_comparison_scores 로직 (점수 계산을 위해 내부적으로 필요)
+const parseComparisonScores = (reportText) => {
+  if (!reportText) return { final_score: 0, converted_scores: {} };
+
+  const scores = {
+    "Core Thesis": 0, "Problem Framing": 0, "Claim": 0,
+    "Reasoning": 0, "Flow Pattern": 0, "Conclusion Framing": 0,
+  };
+  
+  const keyMapping = [
+    { key: "Core Thesis", re: /Core Thesis.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]/i },
+    { key: "Problem Framing", re: /Problem Framing.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]/i },
+    { key: "Claim", re: /Claim.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]/i },
+    { key: "Reasoning", re: /Reasoning.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]/i },
+    { key: "Flow Pattern", re: /Flow Pattern.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]/i },
+    { key: "Conclusion Framing", re: /Conclusion Framing.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]/i },
+  ];
+
+  try {
+    keyMapping.forEach(({ key, re }) => {
+      const match = reportText.match(re);
+      if (match && match[1]) {
+        scores[key] = parseInt(match[1], 10);
+      }
+    });
+
+    const converted_scores = {};
+    converted_scores["Core Thesis"] = Math.pow(Math.max(0, scores["Core Thesis"] - 8), 2) * 2;
+    converted_scores["Claim"] = Math.pow(Math.max(0, scores["Claim"] - 8), 2) * 2;
+    converted_scores["Reasoning"] = Math.floor(Math.pow(Math.max(0, scores["Reasoning"] - 5), 1.5) * 2);
+    converted_scores["Flow Pattern"] = Math.pow(Math.max(0, scores["Flow Pattern"] - 6), 2) * 2;
+    converted_scores["Problem Framing"] = Math.max(0, scores["Problem Framing"] - 5) * 2;
+    converted_scores["Conclusion Framing"] = Math.max(0, scores["Conclusion Framing"] - 5) * 2;
+
+    const final_score = Object.values(converted_scores).reduce((a, b) => a + b, 0);
+
+    return { final_score, converted_scores };
+    
+  } catch (e) {
+    console.error("점수 파싱 중 에러:", e);
+    return { final_score: 0, converted_scores: {} };
+  }
+};
+
+const HIGH_RISK_THRESHOLD = 60;
+const WARNING_THRESHOLD = 30; // <-- 점수 계산에는 필요
+
 // ==================== Helper Components ====================
 
-const ScoreChip = ({ score }) => {
+// [수정] RiskChip (점수 숨기기)
+const RiskChip = ({ score }) => {
   const numeric = Number(score) || 0;
+  
   const getConfig = () => {
-    // 🔥 수정: 30점 이상부터 표절 의심
-    if (numeric >= 40) return { 
+    if (numeric >= HIGH_RISK_THRESHOLD) return { 
       color: 'error', 
       icon: <ErrorIcon fontSize="small" />,
       label: '고위험',
       bgcolor: (t) => alpha(t.palette.error.main, 0.12),
       textColor: 'error.main'
     };
-    if (numeric >= 30) return { 
+    if (numeric >= WARNING_THRESHOLD) return { 
       color: 'warning', 
       icon: <WarningIcon fontSize="small" />,
       label: '주의',
@@ -84,7 +133,7 @@ const ScoreChip = ({ score }) => {
   return (
     <Chip 
       icon={config.icon}
-      label={`${numeric}/50 · ${config.label}`}
+      label={config.label}
       sx={{ 
         fontWeight: 700,
         bgcolor: config.bgcolor,
@@ -97,6 +146,7 @@ const ScoreChip = ({ score }) => {
   );
 };
 
+// ... (copyToClipboard, formatReportText 헬퍼 함수는 변경 없음) ...
 const copyToClipboard = (text) => {
   try {
     navigator.clipboard.writeText(text);
@@ -167,25 +217,23 @@ function SimilarityAnalysis({ data }) {
 
   const { 
     similarity_details = [],
-    high_similarity_candidates = []
   } = data;
 
-  // 🔥 핵심 수정: similarity_details에서 30점 이상인 것만 필터링
-  const filteredCandidates = similarity_details
-    .filter(item => {
-      const score = Number(item.total_score) || 0;
-      return score >= 30; // 30점 이상만 표시
+  // 🔥 프론트에서 점수 계산 및 필터링 (로직은 동일하게 유지)
+  const displayCandidates = similarity_details
+    .map(item => {
+      const { final_score, converted_scores } = parseComparisonScores(item.llm_comparison_report);
+      return {
+        ...item,
+        total_score: final_score,
+        itemized_scores: converted_scores,
+      };
     })
-    .sort((a, b) => (Number(b.total_score) || 0) - (Number(a.total_score) || 0)); // 점수 높은 순 정렬
-
-  // 🔥 표시할 데이터: 필터링된 결과 우선 사용
-  const displayCandidates = filteredCandidates.length > 0 
-    ? filteredCandidates 
-    : high_similarity_candidates;
+    .filter(item => item.total_score >= WARNING_THRESHOLD) // 30점 이상 (계산에는 필요)
+    .sort((a, b) => b.total_score - a.total_score);
 
   console.log('[SimilarityAnalysis] 📊 원본 데이터:', similarity_details.length, '건');
-  console.log('[SimilarityAnalysis] 🔍 30점 이상 필터링:', filteredCandidates.length, '건');
-  console.log('[SimilarityAnalysis] 📌 표시할 데이터:', displayCandidates.length, '건');
+  console.log(`[SimilarityAnalysis] 🔍 ${WARNING_THRESHOLD}점 이상 필터링:`, displayCandidates.length, '건');
 
   return (
     <Box>
@@ -217,12 +265,10 @@ function SimilarityAnalysis({ data }) {
           {displayCandidates && displayCandidates.length > 0 ? (
             <Stack spacing={2}>
               {displayCandidates.map((item, index) => {
-                const score = item.total_score || 0;
-                const numeric = Number(score);
-                const progress = Math.min((numeric / 50) * 100, 100);
+                const score = item.total_score || 0; 
 
                 return (
-                  <StyledAccordion key={index}>
+                  <StyledAccordion key={item.candidate_id || index}>
                     <AccordionSummary 
                       expandIcon={<ExpandMoreIcon />}
                       sx={{ 
@@ -234,74 +280,24 @@ function SimilarityAnalysis({ data }) {
                     >
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%', justifyContent: 'space-between' }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                          <ScoreChip score={score} />
+                          <RiskChip score={score} />
                           <Box>
                             <Typography sx={{ fontWeight: 700, fontSize: '1.05rem' }}>
-                              {item.filename || `비교 문서 #${index + 1}`}
+                              {item.candidate_filename || `비교 문서 #${index + 1}`}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
                               ID: {item.candidate_id}
                             </Typography>
                           </Box>
                         </Box>
-
-                        <Box sx={{ width: 180, display: { xs: 'none', sm: 'block' } }}>
-                          <LinearProgress 
-                            variant="determinate" 
-                            value={progress} 
-                            sx={{ 
-                              height: 8, 
-                              borderRadius: 2,
-                              bgcolor: (t) => alpha(t.palette.primary.main, 0.12),
-                              '& .MuiLinearProgress-bar': {
-                                borderRadius: 2,
-                                // 🔥 수정: 30점 기준 적용
-                                background: (t) => numeric >= 40 
-                                  ? t.palette.error.main 
-                                  : numeric >= 30 
-                                  ? t.palette.warning.main 
-                                  : t.palette.success.main
-                              }
-                            }} 
-                          />
-                        </Box>
                       </Box>
                     </AccordionSummary>
 
                     <AccordionDetails sx={{ bgcolor: (t) => alpha(t.palette.secondary.main, 0.03), px: 3, py: 2.5 }}>
-                      {/* 세부 점수 표시 */}
-                      <Box sx={{ mb: 2 }}>
-                        <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main', mb: 1.5 }}>
-                          📊 세부 항목별 점수
-                        </Typography>
-                        <Grid container spacing={1.5}>
-                          {item.itemized_scores && Object.entries(item.itemized_scores).map(([key, value]) => (
-                            <Grid item xs={6} sm={4} key={key}>
-                              <Paper 
-                                elevation={0}
-                                sx={{ 
-                                  p: 1.5, 
-                                  textAlign: 'center',
-                                  bgcolor: (t) => alpha(t.palette.primary.main, 0.05),
-                                  border: (t) => `1px solid ${alpha(t.palette.primary.main, 0.1)}`
-                                }}
-                              >
-                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                  {key}
-                                </Typography>
-                                <Typography variant="h6" sx={{ fontWeight: 700, color: 'primary.main' }}>
-                                  {value}
-                                </Typography>
-                              </Paper>
-                            </Grid>
-                          ))}
-                        </Grid>
-                      </Box>
-
-                      {/* LLM 비교 리포트 */}
+                      
+                      {/* LLM 비교 리포트 (유지) */}
                       {item.llm_comparison_report && (
                         <>
-                          <Divider sx={{ my: 2 }} />
                           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                             <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main' }}>
                               🔍 LLM 정밀 비교 리포트
@@ -335,6 +331,7 @@ function SimilarityAnalysis({ data }) {
               })}
             </Stack>
           ) : (
+            // [수정] 표절 의심 없음 메시지
             <GlassCard elevation={0}>
               <Stack spacing={2} alignItems="center" sx={{ py: 3 }}>
                 <Avatar
@@ -350,7 +347,7 @@ function SimilarityAnalysis({ data }) {
                 <Typography variant="h6" color="text.primary" fontWeight={700}>
                   표절 의심 문서가 발견되지 않았습니다
                 </Typography>
-                
+                {/* 🔥 수정: 점수 기준 문구 삭제 */}
               </Stack>
             </GlassCard>
           )}
@@ -382,7 +379,8 @@ function SimilarityAnalysis({ data }) {
             }}
           >
             <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-              📌 전체 비교 결과 (similarity_details): {similarity_details.length}건 | 30점 이상: {filteredCandidates.length}건
+              {/* 🔥 수정: 점수 기준 문구 삭제 */}
+              📌 전체 비교 결과 (similarity_details): {similarity_details.length}건 | 주의 기준 이상: {displayCandidates.length}건
             </Typography>
             <Box 
               component="pre" 

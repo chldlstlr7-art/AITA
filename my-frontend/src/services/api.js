@@ -303,15 +303,29 @@ export const getStudentDashboard = async (studentId) => {
   }
 };
 
-// 🔥 [신규] 리포트를 과제에 제출
+/**
+ * 리포트를 과제에 연결 (제출)
+ * @param {string} reportId - 리포트 ID
+ * @param {string|number} assignmentId - 과제 ID
+ * @returns {Promise<Object>}
+ */
 export const submitReportToAssignment = async (reportId, assignmentId) => {
   try {
-    const response = await apiClient.post(`/api/student/report/${reportId}/submit`, {
-      assignment_id: assignmentId,
-    });
+    console.log('[API] 📤 리포트 제출 요청:', { reportId, assignmentId });
+    
+    // [수정] 백엔드(student_api.py)의 POST /api/student/report/<report_id>/submit 엔드포인트와 일치시킴
+    const response = await apiClient.post(
+      `/api/student/report/${reportId}/submit`,
+      {
+        assignment_id: assignmentId, // 백엔드는 이 body를 기대합니다.
+      }
+    );
+    
+    console.log('[API] ✅ 리포트 제출 성공:', response.data);
     return response.data;
   } catch (error) {
-    console.error('리포트 제출 API 에러:', error.response || error);
+    console.error('[API] ❌ 리포트 제출 실패:', error.response?.data || error.message);
+    // [수정] 백엔드가 반환하는 에러 메시지 키(error)를 사용
     throw new Error(error.response?.data?.error || '리포트 제출에 실패했습니다.');
   }
 };
