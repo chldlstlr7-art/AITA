@@ -27,6 +27,7 @@ import {
   updateCourse,
   deleteCourse,
 } from '../../services/api.js';
+import { getAssignmentsByCourse } from '../../services/api.js';
 
 // 🧪 백엔드에 아직 과목이 없을 때 사용할 DUMMY 데이터
 const DUMMY_COURSES = [
@@ -67,6 +68,7 @@ function TADashboard() {
   const [errorMsg, setErrorMsg] = useState('');
   const [anchorEl, setAnchorEl] = useState(null);
   const [menuCourseId, setMenuCourseId] = useState(null);
+  const [navLoading, setNavLoading] = useState(false);
 
   // 과목 추가 다이얼로그 상태
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -253,9 +255,52 @@ function TADashboard() {
           mb: 3,
         }}
       >
-        <Typography variant="h4" sx={{ fontWeight: 700 }}>
-          대시보드
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Typography variant="h4" sx={{ fontWeight: 700 }}>
+            대시보드
+          </Typography>
+
+          <Button
+            variant="outlined"
+            color="primary"
+            onClick={async () => {
+              if (!courses || courses.length === 0) {
+                alert('담당 과목이 없습니다.');
+                return;
+              }
+              const first = courses[0];
+              if (!first || first.isDummy) {
+                alert('유효한 과목이 없습니다.');
+                return;
+              }
+              try {
+                setNavLoading(true);
+                // 과목 단위 Grading으로 바로 이동
+                navigate(`/ta/course/${first.id}/grading`, { state: { course: first } });
+              } catch (e) {
+                console.error('이동 실패:', e);
+                navigate(`/ta/course/${first.id}`, { state: { course: first } });
+              } finally {
+                setNavLoading(false);
+              }
+            }}
+            disabled={navLoading}
+            sx={{
+              height: 36,
+              backgroundColor: '#ffffff',
+              color: 'primary.main',
+              border: '1px solid',
+              borderColor: 'primary.main',
+              '&:hover': {
+                backgroundColor: '#f7fbff',
+                // keep border and text color on hover
+                borderColor: 'primary.main',
+              },
+            }}
+          >
+            {navLoading ? '이동 중...' : '채점 종합 관리 바로가기'}
+          </Button>
+        </Box>
 
         {/* 우측 상단 작은 과목 추가 버튼 */}
         <Button
@@ -353,6 +398,8 @@ function TADashboard() {
           </>
         )}
       </Grid>
+
+      {/* 하단의 별도 빠른 이동 버튼은 헤더에 옮겨져서 제거됨 */}
 
       {/* 과목 카드 메뉴 (이름 수정, 삭제 등) */}
       <Menu

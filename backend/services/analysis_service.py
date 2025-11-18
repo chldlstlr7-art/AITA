@@ -342,19 +342,19 @@ def perform_step2_comparison(report_id, embedding_thesis, embedding_claim, submi
 
 def _parse_comparison_scores(report_text):
     scores = {
-        "Core Thesis": 0, "Problem Framing": 0, "Claim": 0,
-        "Reasoning": 0, "Flow Pattern": 0, "Conclusion Framing": 0,
+        "Core Thesis": 0, "Problem Framing": 0, "Claim Direction": 0,
+        "Reasoning & Evidence": 0, "Flow Pattern": 0, "Conclusion Framing": 0,
     }
     # total_score 변수는 이제 사용하지 않으므로 제거합니다.
     parsed_count = 0
     key_mapping = {
         "Core Thesis": "Core Thesis", "Problem Framing": "Problem Framing",
-        "Claim": "Claim", "Reasoning": "Reasoning",
+        "Claim Direction": "Claim Direction", "Reasoning & Evidence": "Reasoning & Evidence",
         "Flow Pattern": "Flow Pattern", "Conclusion Framing": "Conclusion Framing",
     }
     
     # 변환된 점수를 저장할 임시 딕셔너리를 초기화합니다.
-    converted_scores = {} 
+    calculated_scores = {} 
     
     try:
         # 1. 원점수 파싱 로직
@@ -376,35 +376,27 @@ def _parse_comparison_scores(report_text):
 
         # 2. 새로운 점수 변환 로직 적용
         
-        # Core Thesis: (점수 - 8, 음수면 0)의 제곱 * 2    
+ 
         original_ct = scores["Core Thesis"]
-        converted_scores["Core Thesis"] = max(0, original_ct - 8) ** 2 * 2
         
-        # Claim: (점수 - 8, 음수면 0)의 제곱 * 2   
-        original_claim = scores["Claim"]
-        converted_scores["Claim"] = max(0, original_claim - 8) ** 2 * 2
+ 
+        original_claim = scores["Claim Direction"]
 
-        # Reasoning: (점수 - 5, 음수면 0)의 1.5승 * 2 를 정수 처리 
-        original_reasoning = scores["Reasoning"]
-        # int()를 적용하여 최종적으로 정수 점수가 되도록 합니다.
-        converted_scores["Reasoning"] = int(math.pow(max(0, original_reasoning - 5), 1.5) * 2)
+        original_reasoning = scores["Reasoning & Evidence"]
 
-        # Flow Pattern: (점수 - 6, 음수면 0)의 제곱 * 2  
         original_fp = scores["Flow Pattern"]
-        converted_scores["Flow Pattern"] = max(0, original_fp - 6) ** 2 * 2
-        
-        # Problem Framing: (점수 - 5, 음수면 0) * 2   
-        original_pf = scores["Problem Framing"]
-        converted_scores["Problem Framing"] = max(0, original_pf - 5) * 2
 
-        # Conclusion Framing: (점수 - 5, 음수면 0) * 2  
+
+        original_pf = scores["Problem Framing"]
+
+
         original_cf = scores["Conclusion Framing"]
-        converted_scores["Conclusion Framing"] = max(0, original_cf - 5) * 2
+
         
         # 3. 총점 계산 (변환된 점수들의 합계)
-        total_score_converted = sum(converted_scores.values())
+        total_score_converted = sum(scores.values())
         
-        # 4. 100점 만점으로 환산 부분 제거 
+        # 4. 60점 만점으로 환산 부분 제거 
         # 최종 점수는 변환된 총점으로 설정
         final_score = total_score_converted
             
@@ -414,7 +406,7 @@ def _parse_comparison_scores(report_text):
         return 0, scores
     
     # 최종 점수(변환된 총합)와 변환된 항목별 점수를 반환
-    return final_score, converted_scores
+    return final_score, scores
 
 
 def _filter_high_similarity_reports(comparison_results_list):

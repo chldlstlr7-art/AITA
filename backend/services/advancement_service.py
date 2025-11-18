@@ -122,8 +122,8 @@ def generate_advancement_ideas(summary_dict, snippet, qa_history_list):
         formatted_history = _format_conversation_history(qa_history_list)
         summary_text = f"""
 - 핵심 주장(Claim): {summary_dict.get('Claim', 'N/A')}
-- 사용된 근거(Reasoning): {summary_dict.get('Reasoning', 'N/A')}
-- 논리 흐름(Flow Pattern): {summary_dict.get('Flow_Pattern', 'N/A')}
+- 사용된 근거(Reasoning_Logic): {summary_dict.get('Reasoning_Logic', 'N/A')}
+- 논리 흐름(Flow_Pattern): {summary_dict.get('Flow_Pattern', 'N/A')}
 """
     except Exception as e:
         print(f"[Service ADV] FAILED: Error formatting input data: {e}")

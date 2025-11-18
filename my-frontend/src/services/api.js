@@ -425,6 +425,24 @@ export const createAssignment = async (courseId, { assignment_name, description,
   }
 };
 
+
+// 과제 정보 수정
+// PUT /api/ta/assignments/<assignment_id>
+export const updateAssignment = async (assignmentId, { assignment_name, description, due_date }) => {
+  try {
+    const res = await apiClient.put(`/api/ta/assignments/${assignmentId}`, {
+      assignment_name,
+      description,
+      due_date,
+    });
+    return res.data;
+  } catch (error) {
+    console.error('과제 수정 API 에러:', error.response || error);
+    // axios error handling: prefer server message
+    throw new Error(error.response?.data?.error || '과제 수정에 실패했습니다.');
+  }
+};
+
 // 특정 과제 상세 조회 (TA용)
 export const getAssignmentDetail = async (assignmentId) => {
   try {
@@ -439,13 +457,19 @@ export const getAssignmentDetail = async (assignmentId) => {
 // GET assignment criteria helper (reads from assignment detail)
 export const getAssignmentCriteria = async (assignmentId) => {
   try {
-    const res = await apiClient.get(`/api/ta/assignments/${assignmentId}`);
-    const data = res.data || {};
-    // assignment may be nested or criteria may be top-level
-    return (data.assignment && data.assignment.criteria) || data.criteria || null;
+    // 신규 명세: GET /api/ta/assignments/<assignment_id>/criteria
+    const res = await apiClient.get(`/api/ta/assignments/${assignmentId}/criteria`);
+    // 응답 형태: { criteria_1: {...}, criteria_2: {...} }
+    return res.data;
   } catch (error) {
     console.error('채점 기준 조회 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '채점 기준을 불러오지 못했습니다.');
+    if (error.response) {
+      throw new Error(error.response.data?.error || `HTTP ${error.response.status}`);
+    }
+    if (error.request) {
+      throw new Error('서버에 연결할 수 없습니다. 네트워크를 확인해주세요.');
+    }
+    throw new Error(error.message || '채점 기준을 불러오지 못했습니다.');
   }
 };
 
@@ -467,6 +491,40 @@ export const putAssignmentCriteria = async (assignmentId, criteriaPayload) => {
   } catch (error) {
     console.error('채점 기준 저장 API 에러:', error.response || error);
     throw new Error(error.response?.data?.error || '채점 기준 저장에 실패했습니다.');
+  }
+};
+
+// ==================== TA 리포트 자동 채점 ====================
+// POST /api/ta/reports/<report_id>/auto-grade
+export const autoGradeReport = async (reportId) => {
+  try {
+    const res = await apiClient.post(`/api/ta/reports/${reportId}/auto-grade`);
+    // 202 Accepted -> background task started
+    if (res.status === 202) {
+      return { status: 'processing', message: res.data?.message };
+    }
+    return res.data;
+  } catch (error) {
+    console.error('리포트 자동 채점 API 에러:', error.response || error);
+    if (error.response) {
+      throw new Error(error.response.data?.error || `HTTP ${error.response.status}`);
+    }
+    throw new Error(error.message || '자동 채점 요청에 실패했습니다.');
+  }
+};
+
+// ==================== TA 수동 채점 저장 ====================
+// POST /api/ta/reports/<report_id>/grade
+export const submitTaGrade = async (reportId, body) => {
+  try {
+    const res = await apiClient.post(`/api/ta/reports/${reportId}/grade`, body);
+    return res.data;
+  } catch (error) {
+    console.error('TA 채점 저장 API 에러:', error.response || error);
+    if (error.response) {
+      throw new Error(error.response.data?.error || `HTTP ${error.response.status}`);
+    }
+    throw new Error(error.message || 'TA 채점 저장에 실패했습니다.');
   }
 };
 
