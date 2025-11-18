@@ -9,13 +9,21 @@ import plotly.io as pio
 
 
 try:
-    font_conf_path = os.path.expanduser("~/.config/fontconfig/fonts.conf")
+    # [수정] 홈 디렉토리가 아니라, 프로젝트 루트(현재 작업 경로)에서 찾습니다.
+    # Render에서 실행 시 os.getcwd()는 /opt/render/project/src 입니다.
+    project_root = os.getcwd()
+    font_conf_path = os.path.join(project_root, "fonts.conf")
+    
     if os.path.exists(font_conf_path):
+        # 환경 변수 강제 주입
         os.environ["FONTCONFIG_FILE"] = font_conf_path
-        os.environ["FONTCONFIG_PATH"] = os.path.dirname(font_conf_path)
+        os.environ["FONTCONFIG_PATH"] = project_root
         print(f"[Init] FONTCONFIG_FILE 강제 설정 완료: {font_conf_path}")
     else:
-        print(f"[Init] 경고: fonts.conf 파일을 찾을 수 없습니다: {font_conf_path}")
+        print(f"[Init] [CRITICAL] fonts.conf가 여전히 없습니다: {font_conf_path}")
+        # 디버깅: 현재 폴더 파일 목록 출력
+        print(f"[Debug] Current Dir Files: {os.listdir(project_root)}")
+
 except Exception as e:
     print(f"[Init] 환경 변수 설정 중 오류: {e}")
 # ----------------------------------------------------
