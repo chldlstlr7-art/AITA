@@ -6,6 +6,17 @@ import math
 import plotly.graph_objects as go
 import plotly.io as pio
 
+
+try:
+    font_conf_path = os.path.expanduser("~/.config/fontconfig/fonts.conf")
+    if os.path.exists(font_conf_path):
+        os.environ["FONTCONFIG_FILE"] = font_conf_path
+        os.environ["FONTCONFIG_PATH"] = os.path.dirname(font_conf_path)
+        print(f"[Init] FONTCONFIG_FILE 강제 설정 완료: {font_conf_path}")
+    else:
+        print(f"[Init] 경고: fonts.conf 파일을 찾을 수 없습니다: {font_conf_path}")
+except Exception as e:
+    print(f"[Init] 환경 변수 설정 중 오류: {e}")
 # ----------------------------------------------------
 # --- 4. [신규] 논리 흐름 시각화 (Plotly) 서비스 ---
 # ----------------------------------------------------
@@ -375,3 +386,45 @@ def _create_flow_graph_figure(nodes, edges,
 
     # API로 전송하기 위해 fig 객체 반환
     return fig
+
+def check_system_fonts_debug():
+    """
+    서버의 폰트 상태를 JSON으로 반환하는 디버깅 함수
+    """
+    report = {
+        "1. Environment": {
+            "HOME": os.environ.get("HOME"),
+            "FONTCONFIG_FILE": os.environ.get("FONTCONFIG_FILE"),
+            "FONTCONFIG_PATH": os.environ.get("FONTCONFIG_PATH")
+        },
+        "2. File Existence": {},
+        "3. FC-Match Result": "N/A",
+        "4. FC-List (Nanum Only)": []
+    }
+
+    # 1. 파일 존재 여부 확인
+    check_paths = [
+        os.path.expanduser("~/.local/share/fonts/NanumGothic-Regular.ttf"),
+        os.path.expanduser("~/.fonts/NanumGothic-Regular.ttf"),
+        os.path.expanduser("~/.config/fontconfig/fonts.conf")
+    ]
+    for p in check_paths:
+        report["2. File Existence"][p] = os.path.exists(p)
+
+    # 2. 시스템 명령어로 확인 (fc-match)
+    try:
+        # "NanumGothic을 내놔라" 했을 때 시스템이 뭘 주는지 확인
+        output = subprocess.check_output(['fc-match', 'NanumGothic'], stderr=subprocess.STDOUT)
+        report["3. FC-Match Result"] = output.decode('utf-8').strip()
+    except Exception as e:
+        report["3. FC-Match Result"] = f"Error: {str(e)}"
+
+    # 3. 시스템 명령어로 확인 (fc-list)
+    try:
+        output = subprocess.check_output(['fc-list', ':lang=ko'], stderr=subprocess.STDOUT)
+        lines = output.decode('utf-8').strip().split('\n')
+        report["4. FC-List (Nanum Only)"] = [line for line in lines if "Nanum" in line]
+    except Exception as e:
+        report["4. FC-List (Nanum Only)"] = f"Error: {str(e)}"
+        
+    return report
