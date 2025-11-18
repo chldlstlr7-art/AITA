@@ -21,7 +21,7 @@ except ImportError as e:
     sys.exit(1)
 
 # --- CSV 파일 설정 ---
-CSV_FILE_PATH = 'aita_report_dummy'
+CSV_FILE_PATH = 'aita_report_dummy.csv'
 
 
 # --- 생성할 데이터 정의 ---
