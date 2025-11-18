@@ -26,7 +26,7 @@ EMBEDDING_MODEL_NAME = 'paraphrase-multilingual-MiniLM-L12-v2' # 2단계 S-BERT�
 # [LLM 클라이언트]
 llm_client_analysis = None
 llm_client_comparison = None
-
+ 
 if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
@@ -342,81 +342,61 @@ def perform_step2_comparison(report_id, embedding_thesis, embedding_claim, submi
 
 def _parse_comparison_scores(report_text):
     scores = {
-        "Core Thesis": 0, "Problem Framing": 0, "Claim Direction": 0,
-        "Reasoning & Evidence": 0, "Flow Pattern": 0, "Conclusion Framing": 0,
+        "Core Thesis Similarity": 0, "Problem Framing Similarity": 0, "Claim Similarity": 0,
+        "Reasoning Similarity": 0, "Flow Pattern Similarity": 0, "Conclusion Framing Similarity": 0,
     }
     # total_score 변수는 이제 사용하지 않으므로 제거합니다.
     parsed_count = 0
     key_mapping = {
-        "Core Thesis": "Core Thesis", "Problem Framing": "Problem Framing",
-        "Claim Direction": "Claim Direction", "Reasoning & Evidence": "Reasoning & Evidence",
-        "Flow Pattern": "Flow Pattern", "Conclusion Framing": "Conclusion Framing",
+        "Core Thesis Similarity": "Core Thesis Similarity",
+        "Problem Framing Similarity": "Problem Framing Similarity",
+        "Claim Similarity": "Claim Similarity", 
+        "Reasoning Similarity": "Reasoning Similarity",
+        "Flow Pattern Similarity": "Flow Pattern Similarity", 
+        "Conclusion Framing Similarity": "Conclusion Framing Similarity",
     }
     
     # 변환된 점수를 저장할 임시 딕셔너리를 초기화합니다.
     calculated_scores = {} 
     
     try:
-        # 1. 원점수 파싱 로직
-        for key_name, mapped_key in key_mapping.items():
-            # 점수 파싱 로직은 그대로 유지합니다.
-            # 예: "Core Thesis (Similarity): **9** - 10" 형태에서 '9'를 추출
-            pattern = rf"{re.escape(key_name)}.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]"
-            match = re.search(pattern, report_text, re.IGNORECASE | re.DOTALL)
+        for key_name in scores.keys():
+            # [수정된 정규식의 핵심]
+            # 1. re.escape(key_name): 키 이름 전체 매칭 (예: "Core Thesis Similarity")
+            # 2. \s*:\s*: 콜론(:)과 앞뒤 공백 매칭
+            # 3. (?:\*\*)?: 숫자가 볼드(**) 처리되어 있을 경우 무시
+            # 4. (\d+): 숫자 추출 (1자리 이상)
+            # 5. 중요: 뒤에 오는 문자([--]) 검사 로직을 삭제하여 유연성 확보
+            
+            pattern = rf"{re.escape(key_name)}\s*:\s*(?:\*\*)?(\d+)"
+            
+            match = re.search(pattern, report_text, re.IGNORECASE)
             if match:
                 score = int(match.group(1))
-                scores[mapped_key] = score
+                scores[key_name] = score
                 parsed_count += 1
             else:
-                # 원점수 파싱 실패 시 디버그 메시지
-                print(f"[_parse_comparison_scores] DEBUG: Failed to parse original score for key: '{key_name}'")
-        
-        if parsed_count < 6:
-            print(f"[_parse_comparison_scores] WARNING: Parsed {parsed_count}/6 original scores.")
+                # 디버깅을 위해 못 찾았을 때만 출력
+                print(f"[_parse_comparison_scores] Warning: Could not find score for '{key_name}'")
 
-        # 2. 새로운 점수 변환 로직 적용
-        
- 
-        original_ct = scores["Core Thesis"]
-        
- 
-        original_claim = scores["Claim Direction"]
+        final_score = sum(scores.values())
 
-        original_reasoning = scores["Reasoning & Evidence"]
-
-        original_fp = scores["Flow Pattern"]
-
-
-        original_pf = scores["Problem Framing"]
-
-
-        original_cf = scores["Conclusion Framing"]
-
-        
-        # 3. 총점 계산 (변환된 점수들의 합계)
-        total_score_converted = sum(scores.values())
-        
-        # 4. 60점 만점으로 환산 부분 제거 
-        # 최종 점수는 변환된 총점으로 설정
-        final_score = total_score_converted
-            
     except Exception as e:
-        print(f"[_parse_comparison_scores] 파싱 및 계산 중 에러: {e}")
-        # 에러 발생 시 0점과 파싱된 원점수를 반환
+        print(f"[_parse_comparison_scores] Parsing Error: {e}")
         return 0, scores
     
-    # 최종 점수(변환된 총합)와 변환된 항목별 점수를 반환
     return final_score, scores
 
 
 def _filter_high_similarity_reports(comparison_results_list):
     high_similarity_reports = []
-    threshold = 60
+    threshold = 30
     for result in comparison_results_list:
         report_text = result.get("llm_comparison_report", "")
-        total_score, scores_dict = _parse_comparison_scores(report_text)
+        total_score, scores_dict,  = _parse_comparison_scores(report_text)
         if total_score >= threshold:
             result['plagiarism_score'] = total_score
             result['scores_detail'] = scores_dict
+            result['']
             high_similarity_reports.append(result)
     return high_similarity_reports

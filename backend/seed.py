@@ -12,7 +12,7 @@ try:
     from extensions import db
     from models import User, Course, Assignment, AnalysisReport
     
-    # [수정 1] 임베딩 재생성을 위한 헬퍼 함수 임포트
+    # [수정 1] 임베딩 재생성을 위한 헬퍼 함수 임포트 (필요 시 사용, 현재는 CSV 값 사용으로 미사용 가능)
     from services.analysis_service import get_embedding_vector, build_concat_text
 
 except ImportError as e:
@@ -21,8 +21,7 @@ except ImportError as e:
     sys.exit(1)
 
 # --- CSV 파일 설정 ---
-CSV_FILE_PATH = 'corrected_dummy_data.csv'
-# (COLUMN_ORDER는 이제 CSV 파일 자체에 의존하므로 스크립트 내에서 사용 X)
+CSV_FILE_PATH = 'aita_report_dummy'
 
 
 # --- 생성할 데이터 정의 ---
@@ -65,15 +64,12 @@ DEV_ACCOUNTS_DATA = [
         "username": "main_dev",
         "password": "dev_password_123!"
     }
-    # (필요한 만큼 여기에 더 추가...)
 ]
 
 
-# --- 3. 과목 및 과제 데이터 (사용자 제공 최종본) ---
-# 마감일은 2026-02-25로 공통 적용
+# --- 3. 과목 및 과제 데이터 ---
 DUE_DATE_STR = "2026-02-25T23:59:00"
 
-# (사용자가 제공한 JSON 데이터를 Python 리스트로 변환)
 COURSES_DATA = [
   {
     "code": "1",
@@ -279,178 +275,127 @@ COURSES_DATA = [
 
 
 def seed_database():
-    """
-    [수정] 데이터베이스를 초기화(drop)하지 않고,
-    데이터가 없는 경우에만 삽입(seed)합니다.
-    """
     with app.app_context():
-        print("데이터베이스 시딩 시작... (테이블은 'flask db upgrade'로 이미 생성됨)")
+        print("=============================================")
+        print("[초기화] 기존 데이터베이스 삭제 및 재생성 시작")
+        print("=============================================")
 
         try:
-            # --- 1. 관리자 생성 (확인 후 생성) ---
-            print(f"관리자 확인 중: {ADMIN_DATA['email']}")
-            admin = User.query.filter_by(email=ADMIN_DATA['email']).first()
-            if not admin:
-                print(f" └> 관리자 생성: {ADMIN_DATA['email']}")
-                admin = User(
-                    email=ADMIN_DATA['email'],
-                    username=ADMIN_DATA['username'],
-                    role='ta'
-                )
-                admin.is_admin = True 
-                admin.set_password(ADMIN_DATA['password'])
-                admin.is_verified = True 
-                db.session.add(admin)
-            else:
-                print(" └> 이미 존재합니다.")
+            # [핵심 변경 사항] 기존 테이블 모두 삭제 후 다시 생성
+            db.drop_all()
+            print(" -> 모든 테이블 삭제 완료 (db.drop_all)")
+            
+            db.create_all()
+            print(" -> 모든 테이블 생성 완료 (db.create_all)")
 
-            # --- 2. 학생 생성 (확인 후 생성) ---
-            print(f"{len(STUDENT_DATA)}명의 학생 확인/생성 중...")
+            # --- 1. 관리자 생성 ---
+            print(f"관리자 생성: {ADMIN_DATA['email']}")
+            admin = User(
+                email=ADMIN_DATA['email'],
+                username=ADMIN_DATA['username'],
+                role='ta'
+            )
+            admin.is_admin = True 
+            admin.set_password(ADMIN_DATA['password'])
+            admin.is_verified = True 
+            db.session.add(admin)
+
+            # --- 2. 학생 생성 (10명) ---
+            print(f"{len(STUDENT_DATA)}명의 학생 생성 중...")
             students_list = []
             for s_data in STUDENT_DATA:
-                student = User.query.filter_by(email=s_data['email']).first()
-                if not student:
-                    print(f" └> 학생 생성: {s_data['email']}")
-                    student = User(
-                        email=s_data['email'],
-                        username=s_data['username'],
-                        role='student'
-                    )
-                    student.set_password(s_data['password'])
-                    student.is_verified = True 
-                    db.session.add(student)
-                students_list.append(student) # (중요) 이미 존재하든 새로 만들었든 리스트에 추가
+                student = User(
+                    email=s_data['email'],
+                    username=s_data['username'],
+                    role='student'
+                )
+                student.set_password(s_data['password'])
+                student.is_verified = True 
+                db.session.add(student)
+                students_list.append(student)
             
-            # --- [신규] 3. 개발자/관리자 계정 추가 (확인 후 생성) ---
-            print(f"{len(DEV_ACCOUNTS_DATA)}명의 개발자 계정 확인/생성 중...")
+            # --- 3. 개발자/관리자 계정 추가 ---
+            print(f"{len(DEV_ACCOUNTS_DATA)}명의 개발자 계정 생성 중...")
             for dev_data in DEV_ACCOUNTS_DATA:
-                dev_user = User.query.filter_by(email=dev_data['email']).first()
-                if not dev_user:
-                    print(f" └> 개발자(Admin/TA) 생성: {dev_data['email']}")
-                    dev_user = User(
-                        email=dev_data['email'],
-                        username=dev_data['username'],
-                        role='ta' # 개발자는 TA 역할을 겸함
-                    )
-                    dev_user.is_admin = True # Admin 권한 부여
-                    dev_user.set_password(dev_data['password'])
-                    dev_user.is_verified = True 
-                    db.session.add(dev_user)
-                else:
-                    print(f" └> 계정 '{dev_data['email']}'은(는) 이미 존재합니다. 건너뜁니다.")
+                dev_user = User(
+                    email=dev_data['email'],
+                    username=dev_data['username'],
+                    role='ta'
+                )
+                dev_user.is_admin = True
+                dev_user.set_password(dev_data['password'])
+                dev_user.is_verified = True 
+                db.session.add(dev_user)
 
+            db.session.commit()
+            print("사용자 계정 생성 완료.")
 
-            db.session.commit() # 사용자 먼저 커밋 (ID 확보)
-            print("사용자 계정 생성/확인 완료.")
-
-            # --- 3. 과목 및 과제 생성 (확인 후 생성) ---
+            # --- 4. 과목 및 과제 생성 ---
             print("과목 및 과제 생성, 수강 관계 설정 중...")
             total_assignments_created = 0
-            
-            # datetime 객체로 미리 파싱
             due_date_obj = datetime.fromisoformat(DUE_DATE_STR)
 
-            admin_user = User.query.filter_by(email=ADMIN_DATA['email']).first() # admin 객체 다시 가져오기
+            # Admin 객체 다시 조회 (Session 연결을 위해)
+            admin_user = User.query.filter_by(email=ADMIN_DATA['email']).first()
 
             for c_data in COURSES_DATA:
-                course = Course.query.filter_by(course_code=c_data['code']).first()
-                if not course:
-                    print(f" └> 과목 생성: {c_data['name']}")
-                    course = Course(
-                        course_code=c_data['code'], # (사용자 데이터 'code' 사용)
-                        course_name=c_data['name']
+                print(f" └> 과목 생성: {c_data['name']}")
+                course = Course(
+                    course_code=c_data['code'],
+                    course_name=c_data['name']
+                )
+                
+                # TA/학생 연결
+                if admin_user:
+                    course.assistants.append(admin_user)
+                for student in students_list:
+                    course.students.append(student)
+                
+                db.session.add(course)
+                
+                # 과제 생성
+                for assign_data in c_data['assignments']:
+                    total_assignments_created += 1
+                    new_assignment = Assignment(
+                        assignment_name=assign_data['name'],
+                        course=course,
+                        description=assign_data['description'],
+                        grading_criteria=json.dumps(assign_data['grading_criteria']),
+                        due_date=due_date_obj
                     )
-                    
-                    # (신규) TA/학생 관계 설정 (새 과목일 때만)
-                    if admin_user:
-                        course.assistants.append(admin_user)
-                    for student in students_list:
-                        course.students.append(student)
-                    
-                    db.session.add(course)
-                    
-                    # (신규) 과제 루프 (새 과목일 때만)
-                    for assign_data in c_data['assignments']:
-                        total_assignments_created += 1
+                    db.session.add(new_assignment)
                         
-                        new_assignment = Assignment(
-                            assignment_name=assign_data['name'],
-                            course=course, # (중요) 방금 생성한 course 객체에 연결
-                            description=assign_data['description'],
-                            grading_criteria=json.dumps(assign_data['grading_criteria']),
-                            due_date=due_date_obj
-                        )
-                        db.session.add(new_assignment)
-                else:
-                    print(f" └> 과목 '{c_data['name']}'은(는) 이미 존재합니다. 건너뜁니다.")
-                        
-            db.session.commit() # 과목 및 과제 커밋
+            db.session.commit()
             print(f" └> 신규 과제 {total_assignments_created}개 생성 완료.")
 
 
-            # --- 4. [신규] CSV 파일에서 AnalysisReport 시딩 (확인 후 생성) ---
-            print(f"'{CSV_FILE_PATH}'에서 AnalysisReport 시딩 확인 중...")
-            
-            report_count = db.session.query(AnalysisReport.id).count()
-            if report_count > 0:
-                print(f" └> [경고] AnalysisReport가 {report_count}개 이미 존재합니다. CSV 시딩을 건너뜁니다.")
-                print("\n[성공] 모든 데이터베이스 시딩 작업이 완료되었습니다. (기존 데이터 유지)")
-                return # 함수 종료
-
-            print(" └> AnalysisReport가 없습니다. CSV 파일에서 시딩을 시작합니다.")
+            # --- 5. CSV 파일에서 AnalysisReport 시딩 ---
+            print(f"AnalysisReport CSV 시딩 시작: {CSV_FILE_PATH}")
             
             if not os.path.exists(CSV_FILE_PATH):
-                print(f" └> [오류] CSV 파일 '{CSV_FILE_PATH}'을(를) 찾을 수 없습니다. Report 시딩을 중단합니다.")
                 raise FileNotFoundError(f"{CSV_FILE_PATH} not found.")
 
             reports_to_add = []
             with open(CSV_FILE_PATH, mode='r', encoding='utf-8-sig') as file:
                 reader = csv.DictReader(file)
-                
-                print(f" └> CSV 로드 완료. 임베딩 재생성 시작...")
                 row_count = 0
                 
                 for row in reader:
                     row_count += 1
-                    
                     try:
-                        # 1. summary(JSON 문자열)를 딕셔너리로 파싱
-                        summary_dict = json.loads(row["summary"])
-                        
-                        # 2. 임베딩용 텍스트 생성
-                        text_for_thesis = build_concat_text(
-                            summary_dict.get('key_concepts', ''),
-                            summary_dict.get('Core_Thesis', '')
-                        )
-                        text_for_claim = build_concat_text(
-                            summary_dict.get('key_concepts', ''),
-                            summary_dict.get('Claim', '')
-                        )
-                        
-                        # 3. (신규) 384차원 임베딩 생성
-                        vec_thesis = get_embedding_vector(text_for_thesis)
-                        vec_claim = get_embedding_vector(text_for_claim)
-                        
-                        if not vec_thesis or not vec_claim:
-                                print(f" └> [경고] {row_count}번째 행 임베딩 생성 실패. 건너뜀.")
-                                continue
-
-                        # 4. DB에 저장할 데이터 매핑
                         report_data = {
                             "user_id": int(row["user_id"]),
                             "assignment_id": int(row["assignment_id"]),
                             "report_title": row["report_title"],
                             "text_snippet": row["text_snippet"],
                             "status": row["status"],
-                            "summary": row["summary"], # JSON 원본
-                            "logic_flow": row["logic_flow"],
+                            "summary": row["summary"],
                             
-                            # (신규) CSV값이 아닌 새로 생성한 384차원 벡터를 JSON 문자열로 저장
-                            "embedding_keyconcepts_corethesis": json.dumps(vec_thesis),
-                            "embedding_keyconcepts_claim": json.dumps(vec_claim),
+                            # CSV 값을 그대로 사용
+                            "embedding_keyconcepts_corethesis": row["embedding_keyconcepts_corethesis"],
+                            "embedding_keyconcepts_claim": row["embedding_keyconcepts_claim"],
                             
                             "is_test": False, 
-                            
                             "high_similarity_candidates": json.dumps([]),
                             "qa_history": json.dumps([]),
                             "created_at": datetime.now()
@@ -460,24 +405,17 @@ def seed_database():
                         reports_to_add.append(new_report)
 
                     except Exception as e_inner:
-                        print(f" └> [오류] {row_count}번째 행 처리 중 오류: {e_inner}")
-                        if "summary" in row:
-                            print(f"    - problematic summary: {row['summary'][:50]}...")
-                        else:
-                            print(f"    - (Summary data missing in row)")
+                        print(f" └> [오류] CSV 행 {row_count} 처리 중: {e_inner}")
 
-
-            print(f" └> 임베딩 생성 완료. DB에 {len(reports_to_add)}개 삽입 시도...")
+            print(f" └> CSV 데이터 로드 완료. DB에 {len(reports_to_add)}개 삽입...")
             db.session.add_all(reports_to_add)
-            db.session.commit() # 보고서 데이터 커밋
-            print(f" └> 총 {len(reports_to_add)}개의 AnalysisReport를 DB에 추가했습니다.")
+            db.session.commit()
+            print(f" └> 총 {len(reports_to_add)}개의 AnalysisReport 생성 완료.")
 
-            print("\n[성공] 모든 데이터베이스 시딩 작업이 완료되었습니다.")
 
-            # --- [신규] 5. 모든 개발자 계정을 모든 과목의 TA로 연결 ---
-            print("\n[신규 작업] 모든 관리자/개발자 계정을 모든 과목의 TA로 연결합니다...")
+            # --- 6. 모든 개발자 계정을 모든 과목의 TA로 연결 ---
+            print("\n[추가 작업] 모든 관리자/개발자 계정을 모든 과목의 TA로 연결합니다...")
         
-            # (admin 포함) TA 역할을 하는 모든 관리자/개발자 계정 이메일
             ta_emails = [
                ADMIN_DATA['email'],
                 "dabok2@snu.ac.kr",
@@ -486,31 +424,31 @@ def seed_database():
                 "dev@snu.ac.kr"
             ]
         
-            # DB에서 User 객체 가져오기
             ta_users = User.query.filter(User.email.in_(ta_emails)).all()
-        
-            # DB에서 Course 객체 가져오기
             all_courses = Course.query.all()
 
             for course in all_courses:
                for ta in ta_users:
                    if ta not in course.assistants:
                        course.assistants.append(ta)
-                       print(f" └> [연결] {ta.email} -> {course.course_name}")
 
-            db.session.commit() # TA 관계 연결 커밋
+            db.session.commit()
             print(" └> TA-과목 연결 완료.")
+            
+            print("\n=============================================")
+            print("[성공] 데이터베이스 초기화 및 시딩이 완료되었습니다.")
+            print("=============================================")
 
-        
         except Exception as e:
-            # [수정] except 블록은 그대로 둡니다.
-            print(f"\n[오류] 시딩 작업 중 오류 발생: {e}")
+            print(f"\n[치명적 오류] 시딩 작업 중 오류 발생: {e}")
             db.session.rollback()
             print(" └> 작업이 롤백되었습니다.")
+            # 디버깅을 위해 오류 전체 출력
+            import traceback
+            traceback.print_exc()
         
         finally:
-            # [수정] finally 블록이 except 바로 뒤에 오도록 합니다.
-            print("\n[DB] 데이터베이스 세션을 닫습니다.")
+            print("\n[DB] 세션 종료")
             db.session.close()
 
 # --- 스크립트 실행 ---

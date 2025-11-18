@@ -60,7 +60,7 @@ class Config:
     # (기본값: MAIL_USERNAME과 동일하게 설정)
     MAIL_DEFAULT_SENDER = os.environ.get('SNUAITA301@gmail.com', os.environ.get('MAIL_USERNAME'))
 
-
+ 
 
 # 1. 자료 분석 요약 프롬프트
 JSON_SYSTEM_PROMPT = (
@@ -191,7 +191,6 @@ Your output must be *only* a valid JSON list (starting with '[' and ending with 
   }
 ]
 """
-
 question_making_prompt = """
 You are a 'Socratic Mentor' and 'Innovation Strategist' who sharply critiques a student's logical gaps and blind spots.
 Your sole purpose is to force the student to "actively" and "critically" rethink their arguments, helping them discover deeper insights and original perspectives on their own.
@@ -200,14 +199,27 @@ Do NOT provide 'obvious' advice or 'generic AI' niceties. Your questions must be
 
 The structured summary and plagiarism analysis of the student's submitted report are provided below in [INPUT DATA].
 Thoroughly analyze this data to grasp the student's core thesis and evidence.
-Use the [Plagiarism Analysis Results] to identify if the student's argument is original or where its blind spots are.
 
-If plagiarism is suspected (plagiarism_info), you must guide the student to recognize and correct this themselves.
+**CRITICAL RULE regarding [Plagiarism Analysis Results]:**
+1. Use the plagiarism information ONLY when generating 'perspective' and 'innovative' questions.
+2. Do NOT explicitly mention words like "plagiarism", "similarity score", "copied", or "other documents".
+3. Instead, if high similarity is found, use the content of the similar text to identify "common/cliché arguments." Then, ask questions that subtly force the student to differentiate their views from those common arguments or to expand beyond the scope of the similar text.
 
 You must generate exactly 3 questions for each of the following 3 categories, for a total of 9 questions:
-1. 'critical' (Critical Thinking Questions): Questions that directly attack the student's argument, logical leaps, weak evidence, or hidden assumptions. (e.g., "How would you explain the fact that phenomenon Y directly contradicts your claim?")
-2. 'perspective' (Perspective-Shifting Questions): Questions that force the student to see the "opposite" of their assumed viewpoint, or to apply their idea to a completely different field or timeframe.
-3. 'innovative' (Innovation & Extension Questions): Questions that push the student's idea to its extreme 'what if' scenario, or twist the core concept to explore new possibilities.
+
+1. 'critical' (Critical Thinking Questions):
+   - Focus strictly on the [Submitted Report Summary] and [Snippet].
+   - Attack the internal logic, logical leaps, weak evidence, or hidden assumptions within the student's own text. (e.g., "Your argument relies heavily on premise X, but how does that hold up if condition Y changes?")
+
+2. 'perspective' (Perspective-Shifting Questions):
+   - Utilize [Plagiarism Analysis Results] here. Identify the viewpoints found in the similar documents.
+   - Force the student to look at their topic from a specific angle that is DIFFERENT from the similar documents or their own current argument.
+   - If the student's text mirrors a source too closely, ask a question that adopts a counter-perspective to that source, compelling the student to defend their uniqueness.
+
+3. 'innovative' (Innovation & Extension Questions):
+   - Utilize [Plagiarism Analysis Results] here. Identify the boundaries or conclusions of the similar documents.
+   - Push the student's idea to an extreme 'what if' scenario that goes BEYOND what was covered in the similar text.
+   - Challenge them to twist the core concept to create a novel value proposition that the similar text did not propose.
 
 [INPUT DATA]
 
@@ -236,7 +248,6 @@ The output must be strictly in the following JSON list format. Return *only* the
  {{"type": "innovative", "question": "[세 번째 혁신 및 확장 질문]"}}
 ]
 """
-
 deep_dive_prompt = """
 You are a 'Socratic Mentor' whose role is to shatter a student's complacent thinking and unlock their potential.
 You are given the conversation history and the main topic.

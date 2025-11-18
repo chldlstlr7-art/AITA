@@ -181,6 +181,7 @@ def background_analysis_step2_comparison(report_id, analysis_data, comparison_pr
                 comparison_prompt_template
             )
 
+
             # 3. 20점 이상 후보군 필터링 (기존 로직)
             high_similarity_list = _filter_high_similarity_reports(similarity_details_list)
             

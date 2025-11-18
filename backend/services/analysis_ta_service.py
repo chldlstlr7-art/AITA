@@ -15,7 +15,7 @@ from time import sleep
 # [중요] Flask 앱 컨텍스트(db)가 필요합니다.
 from extensions import db
 from models import AnalysisReport, User
-from analysis_service import _parse_comparison_scores, _filter_high_similarity_reports
+from .analysis_service import _parse_comparison_scores, _filter_high_similarity_reports
 # --------------------------------------------------------------------------------------
 # --- 1. 전역 설정 및 모델 로드 (Flask 앱 시작 시 1회 실행) ---
 # --------------------------------------------------------------------------------------
