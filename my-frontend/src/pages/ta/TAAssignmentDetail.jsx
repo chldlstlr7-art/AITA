@@ -793,9 +793,6 @@ function TAAssignmentDetail() {
               <Typography variant="body2">
                 • 채점 완료 수: {gradedCount}개
               </Typography>
-              <Typography variant="body2">
-                • 채점 기준 상태: {criteria ? '등록됨' : '미등록'}
-              </Typography>
             </Stack>
             <Box sx={{ mt: 2, textAlign: 'right' }}>
               <Button
@@ -803,8 +800,8 @@ function TAAssignmentDetail() {
                 size="small"
                 onClick={() =>
                   navigate(
-                    `/ta/course/${courseId}/assignment/${assignmentId}/grading`,
-                    { state: { course: courseFromState, assignment } }
+                    `/ta/course/${courseId}/grading`,
+                    { state: { course: courseFromState || { id: courseId } } }
                   )
                 }
                 sx={(theme) => ({

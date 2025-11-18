@@ -92,7 +92,7 @@ const router = createBrowserRouter([
       { path: "/ta/dashboard", element: <TADashboard /> }, // 🔥 추가
       { path: "/ta/course/:courseId", element: <TACourseDetail /> },
       { path: "/ta/course/:courseId/assignment/:assignmentId", element: <TAAssignmentDetail /> },
-      { path: "/ta/course/:courseId/assignment/:assignmentId/grading", element: <TAGradingDetail /> },
+      { path: "/ta/course/:courseId/grading", element: <TAGradingDetail /> },
       { path: "/ta/course/:courseId/assignment/:assignmentId/report/:reportId/analysis", element: <TAReportPage /> },
 
     ],

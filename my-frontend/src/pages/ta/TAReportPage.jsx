@@ -138,7 +138,7 @@ function TAReportPage() {
   const [status, setStatus] = useState('processing_analysis'); 
   const [error, setError] = useState('');
   const [loadingMessage, setLoadingMessage] = useState('AI가 리포트를 분석 중입니다...');
-  const [activeTab, setActiveTab] = useState(0);
+  const [activeTab, setActiveTab] = useState(location.state?.openTabIndex ?? 0);
   const [showOriginal, setShowOriginal] = useState(false);
   const [criteriaRows, setCriteriaRows] = useState([]);
   const [criteriaLoading, setCriteriaLoading] = useState(false);
@@ -337,7 +337,7 @@ function TAReportPage() {
       <PageHeader>
         <Stack direction="row" spacing={3} alignItems="center">
           <Button
-            onClick={() => navigate(`/ta/course/${courseId}`, { state: { course: courseFromState } })}
+            onClick={() => navigate(-1)}
             variant="text"
             sx={{ color: 'white', minWidth: 40, pl: 0 }}
           >
@@ -692,6 +692,20 @@ function TAReportPage() {
                 }}
               >
                 {savingGrade ? '저장 중...' : '채점 결과 저장'}
+              </Button>
+            </Box>
+            {/* 채점 종합 관리로 이동 버튼 */}
+            <Box sx={{ display: 'flex', justifyContent: 'center', mb: 6 }}>
+              <Button
+                size="medium"
+                variant="outlined"
+                onClick={() => {
+                  // course 정보를 가능한 경우 전달
+                  const courseState = courseFromState || (courseId ? { id: courseId, course_name: courseName } : null);
+                  navigate(`/ta/course/${courseId}/grading`, { state: { course: courseState } });
+                }}
+              >
+                채점 종합 관리로 이동
               </Button>
             </Box>
           </Box>
