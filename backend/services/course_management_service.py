@@ -270,18 +270,14 @@ class CourseManagementService:
         }
 
     def get_assignment_stats(self, assignment_id, ta_user_id):
-        """ [수정] 11. 과제별 통계 조회 (TA 권한 확인 추가) """
+        """ [수정] 11. 과제별 통계 조회 (TA 권한 확인 추가, 다양한 통계 제공) """
+        import numpy as np
         assignment = self._get_assignment(assignment_id)
-        
-        # [수정] TA 권한 확인
         self._check_ta_permission(ta_user_id, assignment.course_id)
-        
         course = assignment.course
-        
         total_students = course.students.count()
         submissions = AnalysisReport.query.filter_by(assignment_id=assignment_id).all()
         submission_count = len(submissions)
-        
         graded_scores = []
         for report in submissions:
             if report.ta_score_details:
@@ -290,10 +286,14 @@ class CourseManagementService:
                     if 'total' in score_data and isinstance(score_data['total'], (int, float)):
                         graded_scores.append(score_data['total'])
                 except (json.JSONDecodeError, TypeError):
-                    continue 
-
+                    continue
         average_score = sum(graded_scores) / len(graded_scores) if graded_scores else 0
-        
+        max_score = max(graded_scores) if graded_scores else None
+        min_score = min(graded_scores) if graded_scores else None
+        stddev_score = float(np.std(graded_scores)) if graded_scores else None
+        q1 = float(np.percentile(graded_scores, 25)) if graded_scores else None
+        q2 = float(np.percentile(graded_scores, 50)) if graded_scores else None
+        q3 = float(np.percentile(graded_scores, 75)) if graded_scores else None
         return {
             "assignment_id": assignment_id,
             "assignment_name": assignment.assignment_name,
@@ -301,7 +301,13 @@ class CourseManagementService:
             "submission_count": submission_count,
             "submission_rate": (submission_count / total_students) * 100 if total_students > 0 else 0,
             "graded_count": len(graded_scores),
-            "average_score": average_score
+            "average_score": average_score,
+            "max_score": max_score,
+            "min_score": min_score,
+            "stddev_score": stddev_score,
+            "q1": q1,
+            "q2": q2,
+            "q3": q3
         }
 
     def get_student_dashboard_details(self, student_id):
@@ -514,6 +520,38 @@ class CourseManagementService:
         db.session.commit()
         
         return report
+
+    def get_auto_grading_result(self, report_id, ta_user_id):
+        """ AI 자동 채점 결과 robust 조회 """
+        report = self._get_report(report_id)
+        if not report.assignment_id:
+            raise ValueError("과제에 정식으로 제출된 리포트가 아닙니다.")
+        assignment = self._get_assignment(report.assignment_id)
+        self._check_ta_permission(ta_user_id, assignment.course_id)
+        if not report.auto_score_details:
+            return None
+        try:
+            result = json.loads(report.auto_score_details)
+            if isinstance(result, dict) and "error" in result:
+                return {"error": result["error"]}
+            return result
+        except Exception as e:
+            return {"error": f"자동 채점 결과 파싱 오류: {e}"}
+
+    def get_ta_grading_result(self, report_id, ta_user_id):
+        """ TA 채점 및 피드백 조회 """
+        report = self._get_report(report_id)
+        if not report.assignment_id:
+            raise ValueError("과제에 정식으로 제출된 리포트가 아닙니다.")
+
+        # TA 권한 확인
+        assignment = self._get_assignment(report.assignment_id)
+        self._check_ta_permission(ta_user_id, assignment.course_id)
+
+        return {
+            "feedback": report.ta_feedback,
+            "score_details": json.loads(report.ta_score_details) if report.ta_score_details else None
+        }
 
     # --- Helper Functions (오류 처리용) ---
     

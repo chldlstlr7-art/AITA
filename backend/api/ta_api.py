@@ -552,3 +552,44 @@ def trigger_bulk_auto_grading(assignment_id):
     return jsonify({
         "message": f"Assignment {assignment_id}에 대한 일괄 자동 채점 작업을 백그라운드에서 시작했습니다."
     }), 202
+
+@ta_bp.route('/reports/<string:report_id>/auto-grade-result', methods=['GET'])
+@ta_required()
+def get_auto_grading_result(report_id):
+    """ 3.20. AI 자동 채점 결과 조회 API """
+    if not current_app.course_service:
+        return jsonify({"error": "서비스가 초기화되지 않았습니다."}), 503
+
+    try:
+        ta_user_id = g.user.id
+        result = current_app.course_service.get_auto_grading_result(report_id, ta_user_id)
+        if not result:
+            return jsonify({"error": "자동 채점 결과를 찾을 수 없거나 조회 권한이 없습니다."}), 404
+        return jsonify(result), 200
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        print(f"[TA API /reports/{report_id}/auto-grade-result GET] Error: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "자동 채점 결과 조회 중 서버 오류 발생"}), 500
+
+
+@ta_bp.route('/reports/<string:report_id>/ta-grade', methods=['GET'])
+@ta_required()
+def get_ta_grading_result(report_id):
+    """ 3.21. TA 채점 및 피드백 조회 API """
+    if not current_app.course_service:
+        return jsonify({"error": "서비스가 초기화되지 않았습니다."}), 503
+
+    try:
+        ta_user_id = g.user.id
+        result = current_app.course_service.get_ta_grading_result(report_id, ta_user_id)
+        if not result:
+            return jsonify({"error": "TA 채점 데이터를 찾을 수 없거나 조회 권한이 없습니다."}), 404
+        return jsonify(result), 200
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        print(f"[TA API /reports/{report_id}/ta-grade GET] Error: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "TA 채점 데이터 조회 중 서버 오류 발생"}), 500

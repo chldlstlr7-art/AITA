@@ -10,7 +10,8 @@ import traceback # 1단계 오류 핸들링을 위해 추가
 import math
 from extensions import db
 from models import AnalysisReport
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 # --------------------------------------------------------------------------------------
 # --- 1. 전역 설정 및 모델 로드 (Flask 앱 시작 시 1회 실행) ---
 # --------------------------------------------------------------------------------------
@@ -52,7 +53,11 @@ print("[Service Analysis] Ready. (DB will be accessed via Flask context)")
 # ----------------------------------------------------
 # --- 2. 헬퍼 함수 정의 (내부용) ---
 # ----------------------------------------------------
-
+@retry(
+    stop=stop_after_attempt(3),  # 최대 3번 재시도
+    wait=wait_exponential(multiplier=1, min=2, max=10), # 2초, 4초... 대기
+    reraise=True
+)
 def _llm_call_analysis(raw_text, system_prompt):
     """(1단계 분석용) Gemini 모델로 텍스트를 JSON 구조로 분석합니다."""
     if not llm_client_analysis: return None
@@ -82,6 +87,12 @@ def _llm_call_analysis(raw_text, system_prompt):
             else: print(f"[Service Analysis] Final Error (Analysis): {e}")
     return None
 
+
+@retry(
+    stop=stop_after_attempt(3),  # 최대 3번 재시도
+    wait=wait_exponential(multiplier=1, min=2, max=10), # 2초, 4초... 대기
+    reraise=True
+)
 def _llm_call_comparison(submission_json_str, candidate_json_str, system_prompt_template):
     """(3단계 비교용) Gemini 모델로 두 JSON을 1:1 비교합니다."""
     if not llm_client_comparison: return None
@@ -185,7 +196,7 @@ def find_similar_documents(submission_id, sub_thesis_vec, sub_claim_vec, top_n=3
         return []
 
     if db_vectors_thesis_np is None or db_vectors_claim_np.shape[0] == 0:
-        print("[find_similar_documents] DB 벡터가 준비되지 않았거나 비어있습니다.")
+        print("[find_similar_documents] DB 벡터가 준비되지 않거나 비어있습니다.")
         return []
         
     sim_thesis = cosine_similarity(sub_thesis_np, db_vectors_thesis_np)[0]
@@ -301,17 +312,17 @@ def perform_step2_comparison(report_id, embedding_thesis, embedding_claim, submi
         top_n=3
     )
 
-    # --- 4단계: 후보 문서와 LLM 정밀 비교 ---
+    # --- 4단계: 후보 문서와 LLM 정밀 비교 (병렬 처리) ---
     print(f"[{report_id}] 4. LLM 정밀 비교 (후보 {len(candidate_docs)}개) 시작...")
     comparison_results_list = []
-    
-    for candidate in candidate_docs:
+
+    def compare_with_candidate(candidate):
         try:
             candidate_id = candidate["candidate_id"]
             candidate_summary_str = candidate["candidate_summary_json_str"] # DB의 JSON 문자열
             candidate_filename = candidate["candidate_filename"]
             print(f"  -> Comparing with: {candidate_id}")
-            
+
             # LLM 비교 호출
             comparison_report_text = _llm_call_comparison(
                 submission_json_str, 
@@ -320,19 +331,27 @@ def perform_step2_comparison(report_id, embedding_thesis, embedding_claim, submi
             )
 
             if comparison_report_text:
-                comparison_results_list.append({
+                return {
                     "candidate_id": candidate_id,
-                    "candidate_filename" : candidate_filename,
+                    "candidate_filename": candidate_filename,
                     "weighted_similarity": candidate['weighted_similarity'],
                     "llm_comparison_report": comparison_report_text # (6개 점수가 포함된 텍스트)
-                })
+                }
             else:
-                 print(f"  -> WARNING: LLM (Comparison) failed for {candidate_id}.")
-            
-            sleep(1) # API 속도 조절
+                print(f"  -> WARNING: LLM (Comparison) failed for {candidate_id}.")
+                return None
 
         except Exception as e:
-            print(f"[{report_id}] 4. 후보 {candidate_id} 비교 중 오류: {e}")
+            print(f"[{report_id}] 4. 후보 {candidate['candidate_id']} 비교 중 오류: {e}")
+            return None
+
+    # 병렬 처리 실행
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_to_candidate = {executor.submit(compare_with_candidate, candidate): candidate for candidate in candidate_docs}
+        for future in as_completed(future_to_candidate):
+            result = future.result()
+            if result:
+                comparison_results_list.append(result)
 
     print(f"[{report_id}] Step 2 (Comparison) 완료. 비교 결과 반환.")
     return comparison_results_list # (list of dicts)
