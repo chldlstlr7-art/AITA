@@ -397,6 +397,5 @@ def _filter_high_similarity_reports(comparison_results_list):
         if total_score >= threshold:
             result['plagiarism_score'] = total_score
             result['scores_detail'] = scores_dict
-            result['']
             high_similarity_reports.append(result)
     return high_similarity_reports
