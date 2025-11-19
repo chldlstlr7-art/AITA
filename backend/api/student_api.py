@@ -13,6 +13,7 @@ from services.qa_service import generate_deep_dive_question
 from services.advancement_service import generate_advancement_ideas
 from services.course_management_service import CourseManagementService
 from services.flow_graph_services import _create_flow_graph_figure, check_system_fonts_debug
+from services.deep_analysis_service import perform_deep_analysis
 
 
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -813,3 +814,113 @@ def get_flow_graph(report_id):
 def debug_font():
     # 브라우저에서 JSON으로 폰트 상태를 봅니다.
     return jsonify(check_system_fonts_debug())
+
+
+# [내부 함수] 백그라운드에서 실행될 실제 분석 로직
+# ----------------------------------------------------------------
+def _background_deep_analysis(app, report_id):
+    """
+    별도 스레드에서 실행되는 작업입니다.
+    app_context를 명시적으로 사용해야 DB에 접근할 수 있습니다.
+    """
+    with app.app_context():
+        try:
+            print(f"🔄 [Background] Report #{report_id} 분석 스레드 시작...")
+            
+            # 1. 리포트 재조회 (스레드 내에서 세션 관리)
+            report = AnalysisReport.query.get(report_id)
+            if not report:
+                print(f"❌ [Background] Report #{report_id} not found.")
+                return
+
+            # 2. 데이터 준비
+            try:
+                summary_json = json.loads(report.summary) if isinstance(report.summary, str) else report.summary
+            except:
+                summary_json = report.summary
+
+            # text_snippet이 없으면 content 사용 (모델 정의에 따라 조정)
+            raw_text = getattr(report, 'text_snippet', report.text_snippet)
+
+            # 3. 서비스 호출 (오래 걸리는 작업)
+            deep_result = perform_deep_analysis(summary_json, raw_text)
+
+            # 4. DB 저장
+            report.deep_analysis_data = json.dumps(deep_result, ensure_ascii=False)
+            db.session.commit()
+            
+            print(f"✅ [Background] Report #{report_id} 분석 완료 및 DB 저장 성공.")
+
+        except Exception as e:
+            db.session.rollback()
+            print(f"❌ [Background Error] Report #{report_id}: {e}")
+            traceback.print_exc()
+
+
+# ----------------------------------------------------------------
+# [API] 2단계 심층 분석 수행 (비동기 스레드 실행)
+# URL: /reports/<id>/deep-analysis
+# Method: POST
+# ----------------------------------------------------------------
+@student_bp.route('/reports/<report_id>/deep-analysis', methods=['POST'])
+def run_deep_analysis(report_id):
+    try:
+        # 1. 리포트 존재 여부만 가볍게 확인
+        report = AnalysisReport.query.get_or_404(report_id)
+
+        if not report.summary:
+            return jsonify({"status": "error", "message": "1단계 분석이 필요합니다."}), 400
+
+        # 2. 이미 분석된 결과가 있는지 확인 (선택 사항)
+        # if report.deep_analysis_data:
+        #     return jsonify({"status": "completed", "message": "Already analyzed."}), 200
+
+        # 3. 백그라운드 스레드 실행
+        # current_app._get_current_object()를 넘겨줘야 스레드 안에서 DB를 쓸 수 있음
+        app = current_app._get_current_object()
+        
+        thread = threading.Thread(target=_background_deep_analysis, args=(app, report_id))
+        thread.daemon = True # 메인 프로세스 종료 시 같이 종료
+        thread.start()
+
+        print(f"🚀 [API] Report #{report_id} 백그라운드 분석 요청됨. (202 응답)")
+
+        # 4. 기다리지 않고 즉시 응답 (202 Accepted)
+        return jsonify({
+            "status": "processing",
+            "message": "심층 분석이 백그라운드에서 시작되었습니다. 잠시 후 조회해주세요.",
+            "report_id": report_id
+        }), 202
+
+    except Exception as e:
+        print(f"❌ [API Error] {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# ----------------------------------------------------------------
+# [API] 심층 분석 결과 조회 (Fetch Result Only)
+# URL: /reports/<id>/deep-analysis
+# Method: GET
+# ----------------------------------------------------------------
+@student_bp.route('/reports/<report_id>/deep-analysis', methods=['GET'])
+def get_deep_analysis(report_id):
+    try:
+        report = AnalysisReport.query.get_or_404(report_id)
+
+        if not report.deep_analysis_data:
+            return jsonify({
+                "status": "pending", 
+                "message": "심층 분석 결과가 없습니다. POST 요청으로 분석을 시작하세요.",
+                "data": None
+            }), 404
+
+        # 저장된 JSON 문자열을 파싱해서 반환
+        data = json.loads(report.deep_analysis_data)
+        
+        return jsonify({
+            "status": "success",
+            "data": data
+        }), 200
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500

@@ -485,6 +485,61 @@ export const getAssignmentSubmissions = async (assignmentId) => {
     }
 };
 
+// ==================== 과제 통계 조회 ====================
+export const getAssignmentStats = async (assignmentId) => {
+    try {
+        const res = await apiClient.get(`/assignments/${assignmentId}/stats`);
+        const data = res.data;
+
+        // Normalize possible response shapes.
+        // Expected shape (per docs): flat object with keys like total_students, submission_count, ...
+        // But some backends may return { assignment: {...}, stats: {...} } or similar.
+        let stats = null;
+        if (!data) {
+            stats = null;
+        } else if (data.assignment && data.assignment.stats) {
+            stats = data.assignment.stats;
+        } else if (data.stats) {
+            stats = data.stats;
+        } else if (data.assignment && typeof data.assignment === 'object') {
+            // sometimes assignment contains fields
+            stats = {
+                assignment_id: data.assignment.id || data.assignment.assignment_id || assignmentId,
+                assignment_name: data.assignment.assignment_name || data.assignment.name || null,
+                total_students: data.assignment.total_students ?? data.total_students ?? null,
+                submission_count: data.assignment.submission_count ?? data.submission_count ?? null,
+                submission_rate: data.assignment.submission_rate ?? data.submission_rate ?? null,
+                graded_count: data.assignment.graded_count ?? data.graded_count ?? null,
+                average_score: data.assignment.average_score ?? data.average_score ?? null,
+                max_score: data.assignment.max_score ?? data.max_score ?? null,
+                min_score: data.assignment.min_score ?? data.min_score ?? null,
+                stddev_score: data.assignment.stddev_score ?? data.stddev_score ?? null,
+                q1: data.assignment.q1 ?? data.q1 ?? null,
+                q2: data.assignment.q2 ?? data.q2 ?? null,
+                q3: data.assignment.q3 ?? data.q3 ?? null,
+            };
+        } else if (typeof data === 'object') {
+            stats = data;
+        } else {
+            stats = null;
+        }
+
+        // Debug log when total_students missing to help troubleshooting
+        if (stats && (stats.total_students === null || stats.total_students === undefined)) {
+            console.debug(`[getAssignmentStats] assignment ${assignmentId} returned without total_students`, stats);
+        }
+
+        return stats;
+    } catch (error) {
+        console.error('과제 통계 조회 API 에러:', error.response || error);
+        if (error.response) {
+            if (error.response.status === 404) return null;
+            throw new Error(error.response.data?.error || `HTTP ${error.response.status}`);
+        }
+        throw new Error(error.message || '과제 통계를 불러오지 못했습니다.');
+    }
+};
+
 export const putAssignmentCriteria = async (assignmentId, criteriaPayload) => {
     try {
         const res = await apiClient.put(`/api/ta/assignments/${assignmentId}/criteria`, criteriaPayload);
@@ -510,6 +565,38 @@ export const autoGradeReport = async (reportId) => {
             throw new Error(error.response.data?.error || `HTTP ${error.response.status}`);
         }
         throw new Error(error.message || '자동 채점 요청에 실패했습니다.');
+    }
+};
+
+// GET AI 자동 채점 결과
+export const getAutoGradeResult = async (reportId) => {
+    try {
+        const res = await apiClient.get(`/api/ta/reports/${reportId}/auto-grade-result`);
+        return res.data;
+    } catch (error) {
+        console.error('AI 자동 채점 결과 조회 API 에러:', error.response || error);
+        if (error.response) {
+            // 404 또는 기타 응답은 결과 없음으로 처리하기 위해 null 반환 권장
+            if (error.response.status === 404) return null;
+            throw new Error(error.response.data?.error || `HTTP ${error.response.status}`);
+        }
+        throw new Error(error.message || 'AI 자동 채점 결과를 불러오지 못했습니다.');
+    }
+};
+
+// GET TA가 직접 채점한 결과
+export const getTaGrade = async (reportId) => {
+    try {
+        const res = await apiClient.get(`/api/ta/reports/${reportId}/ta-grade`);
+        return res.data;
+    } catch (error) {
+        console.error('TA 채점 결과 조회 API 에러:', error.response || error);
+        if (error.response) {
+            // 404 -> 결과 없음
+            if (error.response.status === 404) return null;
+            throw new Error(error.response.data?.error || `HTTP ${error.response.status}`);
+        }
+        throw new Error(error.message || 'TA 채점 결과를 불러오지 못했습니다.');
     }
 };
 

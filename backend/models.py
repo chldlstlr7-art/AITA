@@ -94,6 +94,7 @@ class AnalysisReport(db.Model):
     # [추가 3] 보고서 제목
     report_title = db.Column(db.String(255), nullable=True) 
     assignment_id = db.Column(db.Integer, db.ForeignKey('assignments.id'), nullable=True)
+    deep_analysis_data = db.Column(db.Text, nullable=True)
     
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 

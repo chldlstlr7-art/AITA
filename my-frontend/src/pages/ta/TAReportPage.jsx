@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { getReportStatus, getAssignmentCriteria, autoGradeReport, submitTaGrade, getAssignmentDetail, getCourseDetail } from '../../services/api.js';
+import { getReportStatus, getAssignmentCriteria, autoGradeReport, submitTaGrade, getAssignmentDetail, getCourseDetail, getAutoGradeResult, getTaGrade } from '../../services/api.js';
 import { 
   Box, 
   Typography, 
@@ -146,6 +146,8 @@ function TAReportPage() {
   const [taComments, setTaComments] = useState('');
   const [autoGradingRunning, setAutoGradingRunning] = useState(false);
   const [savingGrade, setSavingGrade] = useState(false);
+  const [autoGradeResult, setAutoGradeResult] = useState(null);
+  const [autoGradeLoading, setAutoGradeLoading] = useState(false);
   const totalTaScore = criteriaRows.reduce((acc, r) => {
     const v = Number(taScores[r.key]);
     return acc + (Number.isFinite(v) ? v : 0);
@@ -166,6 +168,66 @@ function TAReportPage() {
   const userAssignmentType = location.state?.userAssignmentType;
 
   useEffect(() => {
+    // 불러오기: 자동 채점 결과가 있으면 가져와서 보여줌
+    const fetchAutoGradeResult = async () => {
+      if (!reportId) return;
+      setAutoGradeLoading(true);
+      try {
+        // 병렬로 자동채점 결과와 TA가 저장한 채점 결과를 가져온다 (있으면 프리필)
+        const [autoResp, taResp] = await Promise.allSettled([
+          getAutoGradeResult(reportId),
+          getTaGrade(reportId),
+        ]);
+
+        if (autoResp.status === 'fulfilled') {
+          setAutoGradeResult(autoResp.value || null);
+        } else {
+          console.warn('자동 채점 조회 실패:', autoResp.reason);
+          setAutoGradeResult(null);
+        }
+
+        if (taResp.status === 'fulfilled') {
+          const taData = taResp.value;
+          if (taData) {
+            // TA 코멘트 프리필
+            if (taData.feedback) setTaComments(taData.feedback);
+
+            // TA 점수 프리필 (criteria id -> score 매핑)
+            if (taData.score_details) {
+              const scoresMap = {};
+              const sd = taData.score_details;
+              if (Array.isArray(sd.scores)) {
+                sd.scores.forEach((s) => {
+                  if (s && s.criteria_id != null) scoresMap[String(s.criteria_id)] = s.score;
+                });
+              } else if (sd.scores && typeof sd.scores === 'object') {
+                // 경우에 따라 객체 맵 형태일 수 있음
+                Object.entries(sd.scores).forEach(([k, v]) => {
+                  scoresMap[String(k)] = v?.score ?? v;
+                });
+              }
+
+              // only set if local taScores is empty to avoid overwriting user edits
+              if (Object.keys(taScores).length === 0) setTaScores(scoresMap);
+            }
+          }
+        } else {
+          console.warn('TA 채점 결과 조회 실패:', taResp.reason);
+        }
+      } catch (e) {
+        console.warn('자동 채점 결과 조회 실패:', e);
+        setAutoGradeResult(null);
+      } finally {
+        setAutoGradeLoading(false);
+      }
+    };
+
+    // fetch when reportId changes, status changes (completed), or after autoGradingRunning stops
+    fetchAutoGradeResult();
+  }, [reportId, status, autoGradingRunning]);
+
+
+    useEffect(() => {
     let timerId = null;
 
     const pollReport = async () => {
@@ -547,6 +609,13 @@ function TAReportPage() {
                   variant="contained"
                   color="primary"
                   disabled={autoGradingRunning || Boolean(reportData?.auto_score_details)}
+                  sx={{
+                    '&.Mui-disabled': {
+                      backgroundColor: 'grey.400',
+                      color: 'white',
+                      opacity: 1,
+                    }
+                  }}
                   onClick={async () => {
                     if (!reportId) return;
                     try {
@@ -571,37 +640,54 @@ function TAReportPage() {
               <Table>
                 <TableHead>
                   <TableRow>
-                    <TableCell>채점 항목</TableCell>
-                    <TableCell>채점 기준 (name)</TableCell>
-                    <TableCell>배점 (max_score)</TableCell>
-                    <TableCell>AI 자동 채점</TableCell>
+                    <TableCell sx={{ textAlign: 'center' }}>채점 항목</TableCell>
+                    <TableCell sx={{ textAlign: 'center' }}>채점 기준</TableCell>
+                    <TableCell sx={{ textAlign: 'center', width: '7%' }}>배점</TableCell>
+                    <TableCell sx={{ width: '45%' }}>AI 코멘트</TableCell>
+                    <TableCell sx={{ width: '7%', textAlign: 'center' }}>AI 자동채점</TableCell>
                     <TableCell>TA 최종 채점</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {criteriaLoading ? (
-                    <TableRow><TableCell colSpan={5}><Typography>불러오는 중...</Typography></TableCell></TableRow>
+                    <TableRow><TableCell colSpan={6}><Typography>불러오는 중...</Typography></TableCell></TableRow>
                   ) : criteriaRows && criteriaRows.length > 0 ? (
                     criteriaRows.map((row) => {
-                      // AI 결과 찾기
-                      let aiValue = '';
+                      // AI 결과 분해: score 와 feedback 분리
+                      let aiScore = '';
+                      let aiComment = '';
                       const autoDetails = reportData?.auto_score_details;
                       if (autoDetails) {
                         if (Array.isArray(autoDetails.scores)) {
                           const found = autoDetails.scores.find((s) => String(s.criteria_id) === String(row.key));
-                          if (found) aiValue = `${found.score ?? ''}` + (found.feedback ? ` — ${found.feedback}` : '');
+                          if (found) {
+                            aiScore = found.score ?? '';
+                            aiComment = found.feedback ?? '';
+                          }
                         } else if (autoDetails[row.key]) {
                           const v = autoDetails[row.key];
-                          aiValue = `${v.score ?? v.value ?? ''}` + (v.feedback ? ` — ${v.feedback}` : '');
+                          aiScore = v.score ?? v.value ?? '';
+                          aiComment = v.feedback ?? '';
                         }
                       }
 
                       return (
                         <TableRow key={row.key}>
-                          <TableCell>{row.key}</TableCell>
-                          <TableCell>{row.name}</TableCell>
-                          <TableCell>{row.max_score}</TableCell>
-                          <TableCell sx={{ whiteSpace: 'pre-wrap' }}>{aiValue || '-'}</TableCell>
+                          <TableCell sx={{ textAlign: 'center' }}>{row.key}</TableCell>
+                          <TableCell sx={{ textAlign: 'center' }}>{row.name}</TableCell>
+                          <TableCell sx={{ textAlign: 'center', width: '7%' }}>{row.max_score}</TableCell>
+                          <TableCell sx={{ width: '45%', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                            {aiComment ? (
+                              <Typography component="div" variant="body2">{aiComment}</Typography>
+                            ) : (
+                              '-'
+                            )}
+                          </TableCell>
+                          <TableCell sx={{ width: '7%', textAlign: 'center', verticalAlign: 'middle' }}>
+                            {aiScore !== '' ? (
+                              <Typography component="div" sx={{ fontWeight: 800 }}>{String(aiScore)}</Typography>
+                            ) : '-'}
+                          </TableCell>
                           <TableCell>
                             <TextField
                               size="small"
@@ -619,17 +705,17 @@ function TAReportPage() {
                     })
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={5}>
+                      <TableCell colSpan={6}>
                         <Typography color="text.secondary">채점 기준이 없습니다.</Typography>
                       </TableCell>
                     </TableRow>
                   )}
                   {/* TA 점수 합계 행 */}
                   <TableRow>
-                    <TableCell colSpan={3} sx={{ textAlign: 'right', pr: 2 }}>
+                    <TableCell colSpan={4} sx={{ textAlign: 'right', pr: 2 }}>
                       <Typography fontWeight={700}>TA 채점 합계</Typography>
                     </TableCell>
-                    <TableCell>-</TableCell>
+                    <TableCell sx={{ textAlign: 'center' }}>-</TableCell>
                     <TableCell>
                       <Typography fontWeight={900}>{totalTaScore}</Typography>
                     </TableCell>
@@ -637,6 +723,16 @@ function TAReportPage() {
                 </TableBody>
               </Table>
             </TableContainer>
+            {/* AI 종합 코멘트 (자동채점 API의 overall_feedback) */}
+            {(autoGradeResult?.overall_feedback || reportData?.auto_score_details?.overall_feedback) && (
+              <Paper sx={{ p: 2, mb: 2 }} elevation={1}>
+                <Typography variant="h6" sx={{ mb: 1 }}>AI 종합 코멘트</Typography>
+                <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
+                  {autoGradeResult?.overall_feedback ?? reportData?.auto_score_details?.overall_feedback}
+                </Typography>
+              </Paper>
+            )}
+
             {/* TA 코멘트 입력 칸 */}
             <Paper sx={{ p: 2, mb: 2 }} elevation={1}>
               <Typography variant="h6" sx={{ mb: 1 }}>TA 코멘트</Typography>

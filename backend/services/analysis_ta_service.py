@@ -248,7 +248,7 @@ class AnalysisTAService:
         return None
 
 # --- [핵심 수정] TA용 통합 기능: 일괄 분석 실행 (Batch Processing) ---
-    def run_batch_analysis_for_ta(self, report_ids: list[str]):
+    def run_batch_analysis_for_ta(self, report_ids: list[str], ta_user_id: str | None = None):
         """
         [TA 핵심 기능]
         TA가 선택한 리포트 ID 목록을 받아, 전체 분석 파이프라인(1~4단계)을 실행하고
@@ -257,6 +257,7 @@ class AnalysisTAService:
         """
         print(f"--- TA BATCH ANALYSIS START (Total {len(report_ids)} reports) ---")
         
+        print(f"[TA Service] run_batch_analysis_for_ta called by TA: {ta_user_id}")
         for report_id in report_ids:
             report = None # report 변수 스코프 초기화
             try:
@@ -369,12 +370,13 @@ class AnalysisTAService:
     
 # --- [핵심 수정] TA용 조회 기능 ---
     
-    def get_all_report_overviews(self):
+    def get_all_report_overviews(self, ta_user_id: str | None = None):
         """
         [TA 기능] TA 대시보드를 위한 모든 리포트의 간략한 개요 목록을 반환합니다.
         (TA API가 호출할 함수)
         """
         try:
+            print(f"[TA Service] get_all_report_overviews called by TA: {ta_user_id}")
             # 8. 쿼리 수정 (User 조인, created_at 사용)
             results = db.session.query(AnalysisReport, User)\
                 .join(User, AnalysisReport.user_id == User.id)\
@@ -408,12 +410,13 @@ class AnalysisTAService:
 
         return overviews
 
-    def get_detailed_report_analysis(self, report_id: str):
+    def get_detailed_report_analysis(self, report_id: str, ta_user_id: str | None = None):
         """
         [TA 기능] 특정 리포트 ID의 상세 분석 결과(저장된 JSON)를 반환합니다.
         (TA API가 호출할 함수)
         (ID 타입을 int 대신 str으로 가정합니다)
         """
+        print(f"[TA Service] get_detailed_report_analysis called by TA: {ta_user_id} for report {report_id}")
         report = db.session.get(AnalysisReport, report_id) # 11. .get() 사용
         if not report:
             return None

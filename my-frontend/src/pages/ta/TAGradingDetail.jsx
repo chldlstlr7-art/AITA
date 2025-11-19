@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Box, Typography, Button, Paper, List, ListItemButton, ListItemText, CircularProgress, ListItem, Divider, Collapse, IconButton, Stack, Chip, Dialog, DialogTitle, DialogContent, DialogActions, TextField } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { getTaCourses, getAssignmentsByCourse, getAssignmentSubmissions, getAssignmentCriteria, getAssignmentDetail, putAssignmentCriteria } from '../../services/api.js';
+import { getTaCourses, getAssignmentsByCourse, getAssignmentSubmissions, getAssignmentCriteria, getAssignmentDetail, putAssignmentCriteria, getTaGrade } from '../../services/api.js';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 
@@ -45,6 +45,23 @@ function TAGradingDetail() {
 	const [loadingAssignments, setLoadingAssignments] = useState(true);
 	const [expandedMap, setExpandedMap] = useState({});
 
+	// Helper: determine if TA-grade payload contains meaningful grading
+	const isTaGradeMeaningful = (val) => {
+		if (!val) return false;
+		const feedback = (typeof val.feedback === 'string' ? val.feedback : '') || (val.score_details && typeof val.score_details.feedback === 'string' ? val.score_details.feedback : '');
+		if (feedback && String(feedback).trim().length > 0) return true;
+		const scores = val.score_details && Array.isArray(val.score_details.scores) ? val.score_details.scores : [];
+		if (scores.length === 0) return false;
+		for (let i = 0; i < scores.length; i++) {
+			const sVal = scores[i];
+			const sc = sVal && (sVal.score ?? sVal.value ?? sVal.points);
+			if (sc != null && Number(sc) !== 0) return true;
+		}
+		return false;
+	};
+
+	// NOTE: we preload submissions immediately after fetching assignments (see fetchAssignments useEffect)
+
 	useEffect(() => {
 		let mounted = true;
 		const fetch = async () => {
@@ -55,6 +72,33 @@ function TAGradingDetail() {
 				const list = data?.assignments || data || [];
 				if (!mounted) return;
 				setAssignments(list);
+
+				// Preload submissions + ta_grade flags for assignments that don't have submissions loaded
+				try {
+					const toLoad = (list || []).filter((a) => !Array.isArray(a.submissions) || a.submissions.length === 0).map((a) => a.id);
+					if (toLoad.length > 0) {
+						const results = await Promise.all(toLoad.map(async (aid) => {
+							try {
+								const resSub = await getAssignmentSubmissions(aid);
+								const subs = resSub?.submissions || resSub || [];
+								const checks = await Promise.allSettled((subs || []).map((s) => getTaGrade(s.id || s.report_id)));
+								const subsWithTa = (subs || []).map((s, idx) => ({ ...s, ta_grade_exists: isTaGradeMeaningful(checks[idx] && checks[idx].status === 'fulfilled' ? checks[idx].value : null) }));
+								return { assignmentId: aid, submissions: subsWithTa };
+							} catch (e) {
+								console.warn('Failed to preload submissions for assignment', aid, e);
+								return null;
+							}
+						}));
+
+						if (!mounted) return;
+						setAssignments((prev) => prev.map((a) => {
+							const found = results.find((r) => r && String(r.assignmentId) === String(a.id));
+							return found ? { ...a, submissions: found.submissions } : a;
+						}));
+					}
+				} catch (e) {
+					console.error('Preload submissions failed', e);
+				}
 			} catch (e) {
 				console.error('과제 목록 로드 실패:', e);
 				setAssignments([]);
@@ -75,7 +119,21 @@ function TAGradingDetail() {
 			try {
 				const res = await getAssignmentSubmissions(id);
 				const subs = res?.submissions || res || [];
-				setAssignments((prev) => prev.map((a) => (String(a.id) === String(id) ? { ...a, submissions: subs } : a)));
+				// Check for existing TA grade records for each submission and attach flag
+				let subsWithTa = subs;
+				try {
+					const checks = await Promise.allSettled((subs || []).map((s) => getTaGrade(s.id || s.report_id)));
+					subsWithTa = (subs || []).map((s, idx) => {
+						const result = checks[idx];
+						const payload = result && result.status === 'fulfilled' ? result.value : null;
+						const hasTa = isTaGradeMeaningful(payload);
+						return { ...s, ta_grade_exists: Boolean(hasTa) };
+					});
+				} catch (e) {
+					// ignore per-submission ta-grade fetch errors, fall back to original subs
+					console.warn('TA grade check failed for submissions', e);
+				}
+				setAssignments((prev) => prev.map((a) => (String(a.id) === String(id) ? { ...a, submissions: subsWithTa } : a)));
 			} catch (e) {
 				console.error('제출물 로드 실패:', e);
 			}
@@ -253,10 +311,8 @@ function TAGradingDetail() {
 										<Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
 											{assignments.map((a) => {
 												const submitted = a.report_count ?? a.submission_count ?? (Array.isArray(a.submissions) ? a.submissions.length : 0);
-												let graded = a.graded_count ?? a.graded_reports ?? a.graded_submissions ?? 0;
-												if (!graded && Array.isArray(a.submissions)) {
-													graded = a.submissions.filter((s) => s && (s.graded === true || s.score != null || String(s.status || '').toLowerCase() === 'graded')).length;
-												}
+												// Count TA-saved grading records (ta_grade_exists flag) among submissions
+												const taGradedCount = Array.isArray(a.submissions) ? a.submissions.filter((s) => s && s.ta_grade_exists).length : 0;
 												const isExpanded = Boolean(expandedMap[a.id]);
 												return (
 													<Paper key={a.id} sx={{ p: 2 }} elevation={1}>
@@ -291,8 +347,9 @@ function TAGradingDetail() {
 																	})()}
 
 																	{(() => {
-																		const gradedOk = typeof submitted === 'number' && submitted > 0 ? graded >= submitted : null;
-																		const gradedLabel = submitted ? `채점 ${graded}/${submitted}` : `채점완료 ${graded}`;
+																		// Show TA-graded count (n) over submitted (m)
+																		const gradedOk = typeof submitted === 'number' && submitted > 0 ? taGradedCount >= submitted : null;
+																		const gradedLabel = submitted ? `채점 ${taGradedCount}/${submitted}` : `채점완료 ${taGradedCount}`;
 																		return (
 																			<Chip
 																				label={gradedLabel}
@@ -305,7 +362,7 @@ function TAGradingDetail() {
 																					px: 1,
 																					py: 0.4,
 																					...(gradedOk === null
-																						? (graded > 0 ? { backgroundColor: 'rgba(16,185,129,0.08)', color: theme.palette.success.dark } : {})
+																						? (taGradedCount > 0 ? { backgroundColor: 'rgba(16,185,129,0.08)', color: theme.palette.success.dark } : {})
 																						: gradedOk
 																							? { backgroundColor: 'rgba(16,185,129,0.12)', color: theme.palette.success.dark }
 																							: { backgroundColor: 'rgba(239,68,68,0.08)', color: theme.palette.error.dark }),
@@ -335,24 +392,43 @@ function TAGradingDetail() {
 																						{(() => {
 																							const isGraded = Boolean(s && (s.graded === true || s.score != null || String(s.status || s.state || '').toLowerCase() === 'graded' || String(s.graded) === 'true'));
 																							const isCompleted = String(s.status || s.state || '').toLowerCase() === 'completed';
+																							const hasTaGrade = Boolean(s && s.ta_grade_exists);
 																							return (
-																							<>
-																								{isCompleted ? (
-																									<>
-																										<Button size="small" variant="contained" onClick={() => navigate(`/ta/course/${courseId}/assignment/${a.id}/report/${s.id || s.report_id}/analysis`, { state: { course: courseFromState, assignment: a, student: s, openTabIndex: 0 } })}>AI분석</Button>
-																										{isGraded ? (
-																										<Button size="small" variant="contained" color="success" sx={{ ml: 1 }} disabled>채점완료</Button>
-																										) : (
-																										<Button size="small" variant="outlined" sx={{ ml: 1 }} onClick={() => navigate(`/ta/course/${courseId}/assignment/${a.id}/report/${s.id || s.report_id}/analysis`, { state: { course: courseFromState, assignment: a, student: s, openTabIndex: 2 } })}>채점하기</Button>
-																										)}
-																									</>
+																								<>
+																									{isCompleted ? (
+																										<>
+																											<Button size="small" variant="contained" onClick={() => navigate(`/ta/course/${courseId}/assignment/${a.id}/report/${s.id || s.report_id}/analysis`, { state: { course: courseFromState, assignment: a, student: s, openTabIndex: 0 } })}>AI분석</Button>
+																											{isGraded ? (
+																												<Button size="small" variant="contained" color="success" sx={{ ml: 1 }} disabled>채점완료</Button>
+																											) : hasTaGrade ? (
+																												<Button
+																													size="small"
+																													variant="contained"
+																													sx={(theme) => ({ ml: 1, backgroundColor: 'rgba(16,185,129,0.2)', color: '#fff', '&:hover': { backgroundColor: 'rgba(16,185,129,0.28)' } })}
+																													onClick={() => navigate(`/ta/course/${courseId}/assignment/${a.id}/report/${s.id || s.report_id}/analysis`, { state: { course: courseFromState, assignment: a, student: s, openTabIndex: 2 } })}
+																												>
+																													채점수정
+																												</Button>
+																											) : (
+																											<Button size="small" variant="outlined" sx={{ ml: 1 }} onClick={() => navigate(`/ta/course/${courseId}/assignment/${a.id}/report/${s.id || s.report_id}/analysis`, { state: { course: courseFromState, assignment: a, student: s, openTabIndex: 2 } })}>채점하기</Button>
+																											)}
+																										</>
 																								) : (
 																									<>
 																										<Button size="small" variant="outlined" onClick={() => navigate(`/ta/course/${courseId}/assignment/${a.id}/report/${s.id || s.report_id}/aita`, { state: { course: courseFromState, assignment: a, student: s } })}>AITA분석</Button>
 																										{isGraded ? (
-																										<Button size="small" variant="contained" color="success" sx={{ ml: 1 }} disabled>채점완료</Button>
+																											<Button size="small" variant="contained" color="success" sx={{ ml: 1 }} disabled>채점완료</Button>
+																										) : hasTaGrade ? (
+																											<Button
+																												size="small"
+																												variant="contained"
+																												sx={(theme) => ({ ml: 1, backgroundColor: 'rgba(16,185,129,0.2)', color: '#fff', '&:hover': { backgroundColor: 'rgba(16,185,129,0.28)' } })}
+																												onClick={() => navigate(`/ta/course/${courseId}/assignment/${a.id}/report/${s.id || s.report_id}/analysis`, { state: { course: courseFromState, assignment: a, student: s, openTabIndex: 2 } })}
+																											>
+																												채점수정
+																											</Button>
 																										) : (
-																										<Button size="small" variant="contained" sx={{ ml: 1 }} onClick={() => navigate(`/ta/course/${courseId}/assignment/${a.id}/report/${s.id || s.report_id}/analysis`, { state: { course: courseFromState, assignment: a, student: s, openTabIndex: 2 } })}>채점하기</Button>
+																											<Button size="small" variant="contained" sx={{ ml: 1 }} onClick={() => navigate(`/ta/course/${courseId}/assignment/${a.id}/report/${s.id || s.report_id}/analysis`, { state: { course: courseFromState, assignment: a, student: s, openTabIndex: 2 } })}>채점하기</Button>
 																										)}
 																									</>
 																								)}
