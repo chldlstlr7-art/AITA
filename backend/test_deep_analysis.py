@@ -75,39 +75,53 @@ TEST_SUMMARY_JSON ={
 # ----------------------------------------------------------------
 
 def run_test():
-    print("🧪 [Test Start] Deep Analysis Service 자체 테스트를 시작합니다...\n")
+    print("🧪 [Test Start] Deep Analysis (Zone Logic & Naver API) 테스트\n")
 
     try:
-        # 서비스 함수 호출
+        # 서비스 호출
         result = perform_deep_analysis(TEST_SUMMARY_JSON, TEST_TEXT)
         
-        print("\n" + "="*60)
-        print("✅ [테스트 결과 요약]")
-        print("="*60)
+        print("\n" + "="*70)
+        print("✅ [최종 분석 결과 리포트]")
+        print("="*70)
 
-        # [결과 1] 논리 뉴런 맵 (고립된 노드 및 제안 확인)
+        # 1. 논리 뉴런 맵
         print("\n1. 🧠 논리 뉴런 맵 (Logic Neuron Map)")
         neuron_map = result.get('neuron_map', {})
-        nodes = neuron_map.get('nodes', [])
-        edges = neuron_map.get('edges', [])
-        suggestions = neuron_map.get('suggestions', [])
         
-        print(f"   - 감지된 노드 수: {len(nodes)}")
-        print(f"   - 연결된 엣지 수: {len(edges)}")
-        print(f"   - 🔗 연결 상태:")
-        for edge in edges:
-            print(f"     * {edge['source']} <--> {edge['target']} (강도: {edge['weight']})")
+        print(f"   [노드 & 엣지]")
+        for edge in neuron_map.get('edges', []):
+            # 엣지 타입에 따라 이모지 다르게 표시
+            icon = "🔗"
+            if edge.get('type') == 'strong': icon = "💪"
+            elif edge.get('type') == 'questionable': icon = "❓(Zone C)"
             
-        print(f"\n   - 💡 [Bridge 제안] (외딴 섬 키워드 연결):")
+            print(f"     {icon} {edge['source']} <--> {edge['target']} (강도: {edge['weight']}, 타입: {edge.get('type')})")
+
+        print(f"\n   [🎨 Zone C 창의성 검증 결과]")
+        creatives = neuron_map.get('creative_feedbacks', [])
+        if creatives:
+            for cf in creatives:
+                judgment = cf.get('judgment', 'Unsure')
+                icon = "💡" if judgment == "Creative" else "🤔"
+                print(f"     {icon} 판정: {judgment} ({cf['concepts'][0]} - {cf['concepts'][1]})")
+                print(f"       └ 이유: {cf.get('reason')}")
+                print(f"       └ 피드백: {cf.get('feedback')}")
+        else:
+            print("     - 감지된 Zone C 연결 없음")
+
+        print(f"\n   [🌉 Zone B 기반 Bridge 제안]")
+        suggestions = neuron_map.get('suggestions', [])
         if suggestions:
             for s in suggestions:
-                print(f"     * 고립된 개념: '{s['target_node']}'")
-                print(f"     * 연결 대상: '{s['partner_node']}'")
-                print(f"     * AI 제안: {json.dumps(s['suggestion'], ensure_ascii=False)}")
+                print(f"     Subject: '{s['target_node']}' <--> '{s['partner_node']}'")
+                # JSON 구조에 따라 socratic_guide 위치 확인
+                guide = s['suggestion'].get('socratic_guide', '내용 없음')
+                print(f"       └ 멘토링: {guide}")
         else:
-            print("     * 제안 사항 없음 (모두 잘 연결됨)")
+            print("     - 제안할 Bridge 없음")
 
-        # [결과 2] 논리 정합성 (모호함/모순 확인)
+        # 2. 논리 정합성
         print("\n2. 🛡️ 논리 정합성 스캐너 (Integrity Scanner)")
         issues = result.get('integrity_issues', [])
         if issues:
@@ -118,25 +132,18 @@ def run_test():
         else:
             print("   - 감지된 문제 없음")
 
-        # [결과 3] 흐름 단절 (Flow Disconnects 확인)
-        print("\n3. 🌊 흐름 단절 확인 (Flow Disconnects - LLM Judge)")
+        # 3. 흐름 단절
+        print("\n3. 🌊 흐름 단절 확인 (Flow Disconnects)")
         disconnects = result.get('flow_disconnects', [])
-        
         if disconnects:
             for d in disconnects:
-                # 키 이름 변경 반영 (parent -> parent_id, child -> child_id)
-                p_id = d.get('parent_id', 'Unknown')
-                c_id = d.get('child_id', 'Unknown')
-                issue_type = d.get('issue_type', 'Weak')
-                score = d.get('score', 0.0)
-                reason = d.get('reason', '이유 없음')
-                suggestion = d.get('suggestion', '')
-
-                print(f"   - ⚠️ [{issue_type}] {p_id} -> {c_id} (점수: {score})")
-                print(f"     * 진단: {reason}")
-                print(f"     * 멘토링: {suggestion}")
+                print(f"   ⚠️ [{d.get('issue_type')}] {d.get('parent_id')} -> {d.get('child_id')} (점수: {d.get('score')})")
+                print(f"      - 진단: {d.get('reason')}")
+                print(f"      - 제안: {d.get('suggestion')}")
         else:
-            print("   - 흐름 단절 없음 (모든 논리가 탄탄함)")
+            print("   - 모든 논리 흐름이 튼튼함")
+
+        print("\n" + "="*70)
 
     except Exception as e:
         print(f"\n❌ 테스트 중 에러 발생: {e}")

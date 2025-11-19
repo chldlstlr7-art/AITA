@@ -13,7 +13,7 @@ from services.qa_service import generate_deep_dive_question
 from services.advancement_service import generate_advancement_ideas
 from services.course_management_service import CourseManagementService
 from services.flow_graph_services import _create_flow_graph_figure, check_system_fonts_debug
-
+from services.deep_analysis_service import perform_deep_analysis
 
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
@@ -813,3 +813,80 @@ def get_flow_graph(report_id):
 def debug_font():
     # 브라우저에서 JSON으로 폰트 상태를 봅니다.
     return jsonify(check_system_fonts_debug())
+
+
+@student_bp.route('/reports/<int:report_id>/deep-analysis', methods=['POST'])
+def run_deep_analysis(report_id):
+    try:
+        # 1. 리포트 조회
+        report = AnalysisReport.query.get_or_404(report_id)
+
+        # 2. 예외 처리: 1차 분석(Summary)이 없으면 심층 분석 불가
+        if not report.summary:
+            return jsonify({
+                "status": "error",
+                "message": "1단계 기본 분석(Summary)이 먼저 완료되어야 합니다."
+            }), 400
+
+        # 3. 데이터 준비
+        # DB에는 JSON이 문자열(String)로 저장되어 있으므로 파싱 필요
+        # (만약 summary가 이미 dict라면 json.loads 뺄 것)
+        try:
+            summary_json = json.loads(report.summary) if isinstance(report.summary, str) else report.summary
+        except:
+            summary_json = report.summary # 이미 dict인 경우 대비
+
+        raw_text = report.content
+
+        print(f"🚀 [Student API] Report #{report_id} 심층 분석 요청. 분석 시작...")
+
+        # 4. 심층 분석 서비스 호출 (여기가 핵심!)
+        deep_result = perform_deep_analysis(summary_json, raw_text)
+
+        # 5. 결과 DB 저장 (JSON -> String 변환)
+        report.deep_analysis_data = json.dumps(deep_result, ensure_ascii=False)
+        db.session.commit()
+
+        print(f"✅ [Student API] Report #{report_id} 분석 완료 및 DB 저장됨.")
+
+        # 6. 결과 반환
+        return jsonify({
+            "status": "success",
+            "message": "Deep analysis completed successfully.",
+            "data": deep_result
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"❌ [Student API Error] {str(e)}")
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# ----------------------------------------------------------------
+# [API] 심층 분석 결과 조회 (Fetch Result Only)
+# URL: /reports/<id>/deep-analysis
+# Method: GET
+# ----------------------------------------------------------------
+@student_bp.route('/reports/<int:report_id>/deep-analysis', methods=['GET'])
+def get_deep_analysis(report_id):
+    try:
+        report = AnalysisReport.query.get_or_404(report_id)
+
+        if not report.deep_analysis_data:
+            return jsonify({
+                "status": "pending", 
+                "message": "심층 분석 결과가 없습니다. POST 요청으로 분석을 시작하세요.",
+                "data": None
+            }), 404
+
+        # 저장된 JSON 문자열을 파싱해서 반환
+        data = json.loads(report.deep_analysis_data)
+        
+        return jsonify({
+            "status": "success",
+            "data": data
+        }), 200
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500

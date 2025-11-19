@@ -21,6 +21,9 @@ from services.qa_service import generate_initial_questions, generate_deep_dive_q
 from services.analysis_ta_service import AnalysisTAService 
 from services.grading_service import GradingService
 from services.course_management_service import CourseManagementService
+from services.deep_analysis_service import perform_deep_analysis
+
+
 from config import Config, JSON_SYSTEM_PROMPT, COMPARISON_SYSTEM_PROMPT
 from flask_sqlalchemy import SQLAlchemy
 
@@ -289,7 +292,6 @@ def background_analysis_step3_qa(report_id, summary_dict, similarity_details_lis
                 print(f"[{report_id}] CRITICAL: Failed to write error state (Step 3) to DB: {e_inner}")
 # app.py (예시)
 
-from deep_analysis_service import perform_deep_analysis
 
 
 def analyze_report_workflow(report_id, text):
