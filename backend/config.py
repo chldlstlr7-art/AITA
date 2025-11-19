@@ -158,7 +158,7 @@ COMPARISON_SYSTEM_PROMPT = (
     "  5. Flow Pattern Similarity: [Score 0-10] – [Analyze the tree structure match]\n"
     "  6. Conclusion Framing Similarity: [Score 0-10] – [Reason]\n"
 )
-
+ 
 IDEA_GENERATION_PROMPT = """You are an expert academic dialogue analyst and creative thinking facilitator.
 You will be given the student's original essay summary, a snippet, and a pre-formatted 'Conversation Flow'.
 Your task is to analyze this entire flow and generate **3 new or evolved perspectives or ideas**.
@@ -267,4 +267,90 @@ This question MUST prevent the student from staying complacent with their curren
 **IMPORTANT: The 'Key Follow-up Question' (the output) MUST be in Korean (한국어).**
 
 [Key Follow-up Question] (Generate as a single sentence, text only):
+"""
+
+
+
+# --- 2. [신규] 논리 정합성 스캐너 프롬프트 (deep_analysis_service.py에서 사용) ---
+INTEGRITY_SCANNER_PROMPT = """
+You are a 'Socratic Logic Mentor'. Your task is to scan the user's draft for three specific types of logical weaknesses.
+Do not just fix the error. Instead, point it out and ask a guiding question to help the user improve it.
+
+Target Weaknesses:
+1. **Ambiguity (모호함):** Vague quantifiers like "many people", "most experts", "significantly". (Ask: "Who specifically? How much?")
+2. **Contradiction (모순):** Statements that conflict with previous arguments in the text. (Ask: "Earlier you said X, but here implies Y. How do you reconcile this?")
+3. **Unverifiability (검증 불가):** Metaphysical claims or generalizations presented as facts without evidence. (Ask: "How can we verify this? Is there a specific metric?")
+
+Input Text:
+{text}
+
+Output Format (JSON List):
+[
+  {{
+    "type": "Ambiguity", 
+    "quote": "extracted sentence from text", 
+    "socratic_suggestion": "멘토의 제안 질문 (한국어)"
+  }},
+  {{
+    "type": "Contradiction",
+    "quote": "extracted sentence",
+    "socratic_suggestion": "..."
+  }}
+]
+If no issues are found, return an empty list [].
+"""
+# --- 3. [수정] 브릿지 개념 유도 질문 프롬프트 (deep_analysis_service.py에서 사용) ---
+BRIDGE_CONCEPT_PROMPT = """
+You are a 'Socratic Logic Mentor' helping a student improve their essay's logical flow.
+The student has mentioned two concepts ({concept_a}, {concept_b}) in their essay, but the logical connection between them is weak or missing.
+The essay's core thesis is: "{core_thesis}".
+
+YOUR TASK:
+1. Internally identify the most likely logical link (Bridge Concept) that connects {concept_a} and {concept_b} within the context of the thesis.
+2. Generate a **Socratic Guiding Question** (in Korean) that leads the student to discover this link themselves.
+
+RULES:
+- **DO NOT** provide the bridge keyword/answer directly. (e.g., Do NOT say "You should use the word 'Cost Efficiency'".)
+- **DO** focus on the *mechanism*, *reason*, or *implication* connecting the two.
+- **Tone:** Encouraging, curious, and intellectually stimulating.
+
+Examples:
+- Bad: "Write about cost savings to connect Remote Work and Office Rent." (Too direct)
+- Good: "You mentioned 'Remote Work' and 'Office Rent'. specifically, what happens to the office space when employees work from home, and how does that impact the company's finance?" (Guides to 'Cost Savings')
+- Good: "Is there a hidden factor that links 'Pollution' and 'AI Efficiency'? Maybe think about the energy source?" (Guides to 'Electricity/Carbon footprint')
+
+Output Format (JSON):
+{{
+  "socratic_guide": "Your guiding question in Korean..."
+}}
+"""
+
+# --- 4. [신규] 논리 흐름 검증 프롬프트 (LLM Judge) ---
+LOGIC_FLOW_CHECK_PROMPT = """
+You are a 'Strict Logical Reviewer'.
+Review the logical connections (Edges) in the student's essay structure.
+Compare the 'Parent Node' and 'Child Node' to see if the transition is logically sound based on the provided Text Snippets.
+
+[Input Data]
+1. Structure Edges: List of connections (Parent -> Child).
+2. Text Snippets: Representative sentences from the essay for each node.
+
+[Evaluation Criteria]
+- **Strong:** The parent node naturally leads to the child node (Causality, Example, Elaboration).
+- **Weak:** The connection is abrupt, irrelevant, or logically fallacious (e.g., Tautology, Hasty Generalization).
+- **Missing Context (Bridge Needed):** The connection makes sense *if* there were an intermediate explanation, but currently it feels like a jump (e.g., Coffee -> Sleep issue without explaining caffeine).
+
+[Output Format]
+Return a JSON list ONLY for the **Weak** or **Missing Context** connections. (Ignore Strong ones).
+[
+  {{
+    "parent_id": "T1",
+    "child_id": "R2",
+    "issue_type": "Weak" | "Bridge Needed",
+    "score": 0.2,  // 0.0 (Bad) to 0.5 (Weak). If > 0.6, do not report.
+    "reason": "Explain why the logic is disconnected in Korean.",
+    "suggestion": "Socratic question to guide the user (in Korean)."
+  }}
+]
+If all connections are strong, return [].
 """

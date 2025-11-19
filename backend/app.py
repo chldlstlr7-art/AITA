@@ -287,6 +287,28 @@ def background_analysis_step3_qa(report_id, summary_dict, similarity_details_lis
                     db.session.commit()
             except Exception as e_inner:
                 print(f"[{report_id}] CRITICAL: Failed to write error state (Step 3) to DB: {e_inner}")
+# app.py (예시)
+
+from deep_analysis_service import perform_deep_analysis
+
+
+def analyze_report_workflow(report_id, text):
+    # 1단계: 기본 구조 분석 (기존 코드)
+    step1_result = perform_step1_analysis_and_embedding(report_id, text, JSON_SYSTEM_PROMPT)
+    summary_json = step1_result['summary_json']
+    
+    # ... (DB 저장 등) ...
+
+    # 2단계: 심층 분석 (New!)
+    # 학생이 '심층 진단' 버튼을 눌렀을 때 호출하거나, 분석 완료 후 자동 호출
+    deep_result = perform_deep_analysis(summary_json, text)
+    
+    # 결과 구조:
+    # deep_result['neuron_map'] -> 그래프 시각화용 데이터 + 추천 제안
+    # deep_result['integrity_issues'] -> 에디터 하이라이트용 (노란불/빨간불)
+    # deep_result['flow_disconnects'] -> 트리 구조 내 점선 표시용
+    
+    return deep_result
 
 def background_refill(report_id):
     # ... (이하 모든 background_... 함수 내용은 제공해주신 원본과 동일) ...
