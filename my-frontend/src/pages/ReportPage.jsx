@@ -1,7 +1,5 @@
-// [파일 경로] src/pages/ReportPage.jsx
-
 import React, { useState, useEffect } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom'; // useNavigate 추가
 import { getReportStatus } from '../services/api.js';
 import { 
   Box, 
@@ -18,7 +16,10 @@ import {
   Tabs,
   Tab,
   Chip,
-  LinearProgress
+  LinearProgress,
+  Fab,        // 추가
+  Tooltip,    // 추가
+  Zoom        // 추가
 } from '@mui/material';
 import { 
   AutoAwesome, 
@@ -29,7 +30,8 @@ import {
   ContentCopy,
   Description,
   Lock,
-  CheckCircle
+  CheckCircle,
+  Psychology // 추가 (뉴런 맵 아이콘)
 } from '@mui/icons-material';
 import { styled, alpha } from '@mui/material/styles';
 import ReportDisplay from '../components/ReportDisplay.jsx';
@@ -40,7 +42,6 @@ import FloatingAdvancementButton from '../components/FloatingAdvancementButton';
 const POLLING_INTERVAL = 3000;
 
 // ==================== Styled Components ====================
-// ... (스타일 컴포넌트는 이전과 동일) ...
 const PageHeader = styled(Box)(({ theme }) => ({
   background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
   borderRadius: theme.spacing(3),
@@ -118,11 +119,23 @@ const TabPanel = ({ children, value, index }) => (
   </Box>
 );
 
+// [추가] 뉴런 맵 버튼 스타일 정의 (보라색 그라데이션)
+const NeuronFab = styled(Fab)(({ theme }) => ({
+  background: 'linear-gradient(45deg, #9c27b0 30%, #d500f9 90%)',
+  color: 'white',
+  fontWeight: 'bold',
+  paddingRight: 20,
+  '&:hover': {
+    background: 'linear-gradient(45deg, #7b1fa2 30%, #aa00ff 90%)',
+  },
+}));
+
 // ==================== Main Component ====================
 
 function ReportPage() {
   const { reportId } = useParams();
   const location = useLocation();
+  const navigate = useNavigate(); // 페이지 이동 훅
   
   const [reportData, setReportData] = useState(null);
   const [status, setStatus] = useState('processing_analysis'); 
@@ -131,7 +144,7 @@ function ReportPage() {
   const [showAdvancement, setShowAdvancement] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
 
-  // 각 단계별 완료 상태 (3단계 구조에 맞게 수정)
+  // 각 단계별 완료 상태
   const [step1Complete, setStep1Complete] = useState(false); // 분석 완료 (summary)
   const [step2Complete, setStep2Complete] = useState(false); // 유사도 비교 완료 (similarity_details)
   const [step3Complete, setStep3Complete] = useState(false); // QA 생성 완료 (initialQuestions)
@@ -228,7 +241,13 @@ function ReportPage() {
     if (newValue === 2 && step3Complete) setActiveTab(newValue);
   };
 
-  // ... (handleShowAdvancement, 에러 상태 UI는 동일) ...
+  // [추가] 로직 뉴런 맵 페이지로 이동하는 핸들러
+  const handleNavigateToNeuronMap = () => {
+    // 라우트 경로를 프로젝트 설정에 맞게 수정하세요.
+    // 예: /reports/${reportId}/deep-analysis 또는 /reports/${reportId}/logic-map
+    navigate(`/reports/${reportId}/logic-neuron`);
+  };
+
   if (status === 'error') {
     return (
       <Container maxWidth="lg" sx={{ mt: 4 }}>
@@ -244,7 +263,6 @@ function ReportPage() {
     <Container maxWidth="lg">
       {/* 페이지 헤더 */}
       <PageHeader>
-        {/* ... (헤더 내용 동일) ... */}
         <Stack direction="row" spacing={3} alignItems="center">
           <IconWrapper>
             <Assessment sx={{ fontSize: 32, color: 'white' }} />
@@ -343,7 +361,6 @@ function ReportPage() {
         variant="fullWidth"
         centered
       >
-        {/* ... (탭 1, 2, 3 스타일 동일) ... */}
         <StyledTab 
           icon={
             <Stack direction="row" alignItems="center" spacing={1}>
@@ -415,30 +432,29 @@ function ReportPage() {
           <ReportDisplay 
             data={reportData} 
             userAssignmentType={userAssignmentType}
-            reportId={reportId} // <--- [수정] reportId를 여기에서 전달
+            reportId={reportId}
           />
         ) : (
           <LoadingTabContent elevation={3}>
-            {/* ... (로딩 UI 동일) ... */}
+             <CircularProgress />
+             <Typography sx={{ mt: 2 }}>분석 데이터를 불러오는 중입니다...</Typography>
           </LoadingTabContent>
         )}
       </TabPanel>
 
       {/* 🎯 탭 2: 유사 문서 비교 */}
       <TabPanel value={activeTab} index={1}>
-        {/* ... (유사도 탭 내용 동일) ... */}
         {step2Complete && reportData?.similarity_details ? (
           <SimilarityAnalysis data={reportData} />
         ) : (
           <LoadingTabContent elevation={3}>
-            {/* ... (로딩 UI 동일) ... */}
+             <CircularProgress />
           </LoadingTabContent>
         )}
       </TabPanel>
 
       {/* 🎯 탭 3: AITA와의 대화 */}
       <TabPanel value={activeTab} index={2}>
-        {/* ... (QA 탭 내용 동일) ... */}
         {step3Complete && reportData?.initialQuestions ? (
           <>
             <QAChat 
@@ -451,14 +467,35 @@ function ReportPage() {
           </>
         ) : (
           <LoadingTabContent elevation={3}>
-            {/* ... (로딩 UI 동일) ... */}
+             <CircularProgress />
           </LoadingTabContent>
         )}
       </TabPanel>
 
-      {/* 🆕 우측 하단 고정 버튼 추가 */}
+      {/* ========== [추가] Floating Buttons Area ========== */}
+      {/* 리포트 ID가 있고, 상태가 completed일 때만 우측 하단에 버튼 표시 */}
       {reportId && status === 'completed' && (
-        <FloatingAdvancementButton reportId={reportId} />
+        <Box sx={{ position: 'fixed', bottom: 32, right: 32, zIndex: 1000 }}>
+          <Stack direction="column" spacing={2} alignItems="flex-end">
+            
+            {/* 1. 로직 뉴런 맵 이동 버튼 */}
+            <Zoom in={true} timeout={500}>
+              <Tooltip title="논리 구조 시각화 (Logic Neuron Map)" placement="left">
+                <NeuronFab 
+                  variant="extended" 
+                  onClick={handleNavigateToNeuronMap}
+                >
+                  <Psychology sx={{ mr: 1 }} />
+                  Logic Map
+                </NeuronFab>
+              </Tooltip>
+            </Zoom>
+
+            {/* 2. 기존 Floating Advancement Button */}
+            <FloatingAdvancementButton reportId={reportId} />
+            
+          </Stack>
+        </Box>
       )}
     </Container>
   );

@@ -121,6 +121,44 @@ export const getFlowGraphImage = async (reportId) => {
         throw new Error(error.response?.data?.error || error.response?.data?.message || '그래프를 불러오지 못했습니다.');
     }
 };
+// ==================== 심층 분석 (Deep Analysis) ====================
+
+/**
+ * 심층 분석 요청 (POST)
+ * 백그라운드 작업을 시작하고 202 Accepted를 반환받음
+ */
+export const requestDeepAnalysis = async (reportId) => {
+    try {
+        // 백엔드 라우트: /reports/<report_id>/deep-analysis
+        const response = await apiClient.post(`/api/student/reports/${reportId}/deep-analysis`);
+        
+        // 202 Accepted or 200 OK
+        return response.data;
+    } catch (error) {
+        console.error('심층 분석 요청 API 에러:', error.response || error);
+        const errorMessage = error.response?.data?.message || '심층 분석 요청에 실패했습니다.';
+        throw new Error(errorMessage);
+    }
+};
+
+/**
+ * 심층 분석 결과 조회 (GET)
+ * 분석 완료 시 데이터 반환, 미완료(404) 시 pending 상태 반환
+ */
+export const getDeepAnalysisResult = async (reportId) => {
+    try {
+        const response = await apiClient.get(`/api/student/reports/${reportId}/deep-analysis`);
+        return response.data; // { status: "success", data: {...} }
+    } catch (error) {
+        // 404는 아직 분석 결과가 생성되지 않음을 의미 (Pending)
+        if (error.response && error.response.status === 404) {
+            return { status: 'pending', data: null };
+        }
+        
+        console.error('심층 분석 결과 조회 API 에러:', error.response || error);
+        throw error;
+    }
+};
 
 // ==================== QA 관련 ====================
 

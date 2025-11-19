@@ -22,6 +22,7 @@ import RegisterPage from './pages/RegisterPage.jsx'
 import ReportPage from './pages/ReportPage.jsx';
 import AdvancementPage from './pages/AdvancementPage.jsx';
 import StudentDashboard from './pages/StudentDashboard.jsx';
+import LogicNeuronPage from './pages/LogicNeuronPage.jsx'; // 🆕 추가됨
 
 import TADashboard from './pages/ta/TADashboard.jsx';
 import TACourseDetail from './pages/ta/TACourseDetail.jsx';
@@ -85,8 +86,12 @@ const router = createBrowserRouter([
         errorElement: <ErrorPage />
       },
       
-      // 리포트 페이지
+      // 리포트 페이지 (기존)
       { path: "/report/:reportId", element: <ReportPage /> },
+
+      // 🆕 [추가] 로직 뉴런 맵 페이지
+      // ReportPage의 navigate 경로('/reports/${reportId}/logic-neuron')와 일치시킴
+      { path: "/reports/:reportId/logic-neuron", element: <LogicNeuronPage /> },
 
       // 🔥 TA용 라우트
       { path: "/ta", element: <TADashboard /> },
