@@ -104,7 +104,7 @@ def _call_llm_text(prompt_text):
 # --------------------------------------------------------------------------------------
 # --- 4. 메인 서비스 함수 (app.py에서 호출) ---
 # --------------------------------------------------------------------------------------
-
+ 
 def generate_initial_questions(summary_dict, high_similarity_reports_list, snippet):
     """
     [수정] 초기 질문 9개 (3:3:3)를 생성합니다.
@@ -112,15 +112,15 @@ def generate_initial_questions(summary_dict, high_similarity_reports_list, snipp
     """
     print("[Service QA] Generating 9 initial questions...")
     
-    # 1. 표절 점수가 높은 리포트 요약 (텍스트)
+    # 1. 표절 점수가 높은 리포트 요약 (텍스트) 
     plagiarism_info = ""
     if high_similarity_reports_list:
         plagiarism_info += f"참고: {len(high_similarity_reports_list)}개의 문서와 총점 30점 이상의 높은 구조적 유사성(표절 의심)이 발견되었습니다.\n"
         for i, report in enumerate(high_similarity_reports_list[:2]): # 최대 2개만 예시
-            score = report.get('plagiarism_score', 'N/A')
-            plagiarism_info += f" - 후보 {i+1} (점수: {score}점): 이 문서는 특히 주장과 결론 도출 방식에서 유사성이 높았습니다.\n"
+            comment = report.get('llm_comparison_report', " ")
+            plagiarism_info += f" - 후보 {i+1} ({comment})\n"
     else:
-        plagiarism_info = "참고: 총점 30점 이상의 구조적 유사성을 보이는 문서는 발견되지 않았습니다."
+        plagiarism_info = "참고: 총점 50점 이상의 구조적 유사성을 보이는 문서는 발견되지 않았습니다."
 
     # 2. 제출된 리포트 요약 (텍스트)
     summary_text = f"""

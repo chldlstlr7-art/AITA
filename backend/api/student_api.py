@@ -12,7 +12,8 @@ from services.parsing_service import extract_text
 from services.qa_service import generate_deep_dive_question
 from services.advancement_service import generate_advancement_ideas
 from services.course_management_service import CourseManagementService
-from services.flow_graph_services import _create_flow_graph_figure
+from services.flow_graph_services import _create_flow_graph_figure, check_system_fonts_debug
+
 
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
@@ -806,3 +807,9 @@ def get_flow_graph(report_id):
         print(f"[get_flow_graph:{report_id}] CRITICAL: Failed to generate graph image: {e}")
         traceback.print_exc()
         return jsonify({"status": "error", "message": "An error occurred while generating the graph image."}), 500
+
+
+@student_bp.route('/debug/font')
+def debug_font():
+    # 브라우저에서 JSON으로 폰트 상태를 봅니다.
+    return jsonify(check_system_fonts_debug())

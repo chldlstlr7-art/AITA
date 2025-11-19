@@ -10,7 +10,8 @@ import traceback # 1단계 오류 핸들링을 위해 추가
 import math
 from extensions import db
 from models import AnalysisReport
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 # --------------------------------------------------------------------------------------
 # --- 1. 전역 설정 및 모델 로드 (Flask 앱 시작 시 1회 실행) ---
 # --------------------------------------------------------------------------------------
@@ -26,7 +27,7 @@ EMBEDDING_MODEL_NAME = 'paraphrase-multilingual-MiniLM-L12-v2' # 2단계 S-BERT�
 # [LLM 클라이언트]
 llm_client_analysis = None
 llm_client_comparison = None
-
+ 
 if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
@@ -52,7 +53,11 @@ print("[Service Analysis] Ready. (DB will be accessed via Flask context)")
 # ----------------------------------------------------
 # --- 2. 헬퍼 함수 정의 (내부용) ---
 # ----------------------------------------------------
-
+@retry(
+    stop=stop_after_attempt(3),  # 최대 3번 재시도
+    wait=wait_exponential(multiplier=1, min=2, max=10), # 2초, 4초... 대기
+    reraise=True
+)
 def _llm_call_analysis(raw_text, system_prompt):
     """(1단계 분석용) Gemini 모델로 텍스트를 JSON 구조로 분석합니다."""
     if not llm_client_analysis: return None
@@ -82,6 +87,12 @@ def _llm_call_analysis(raw_text, system_prompt):
             else: print(f"[Service Analysis] Final Error (Analysis): {e}")
     return None
 
+
+@retry(
+    stop=stop_after_attempt(3),  # 최대 3번 재시도
+    wait=wait_exponential(multiplier=1, min=2, max=10), # 2초, 4초... 대기
+    reraise=True
+)
 def _llm_call_comparison(submission_json_str, candidate_json_str, system_prompt_template):
     """(3단계 비교용) Gemini 모델로 두 JSON을 1:1 비교합니다."""
     if not llm_client_comparison: return None
@@ -185,7 +196,7 @@ def find_similar_documents(submission_id, sub_thesis_vec, sub_claim_vec, top_n=3
         return []
 
     if db_vectors_thesis_np is None or db_vectors_claim_np.shape[0] == 0:
-        print("[find_similar_documents] DB 벡터가 준비되지 않았거나 비어있습니다.")
+        print("[find_similar_documents] DB 벡터가 준비되지 않거나 비어있습니다.")
         return []
         
     sim_thesis = cosine_similarity(sub_thesis_np, db_vectors_thesis_np)[0]
@@ -301,17 +312,17 @@ def perform_step2_comparison(report_id, embedding_thesis, embedding_claim, submi
         top_n=3
     )
 
-    # --- 4단계: 후보 문서와 LLM 정밀 비교 ---
+    # --- 4단계: 후보 문서와 LLM 정밀 비교 (병렬 처리) ---
     print(f"[{report_id}] 4. LLM 정밀 비교 (후보 {len(candidate_docs)}개) 시작...")
     comparison_results_list = []
-    
-    for candidate in candidate_docs:
+
+    def compare_with_candidate(candidate):
         try:
             candidate_id = candidate["candidate_id"]
             candidate_summary_str = candidate["candidate_summary_json_str"] # DB의 JSON 문자열
             candidate_filename = candidate["candidate_filename"]
             print(f"  -> Comparing with: {candidate_id}")
-            
+
             # LLM 비교 호출
             comparison_report_text = _llm_call_comparison(
                 submission_json_str, 
@@ -320,19 +331,27 @@ def perform_step2_comparison(report_id, embedding_thesis, embedding_claim, submi
             )
 
             if comparison_report_text:
-                comparison_results_list.append({
+                return {
                     "candidate_id": candidate_id,
-                    "candidate_filename" : candidate_filename,
+                    "candidate_filename": candidate_filename,
                     "weighted_similarity": candidate['weighted_similarity'],
                     "llm_comparison_report": comparison_report_text # (6개 점수가 포함된 텍스트)
-                })
+                }
             else:
-                 print(f"  -> WARNING: LLM (Comparison) failed for {candidate_id}.")
-            
-            sleep(1) # API 속도 조절
+                print(f"  -> WARNING: LLM (Comparison) failed for {candidate_id}.")
+                return None
 
         except Exception as e:
-            print(f"[{report_id}] 4. 후보 {candidate_id} 비교 중 오류: {e}")
+            print(f"[{report_id}] 4. 후보 {candidate['candidate_id']} 비교 중 오류: {e}")
+            return None
+
+    # 병렬 처리 실행
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_to_candidate = {executor.submit(compare_with_candidate, candidate): candidate for candidate in candidate_docs}
+        for future in as_completed(future_to_candidate):
+            result = future.result()
+            if result:
+                comparison_results_list.append(result)
 
     print(f"[{report_id}] Step 2 (Comparison) 완료. 비교 결과 반환.")
     return comparison_results_list # (list of dicts)
@@ -341,80 +360,56 @@ def perform_step2_comparison(report_id, embedding_thesis, embedding_claim, submi
 # --- (기존 perform_full_analysis_and_comparison 함수는 삭제됨) ---
 
 def _parse_comparison_scores(report_text):
+    # 1. 점수 컨테이너 초기화
     scores = {
-        "Core Thesis": 0, "Problem Framing": 0, "Claim Direction": 0,
-        "Reasoning & Evidence": 0, "Flow Pattern": 0, "Conclusion Framing": 0,
-    }
-    # total_score 변수는 이제 사용하지 않으므로 제거합니다.
-    parsed_count = 0
-    key_mapping = {
-        "Core Thesis": "Core Thesis", "Problem Framing": "Problem Framing",
-        "Claim Direction": "Claim Direction", "Reasoning & Evidence": "Reasoning & Evidence",
-        "Flow Pattern": "Flow Pattern", "Conclusion Framing": "Conclusion Framing",
+        "Core Thesis Similarity": 0, 
+        "Problem Framing Similarity": 0, 
+        "Claim Similarity": 0,
+        "Reasoning Similarity": 0, 
+        "Flow Pattern Similarity": 0, 
+        "Conclusion Framing Similarity": 0,
     }
     
-    # 변환된 점수를 저장할 임시 딕셔너리를 초기화합니다.
-    calculated_scores = {} 
+    parsed_count = 0
     
     try:
-        # 1. 원점수 파싱 로직
-        for key_name, mapped_key in key_mapping.items():
-            # 점수 파싱 로직은 그대로 유지합니다.
-            # 예: "Core Thesis (Similarity): **9** - 10" 형태에서 '9'를 추출
-            pattern = rf"{re.escape(key_name)}.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]"
-            match = re.search(pattern, report_text, re.IGNORECASE | re.DOTALL)
+        # 2. 파싱 로직 (강력한 Regex 적용)
+        for key_name in scores.keys():
+            # [Regex 설명]
+            # re.escape(key_name) : 키워드 매칭
+            # .*?                 : 중간에 잡다한 문자 비탐욕적 허용
+            # :                   : 콜론 필수
+            # [\s\*]* : 공백이나 별표(*)가 0개 이상 섞여 있어도 무시
+            # (\d+)               : 숫자 추출
+            pattern = rf"{re.escape(key_name)}.*?:\s*[\s\*]*(\d+)"
+            
+            match = re.search(pattern, report_text, re.IGNORECASE)
             if match:
                 score = int(match.group(1))
-                scores[mapped_key] = score
+                scores[key_name] = score
                 parsed_count += 1
             else:
-                # 원점수 파싱 실패 시 디버그 메시지
-                print(f"[_parse_comparison_scores] DEBUG: Failed to parse original score for key: '{key_name}'")
+                print(f"[_parse_comparison_scores] Warning: Could not find score for '{key_name}'")
+
+        # 3. [수정] 가중치 적용하여 총점 계산
+        # 기본 총합(sum)에 'Reasoning Similarity'를 한 번 더 더해주면 2배 가중치가 됩니다.
+        # (Reasoning은 중요하므로 x2)
         
-        if parsed_count < 6:
-            print(f"[_parse_comparison_scores] WARNING: Parsed {parsed_count}/6 original scores.")
+        final_score = sum(scores.values()) + scores["Reasoning Similarity"]
 
-        # 2. 새로운 점수 변환 로직 적용
-        
- 
-        original_ct = scores["Core Thesis"]
-        
- 
-        original_claim = scores["Claim Direction"]
-
-        original_reasoning = scores["Reasoning & Evidence"]
-
-        original_fp = scores["Flow Pattern"]
-
-
-        original_pf = scores["Problem Framing"]
-
-
-        original_cf = scores["Conclusion Framing"]
-
-        
-        # 3. 총점 계산 (변환된 점수들의 합계)
-        total_score_converted = sum(scores.values())
-        
-        # 4. 60점 만점으로 환산 부분 제거 
-        # 최종 점수는 변환된 총점으로 설정
-        final_score = total_score_converted
-            
     except Exception as e:
-        print(f"[_parse_comparison_scores] 파싱 및 계산 중 에러: {e}")
-        # 에러 발생 시 0점과 파싱된 원점수를 반환
+        print(f"[_parse_comparison_scores] Parsing Error: {e}")
         return 0, scores
     
-    # 최종 점수(변환된 총합)와 변환된 항목별 점수를 반환
     return final_score, scores
 
 
 def _filter_high_similarity_reports(comparison_results_list):
     high_similarity_reports = []
-    threshold = 60
+    threshold = 50
     for result in comparison_results_list:
         report_text = result.get("llm_comparison_report", "")
-        total_score, scores_dict = _parse_comparison_scores(report_text)
+        total_score, scores_dict,  = _parse_comparison_scores(report_text)
         if total_score >= threshold:
             result['plagiarism_score'] = total_score
             result['scores_detail'] = scores_dict

@@ -19,7 +19,7 @@ except Exception as e:
 
 class GradingService:
     
-    def __init__(self, model_name='gemini-1.5-pro'): # [예시] 모델명은 최신 버전을 권장합니다.
+    def __init__(self, model_name='gemini-2.5-flash'): # [예시] 모델명은 최신 버전을 권장합니다.
         """
         Gemini 모델을 초기화합니다.
         JSON 출력을 위해 'response_mime_type'을 설정합니다.
@@ -91,7 +91,7 @@ class GradingService:
         1.  `scores` (List):
             -   [평가 기준]의 각 항목(예: "A", "B")을 `criteria_id`로 합니다.
             -   `score`는 `max_score`를 넘지 않는 정수여야 합니다.
-            -   `feedback`은 해당 항목에 대한 구체적인 한 줄 피드백입니다.
+            -   `feedback`은 해당 항목에 대한 구체적인 세 줄 피드백입니다.
         2.  `total` (Number):
             -   모든 `score`의 총합입니다.
         3.  `overall_feedback` (String):
@@ -103,69 +103,95 @@ class GradingService:
         - [리포트 본문]이 기준에 미달하면 0점을 부여할 수 있습니다.
         """
 
-    def run_auto_grading(self, report_id):
+    def _validate_and_parse_llm_output(self, json_string, criteria_dict):
+        """
+        LLM 출력 JSON을 robust하게 파싱 및 검증합니다.
+        필수 필드, 타입, 점수 범위, 피드백 등 체크.
+        """
+        try:
+            result = json.loads(json_string)
+        except Exception as e:
+            raise ValueError(f"LLM 출력이 JSON 형식이 아닙니다: {e}")
+
+        # 필수 필드 체크
+        if not isinstance(result, dict):
+            raise ValueError("LLM 출력이 dict가 아닙니다.")
+        if "scores" not in result or "total" not in result or "overall_feedback" not in result:
+            raise ValueError("LLM 출력에 필수 필드가 누락되었습니다.")
+        if not isinstance(result["scores"], list):
+            raise ValueError("scores 필드는 리스트여야 합니다.")
+        if not isinstance(result["total"], (int, float)):
+            raise ValueError("total 필드는 숫자여야 합니다.")
+        if not isinstance(result["overall_feedback"], str):
+            raise ValueError("overall_feedback 필드는 문자열이어야 합니다.")
+
+        # 각 score 항목 검증
+        for item in result["scores"]:
+            if not isinstance(item, dict):
+                raise ValueError("scores 리스트의 각 항목은 dict여야 합니다.")
+            if "criteria_id" not in item or "score" not in item or "feedback" not in item:
+                raise ValueError("scores 항목에 필수 필드가 누락되었습니다.")
+            cid = item["criteria_id"]
+            score = item["score"]
+            feedback = item["feedback"]
+            if cid not in criteria_dict:
+                raise ValueError(f"criteria_id '{cid}'가 평가 기준에 없습니다.")
+            max_score = criteria_dict[cid].get("max_score", None)
+            if max_score is not None and score > max_score:
+                raise ValueError(f"criteria_id '{cid}'의 score가 max_score({max_score})를 초과합니다.")
+            if not isinstance(feedback, str):
+                raise ValueError("feedback은 문자열이어야 합니다.")
+        return result
+
+    def run_auto_grading(self, report_id, ta_user_id=None):
         """
         특정 리포트에 대해 자동 채점을 실행하고 결과를 DB에 저장합니다.
+        ta_user_id가 주어지면 권한 체크도 수행합니다.
         """
         if not self.model:
             print(f"[GradingService] ERROR: 모델이 초기화되지 않아 Report {report_id} 채점을 건너뜁니다.")
             return None
-            
-        report = None # finally에서 사용하기 위해 try 밖에 선언
+        report = None
         try:
             # 1. 데이터 로드
             report, assignment, doc_text, criteria_dict = self._get_report_and_criteria(report_id)
-            
+            # 1-1. TA 권한 체크 (옵션)
+            if ta_user_id:
+                course = assignment.course
+                if not any(a.id == ta_user_id for a in course.assistants):
+                    raise ValueError("해당 리포트에 대한 채점 권한이 없습니다.")
             # 2. 프롬프트 생성
             criteria_str = self._format_criteria_for_prompt(criteria_dict)
             prompt = self._build_prompt(
-                course_name=assignment.course.course_name, # 관계(relationship)로 접근
+                course_name=assignment.course.course_name,
                 assignment_name=assignment.assignment_name,
                 criteria_str=criteria_str,
                 document_text=doc_text
             )
-            
             # 3. Gemini API 호출
             print(f"[GradingService] Report {report_id} 자동 채점 시작...")
             response = self.model.generate_content(prompt)
-            
-            # 4. 결과 파싱 및 저장
-            # JSON 모드를 사용했으므로, response.text는 순수한 JSON 문자열이어야 함
             json_string = response.text
-            
-            # (선택적) 파싱 검증
-            try:
-                result_json = json.loads(json_string)
-                # TODO: result_json의 형식이 우리가 원하는 'scores', 'total' 등을
-                #       포함하는지 스키마 검증을 추가하면 더 좋습니다.
-            except json.JSONDecodeError:
-                print(f"[GradingService] ERROR: Gemini가 유효한 JSON을 반환하지 않았습니다. \nRaw: {json_string}")
-                raise ValueError("AI 모델이 유효한 JSON을 생성하지 못했습니다.")
-
-            # 5. DB 저장 (auto_score_details에 저장)
-            report.auto_score_details = json_string
+            # 4. robust 파싱 및 검증
+            result_json = self._validate_and_parse_llm_output(json_string, criteria_dict)
+            # 5. DB 저장
+            report.auto_score_details = json.dumps(result_json, ensure_ascii=False)
             db.session.commit()
-            
             print(f"[GradingService] Report {report_id} 자동 채점 완료 및 저장 성공.")
             return result_json
-
         except Exception as e:
             db.session.rollback()
             print(f"[GradingService] CRITICAL: Report {report_id} 채점 중 오류 발생: {e}")
-            # 오류 발생 시 auto_score_details에 에러 메시지 저장 (선택적)
             try:
-                # report 변수가 위 try 블록에서 할당되었는지 확인
                 if report is None:
                     report = AnalysisReport.query.get(report_id)
-                
                 if report:
-                    report.auto_score_details = json.dumps({"error": str(e)})
+                    report.auto_score_details = json.dumps({"error": str(e)}, ensure_ascii=False)
                     db.session.commit()
             except Exception as db_e:
                 print(f"[GradingService] 에러 메시지 저장 실패: {db_e}")
-                db.session.rollback() # 에러 저장 실패 시 롤백
-            
-            return None # 실패 시 None 반환
+                db.session.rollback()
+            return None
 
     # --- [신규] 일괄 자동 채점 메서드 ---
     

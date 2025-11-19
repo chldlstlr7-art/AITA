@@ -1,3 +1,4 @@
+import os
 import re
 import textwrap
 from collections import deque, defaultdict
@@ -6,6 +7,31 @@ import math
 import plotly.graph_objects as go
 import plotly.io as pio
 
+try:
+    # [수정] 헷갈리는 상대 경로 대신, Render의 "절대 경로"를 박아버립니다.
+    # Render에서 소스 코드는 무조건 이 위치에 있습니다.
+    PROJECT_ROOT = "/opt/render/project/src"
+    
+    # 1. fonts.conf 파일 위치 지정
+    font_conf_path = os.path.join(PROJECT_ROOT, "fonts.conf")
+    
+    # 2. 혹시 파일이 없다면, 백엔드 폴더 안쪽도 한번 찾아봅니다 (보험용)
+    if not os.path.exists(font_conf_path):
+        print(f"[Init] 루트에서 못 찾음. 백엔드 폴더 확인 중...")
+        font_conf_path = os.path.join(PROJECT_ROOT, "backend", "fonts.conf")
+
+    if os.path.exists(font_conf_path):
+        # 환경 변수 강제 주입
+        os.environ["FONTCONFIG_FILE"] = font_conf_path
+        os.environ["FONTCONFIG_PATH"] = os.path.dirname(font_conf_path)
+        print(f"[Init] FONTCONFIG_FILE 강제 설정 완료: {font_conf_path}")
+    else:
+        # [디버깅] 파일이 진짜 어디 갔는지 확인
+        print(f"[Init] [CRITICAL] fonts.conf 실종! 탐색 경로: {font_conf_path}")
+        print(f"[Debug] Root Files: {os.listdir(PROJECT_ROOT) if os.path.exists(PROJECT_ROOT) else 'Root Not Found'}")
+
+except Exception as e:
+    print(f"[Init] 환경 변수 설정 중 오류: {e}")
 # ----------------------------------------------------
 # --- 4. [신규] 논리 흐름 시각화 (Plotly) 서비스 ---
 # ----------------------------------------------------
@@ -32,6 +58,7 @@ _SPACING = {
     "level_gap_scale": 2.0,
     "center_jitter_amp": 0.06
 }
+font_family = "NanumGothic, 'Nanum Gothic'"
 
 # ------------------ HTML/텍스트 유틸 ------------------
 
@@ -347,8 +374,7 @@ def _create_flow_graph_figure(nodes, edges,
         text=[labels[n] for n in node_ids],
         textposition="middle center",
         hoverinfo="text",
-        textfont=dict(family="NanumGothic, sans-serif",
-                      size=_FONT_SIZE, color="#0f172a")
+        textfont=dict(family=font_family, size=_FONT_SIZE, color="#0f172a")
     ))
 
     # 4) 레이아웃
@@ -370,8 +396,50 @@ def _create_flow_graph_figure(nodes, edges,
                    range=[min(xs)-pad_x, max(xs)+pad_x]),
         yaxis=dict(visible=False, showgrid=False, zeroline=False,
                    range=[min(ys)-pad_y, max(ys)+pad_y]),
-        font=dict(family="NanumGothic, sans-serif")
+        font=dict(family=font_family)
     )
 
     # API로 전송하기 위해 fig 객체 반환
     return fig
+
+def check_system_fonts_debug():
+    """
+    서버의 폰트 상태를 JSON으로 반환하는 디버깅 함수
+    """
+    report = {
+        "1. Environment": {
+            "HOME": os.environ.get("HOME"),
+            "FONTCONFIG_FILE": os.environ.get("FONTCONFIG_FILE"),
+            "FONTCONFIG_PATH": os.environ.get("FONTCONFIG_PATH")
+        },
+        "2. File Existence": {},
+        "3. FC-Match Result": "N/A",
+        "4. FC-List (Nanum Only)": []
+    }
+
+    # 1. 파일 존재 여부 확인
+    check_paths = [
+        os.path.expanduser("~/.local/share/fonts/NanumGothic-Regular.ttf"),
+        os.path.expanduser("~/.fonts/NanumGothic-Regular.ttf"),
+        os.path.expanduser("~/.config/fontconfig/fonts.conf")
+    ]
+    for p in check_paths:
+        report["2. File Existence"][p] = os.path.exists(p)
+
+    # 2. 시스템 명령어로 확인 (fc-match)
+    try:
+        # "NanumGothic을 내놔라" 했을 때 시스템이 뭘 주는지 확인
+        output = subprocess.check_output(['fc-match', 'NanumGothic'], stderr=subprocess.STDOUT)
+        report["3. FC-Match Result"] = output.decode('utf-8').strip()
+    except Exception as e:
+        report["3. FC-Match Result"] = f"Error: {str(e)}"
+
+    # 3. 시스템 명령어로 확인 (fc-list)
+    try:
+        output = subprocess.check_output(['fc-list', ':lang=ko'], stderr=subprocess.STDOUT)
+        lines = output.decode('utf-8').strip().split('\n')
+        report["4. FC-List (Nanum Only)"] = [line for line in lines if "Nanum" in line]
+    except Exception as e:
+        report["4. FC-List (Nanum Only)"] = f"Error: {str(e)}"
+        
+    return report
