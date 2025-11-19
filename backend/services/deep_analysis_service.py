@@ -63,7 +63,7 @@ def _call_llm_json(prompt_text):
         ],
         "topP": 0.8,
         "topK": 0,
-        "maxCompletionTokens" : 20480,
+        "maxTokens": 2048,
         "temperature": 0.2,
         "repeatPenalty": 1.5,
         "stopBefore": [],
