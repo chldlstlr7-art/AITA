@@ -1,306 +1,280 @@
 import axios from 'axios';
 
 const API_BASE_URL = 
-  import.meta.env.VITE_API_BASE_URL || 
-  'https://aita-5xo5.onrender.com';
+    import.meta.env.VITE_API_BASE_URL || 
+    'https://aita-5xo5.onrender.com';
 
 const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+    baseURL: API_BASE_URL,
+    headers: {
+        'Content-Type': 'application/json',
+    },
 });
 
 // ==================== 인증 관련 ====================
 
 export const healthCheck = () => {
-  return apiClient.get('/');
+    return apiClient.get('/');
 };
 
 export const register = async (email, password, role = 'student') => {
-  try {
-    const response = await apiClient.post('/api/auth/register', {
-      email,
-      password,
-      role,
-    });
-    return response.data;
-  } catch (error) {
-    console.error('회원가입 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '회원가입에 실패했습니다.');
-  }
+    try {
+        const response = await apiClient.post('/api/auth/register', {
+            email,
+            password,
+            role,
+        });
+        return response.data;
+    } catch (error) {
+        console.error('회원가입 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '회원가입에 실패했습니다.');
+    }
 };
 
 export const verifyEmail = async (email, code) => {
-  try {
-    const response = await apiClient.post('/api/auth/verify-email', {
-      email,
-      code,
-    });
-    return response.data;
-  } catch (error) {
-    console.error('이메일 인증 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '인증 코드가 잘못되었습니다.');
-  }
+    try {
+        const response = await apiClient.post('/api/auth/verify-email', {
+            email,
+            code,
+        });
+        return response.data;
+    } catch (error) {
+        console.error('이메일 인증 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '인증 코드가 잘못되었습니다.');
+    }
 };
 
 export const login = async (email, password) => {
-  try {
-    const response = await apiClient.post('/api/auth/login', {
-      email,
-      password,
-    });
-    
-    if (response.data && response.data.access_token) {
-      localStorage.setItem('accessToken', response.data.access_token);
-      return response.data; 
-    } else {
-      throw new Error('로그인 응답이 올바르지 않습니다.');
+    try {
+        const response = await apiClient.post('/api/auth/login', {
+            email,
+            password,
+        });
+        
+        if (response.data && response.data.access_token) {
+            // 🔥 [수정] 토큰 저장을 AuthContext로 위임하기 위해 제거
+            // localStorage.setItem('accessToken', response.data.access_token); 
+            return response.data; // { access_token, user } 반환
+        } else {
+            throw new Error('로그인 응답이 올바르지 않습니다.');
+        }
+    } catch (error) {
+        console.error('로그인 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '로그인에 실패했습니다.');
     }
-  } catch (error) {
-    console.error('로그인 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '로그인에 실패했습니다.');
-  }
 };
 
 // ==================== 학생용 리포트 분석 ====================
 
 export const analyzeReport = async (formData) => {
-  try {
-    const response = await apiClient.post('/api/student/analyze', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return response.data;
-  } catch (error) {
-    console.error('분석 요청 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '분석 요청에 실패했습니다.');
-  }
+    try {
+        const response = await apiClient.post('/api/student/analyze', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data;
+    } catch (error) {
+        console.error('분석 요청 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '분석 요청에 실패했습니다.');
+    }
 };
 
 export const getReportStatus = async (reportId) => {
-  try {
-    const response = await apiClient.get(`/api/student/report/${reportId}`);
-    return response.data;
-  } catch (error) {
-    console.error('리포트 조회 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '리포트 조회에 실패했습니다.');
-  }
+    try {
+        const response = await apiClient.get(`/api/student/report/${reportId}`);
+        return response.data;
+    } catch (error) {
+        console.error('리포트 조회 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '리포트 조회에 실패했습니다.');
+    }
 };
 
 /**
- * 🔥 [신규] 논리 흐름도 PNG 이미지 조회
+ * 논리 흐름도 PNG 이미지 조회
  * @param {string} reportId - 리포트 ID
  * @returns {Promise<Blob>} PNG 이미지 Blob 객체
  */
 export const getFlowGraphImage = async (reportId) => {
-  try {
-    const response = await apiClient.get(
-      `/api/student/report/${reportId}/flow-graph`,
-      {
-        // [중요] 응답을 JSON이 아닌 Blob(바이너리)으로 받도록 설정
-        responseType: 'blob', 
-      }
-    );
-    // 성공 시 response.data는 Blob 객체입니다.
-    return response.data;
+    try {
+        const response = await apiClient.get(
+            `/api/student/report/${reportId}/flow-graph`,
+            {
+                // 응답을 Blob(바이너리)으로 받도록 설정
+                responseType: 'blob', 
+            }
+        );
+        return response.data;
 
-  } catch (error) {
-    console.error('흐름도 이미지 API 에러:', error.response || error);
-    
-    // [중요] 오류 응답(JSON)을 파싱하기 위한 처리
-    if (error.response && error.response.data instanceof Blob) {
-      try {
-        // Blob을 텍스트로 읽고 JSON으로 파싱
-        const errorText = await error.response.data.text();
-        const errorJson = JSON.parse(errorText);
-        throw new Error(errorJson.message || errorJson.error || '그래프 로딩 실패');
-      } catch (parseError) {
-        throw new Error(error.response?.statusText || '그래프를 불러오지 못했습니다.');
-      }
+    } catch (error) {
+        console.error('흐름도 이미지 API 에러:', error.response || error);
+        
+        if (error.response && error.response.data instanceof Blob) {
+            try {
+                // Blob을 텍스트로 읽고 JSON으로 파싱하여 에러 메시지 추출
+                const errorText = await error.response.data.text();
+                const errorJson = JSON.parse(errorText);
+                throw new Error(errorJson.message || errorJson.error || '그래프 로딩 실패');
+            } catch (parseError) {
+                throw new Error(error.response?.statusText || '그래프를 불러오지 못했습니다.');
+            }
+        }
+        
+        throw new Error(error.response?.data?.error || error.response?.data?.message || '그래프를 불러오지 못했습니다.');
     }
-    
-    throw new Error(error.response?.data?.error || error.response?.data?.message || '그래프를 불러오지 못했습니다.');
-  }
 };
 
 // ==================== QA 관련 ====================
 
 export const submitAnswer = async (reportId, questionId, userAnswer) => {
-  try {
-    const response = await apiClient.post(`/api/student/report/${reportId}/answer`, {
-      question_id: questionId,
-      user_answer: userAnswer,
-    });
-    return response.data;
-  } catch (error) {
-    console.error('답변 제출 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '답변 제출에 실패했습니다.');
-  }
+    try {
+        const response = await apiClient.post(`/api/student/report/${reportId}/answer`, {
+            question_id: questionId,
+            user_answer: userAnswer,
+        });
+        return response.data;
+    } catch (error) {
+        console.error('답변 제출 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '답변 제출에 실패했습니다.');
+    }
 };
 
 export const getNextQuestion = async (reportId) => {
-  try {
-    const response = await apiClient.post(`/api/student/report/${reportId}/question/next`);
-    return response.data;
-  } catch (error) {
-    console.error('다음 질문 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '다음 질문 로딩에 실패했습니다.');
-  }
+    try {
+        const response = await apiClient.post(`/api/student/report/${reportId}/question/next`);
+        return response.data;
+    } catch (error) {
+        console.error('다음 질문 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '다음 질문 로딩에 실패했습니다.');
+    }
 };
 
-// 🔥 [수정] Deep-dive API - 202 Accepted 처리
+// Deep-dive API - 202 Accepted 처리
 export const requestDeepDiveQuestion = async (reportId, parentQuestionId) => {
-  try {
-    console.log(`[API] 📡 심화 질문 생성 요청: reportId=${reportId}, parentId=${parentQuestionId}`);
-    
-    const response = await apiClient.post(`/api/student/report/${reportId}/question/deep-dive`, {
-      parent_question_id: parentQuestionId,
-    });
+    try {
+        const response = await apiClient.post(`/api/student/report/${reportId}/question/deep-dive`, {
+            parent_question_id: parentQuestionId,
+        });
 
-    console.log(`[API] ✅ 응답 상태: ${response.status}`);
-    
-    // 202 Accepted - 백그라운드 작업 시작
-    if (response.status === 202) {
-      console.log('[API] 💡 심화 질문 생성이 시작되었습니다. 폴링으로 확인하세요.');
-      return { 
-        status: 'processing',
-        message: response.data.message 
-      };
+        // 202 Accepted - 백그라운드 작업 시작
+        if (response.status === 202) {
+            return { 
+                status: 'processing',
+                message: response.data.message 
+            };
+        }
+        
+        return response.data;
+        
+    } catch (error) {
+        console.error('[API] ❌ requestDeepDiveQuestion 에러:', error);
+        
+        if (error.response) {
+            const errorMessage = error.response.data?.error || `HTTP ${error.response.status}`;
+            throw new Error(errorMessage);
+        } else if (error.request) {
+            throw new Error('서버에 연결할 수 없습니다.');
+        } else {
+            throw new Error(error.message || '요청 중 오류가 발생했습니다.');
+        }
     }
-    
-    return response.data;
-    
-  } catch (error) {
-    console.error('[API] ❌ requestDeepDiveQuestion 에러:', error);
-    
-    if (error.response) {
-      const errorMessage = error.response.data?.error || `HTTP ${error.response.status}`;
-      throw new Error(errorMessage);
-    } else if (error.request) {
-      throw new Error('서버에 연결할 수 없습니다.');
-    } else {
-      throw new Error(error.message || '요청 중 오류가 발생했습니다.');
-    }
-  }
 };
 
-// 🔥 [DEPRECATED] 기존 동기 방식 (하위 호환용)
+// [DEPRECATED] 기존 동기 방식
 export const getDeepDiveQuestion = async (reportId, parentQuestionId) => {
-  console.warn('[API] getDeepDiveQuestion은 deprecated되었습니다. requestDeepDiveQuestion을 사용하세요.');
-  return requestDeepDiveQuestion(reportId, parentQuestionId);
+    console.warn('[API] getDeepDiveQuestion은 deprecated되었습니다. requestDeepDiveQuestion을 사용하세요.');
+    return requestDeepDiveQuestion(reportId, parentQuestionId);
 };
 
 // ==================== 발전 아이디어 ====================
 
-// 🔥 [수정] GET → POST로 변경 (비동기 처리)
+// POST로 변경 (비동기 처리)
 export const requestAdvancementIdeas = async (reportId) => {
-  try {
-    console.log(`[API] 📡 발전 아이디어 생성 요청: reportId=${reportId}`);
-    
-    const response = await apiClient.post(`/api/student/report/${reportId}/advancement`);
+    try {
+        const response = await apiClient.post(`/api/student/report/${reportId}/advancement`);
 
-    console.log(`[API] ✅ 응답 상태: ${response.status}`);
-    
-    // 200 OK - 이미 생성된 데이터 반환
-    if (response.status === 200) {
-      console.log('[API] 💡 발전 아이디어 데이터 수신 (캐시)');
-      return { 
-        status: 'completed',
-        data: response.data 
-      };
+        // 200 OK - 이미 생성된 데이터 반환
+        if (response.status === 200) {
+            return { 
+                status: 'completed',
+                data: response.data 
+            };
+        }
+        
+        // 202 Accepted - 백그라운드 작업 시작
+        if (response.status === 202) {
+            return { 
+                status: 'processing',
+                message: response.data.message 
+            };
+        }
+        
+        return response.data;
+        
+    } catch (error) {
+        console.error('[API] ❌ requestAdvancementIdeas 에러:', error);
+        
+        if (error.response) {
+            const errorMessage = error.response.data?.error || `HTTP ${error.response.status}`;
+            throw new Error(errorMessage);
+        } else if (error.request) {
+            throw new Error('서버에 연결할 수 없습니다.');
+        } else {
+            throw new Error(error.message || '요청 중 오류가 발생했습니다.');
+        }
     }
-    
-    // 202 Accepted - 백그라운드 작업 시작
-    if (response.status === 202) {
-      console.log('[API] 💡 발전 아이디어 생성 시작. 폴링으로 확인하세요.');
-      return { 
-        status: 'processing',
-        message: response.data.message 
-      };
-    }
-    
-    return response.data;
-    
-  } catch (error) {
-    console.error('[API] ❌ requestAdvancementIdeas 에러:', error);
-    
-    if (error.response) {
-      const errorMessage = error.response.data?.error || `HTTP ${error.response.status}`;
-      throw new Error(errorMessage);
-    } else if (error.request) {
-      throw new Error('서버에 연결할 수 없습니다.');
-    } else {
-      throw new Error(error.message || '요청 중 오류가 발생했습니다.');
-    }
-  }
 };
 
-// 🔥 [DEPRECATED] 기존 GET 방식 (하위 호환용)
+// [DEPRECATED] 기존 GET 방식
 export const getAdvancementIdeas = async (reportId) => {
-  console.warn('[API] getAdvancementIdeas(GET)는 deprecated되었습니다. requestAdvancementIdeas(POST)를 사용하세요.');
-  return requestAdvancementIdeas(reportId);
+    console.warn('[API] getAdvancementIdeas(GET)는 deprecated되었습니다. requestAdvancementIdeas(POST)를 사용하세요.');
+    return requestAdvancementIdeas(reportId);
 };
 
 // ==================== 학생 대시보드 ====================
 
 /**
- * 🔥 학생 대시보드 데이터 조회
+ * 학생 대시보드 데이터 조회
  * @param {number} studentId - 학생 ID
  * @returns {Promise<Object>} 대시보드 데이터
  */
 export const getStudentDashboard = async (studentId) => {
-  try {
-    console.log(`[API] 📡 대시보드 조회 요청: studentId=${studentId}`);
-    
-    const token = localStorage.getItem('accessToken');
-    if (!token) {
-      throw new Error('로그인 정보가 없습니다.');
+    try {
+        
+        // AuthContext에서 토큰이 관리되므로, 여기서 로컬 스토리지를 직접 검사하는 것은 
+        // Interceptor에 의존하는 것이 더 안전함.
+        // if (!token) throw new Error('로그인 정보가 없습니다.'); // Interceptor가 처리
+
+        const response = await apiClient.get(`/api/student/dashboard/${studentId}`);
+        
+        if (!response.data) {
+            throw new Error('서버 응답이 비어있습니다.');
+        }
+        
+        return response.data;
+        
+    } catch (error) {
+        console.error('[API] ❌ 학생 대시보드 조회 실패:', error.response?.data || error.message);
+        
+        if (error.response) {
+            const status = error.response.status;
+            const errorData = error.response.data;
+            
+            if (status === 500) {
+                throw new Error(`서버 오류: ${errorData?.error || '내부 서버 오류'}`);
+            } else if (status === 404) {
+                throw new Error('학생 정보를 찾을 수 없습니다.');
+            } else if (status === 401) {
+                throw new Error('로그인이 만료되었습니다. 다시 로그인해주세요.');
+            } else if (status === 403) {
+                throw new Error('접근 권한이 없습니다.');
+            } else {
+                throw new Error(errorData?.error || `HTTP ${status} 오류`);
+            }
+        } else if (error.request) {
+            throw new Error('서버에 연결할 수 없습니다.');
+        } else {
+            throw error;
+        }
     }
-    
-    const response = await apiClient.get(`/api/student/dashboard/${studentId}`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      }
-    });
-    
-    console.log(`[API] ✅ 대시보드 조회 성공:`, response.data);
-    
-    // 🔥 데이터 구조 검증
-    if (!response.data) {
-      throw new Error('서버 응답이 비어있습니다.');
-    }
-    
-    return response.data;
-    
-  } catch (error) {
-    console.error('[API] ❌ 학생 대시보드 조회 실패:', {
-      message: error.message,
-      response: error.response?.data,
-      status: error.response?.status,
-    });
-    
-    if (error.response) {
-      const status = error.response.status;
-      const errorData = error.response.data;
-      
-      if (status === 500) {
-        throw new Error(`서버 오류: ${errorData?.error || '내부 서버 오류'}`);
-      } else if (status === 404) {
-        throw new Error('학생 정보를 찾을 수 없습니다.');
-      } else if (status === 401) {
-        throw new Error('로그인이 만료되었습니다. 다시 로그인해주세요.');
-      } else if (status === 403) {
-        throw new Error('접근 권한이 없습니다.');
-      } else {
-        throw new Error(errorData?.error || `HTTP ${status} 오류`);
-      }
-    } else if (error.request) {
-      throw new Error('서버에 연결할 수 없습니다.');
-    } else {
-      throw error;
-    }
-  }
 };
 
 /**
@@ -310,279 +284,265 @@ export const getStudentDashboard = async (studentId) => {
  * @returns {Promise<Object>}
  */
 export const submitReportToAssignment = async (reportId, assignmentId) => {
-  try {
-    console.log('[API] 📤 리포트 제출 요청:', { reportId, assignmentId });
-    
-    // [수정] 백엔드(student_api.py)의 POST /api/student/report/<report_id>/submit 엔드포인트와 일치시킴
-    const response = await apiClient.post(
-      `/api/student/report/${reportId}/submit`,
-      {
-        assignment_id: assignmentId, // 백엔드는 이 body를 기대합니다.
-      }
-    );
-    
-    console.log('[API] ✅ 리포트 제출 성공:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('[API] ❌ 리포트 제출 실패:', error.response?.data || error.message);
-    // [수정] 백엔드가 반환하는 에러 메시지 키(error)를 사용
-    throw new Error(error.response?.data?.error || '리포트 제출에 실패했습니다.');
-  }
+    try {
+        const response = await apiClient.post(
+            `/api/student/report/${reportId}/submit`,
+            {
+                assignment_id: assignmentId, 
+            }
+        );
+        return response.data;
+    } catch (error) {
+        console.error('[API] ❌ 리포트 제출 실패:', error.response?.data || error.message);
+        throw new Error(error.response?.data?.error || '리포트 제출에 실패했습니다.');
+    }
 };
 
-// 🔥 [신규] 학생용 과제 목록 조회
+// 학생용 과제 목록 조회
 export const getStudentCourseAssignments = async (courseId) => {
-  try {
-    const response = await apiClient.get(`/api/student/courses/${courseId}/assignments`);
-    return response.data.assignments || [];
-  } catch (error) {
-    console.error('과제 목록 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '과제 목록을 불러오지 못했습니다.');
-  }
+    try {
+        const response = await apiClient.get(`/api/student/courses/${courseId}/assignments`);
+        return response.data.assignments || [];
+    } catch (error) {
+        console.error('과제 목록 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '과제 목록을 불러오지 못했습니다.');
+    }
 };
 
 // ==================== TA용 API ====================
 
 export const getTaCourses = async () => {
-  try {
-    const res = await apiClient.get('/api/ta/my-courses');
-    return res.data;
-  } catch (error) {
-    console.error('TA 과목 목록 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '과목 목록을 불러오지 못했습니다.');
-  }
+    try {
+        const res = await apiClient.get('/api/ta/my-courses');
+        return res.data;
+    } catch (error) {
+        console.error('TA 과목 목록 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '과목 목록을 불러오지 못했습니다.');
+    }
 };
 
 export const createCourse = async ({ course_code, course_name }) => {
-  try {
-    const res = await apiClient.post('/api/ta/courses', {
-      course_code,
-      course_name,
-    });
-    return res.data;
-  } catch (error) {
-    console.error('TA 과목 생성 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '과목 생성에 실패했습니다.');
-  }
+    try {
+        const res = await apiClient.post('/api/ta/courses', {
+            course_code,
+            course_name,
+        });
+        return res.data;
+    } catch (error) {
+        console.error('TA 과목 생성 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '과목 생성에 실패했습니다.');
+    }
 };
 
 export const updateCourse = async (courseId, { course_code, course_name }) => {
-  try {
-    const res = await apiClient.put(`/api/ta/courses/${courseId}`, {
-      course_code,
-      course_name,
-    });
-    return res.data;
-  } catch (error) {
-    console.error('TA 과목 수정 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '과목 수정에 실패했습니다.');
-  }
+    try {
+        const res = await apiClient.put(`/api/ta/courses/${courseId}`, {
+            course_code,
+            course_name,
+        });
+        return res.data;
+    } catch (error) {
+        console.error('TA 과목 수정 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '과목 수정에 실패했습니다.');
+    }
 };
 
 export const deleteCourse = async (courseId) => {
-  try {
-    const res = await apiClient.delete(`/api/ta/courses/${courseId}`);
-    return res.data;
-  } catch (error) {
-    console.error('TA 과목 삭제 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '과목 삭제에 실패했습니다.');
-  }
+    try {
+        const res = await apiClient.delete(`/api/ta/courses/${courseId}`);
+        return res.data;
+    } catch (error) {
+        console.error('TA 과목 삭제 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '과목 삭제에 실패했습니다.');
+    }
 };
 
 export const getCourseDetail = async (courseId) => {
-  try {
-    const res = await apiClient.get(`/api/ta/courses/${courseId}`);
-    return res.data;
-  } catch (error) {
-    console.error('TA 과목 상세 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '과목 정보를 불러오지 못했습니다.');
-  }
+    try {
+        const res = await apiClient.get(`/api/ta/courses/${courseId}`);
+        return res.data;
+    } catch (error) {
+        console.error('TA 과목 상세 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '과목 정보를 불러오지 못했습니다.');
+    }
 };
 
 export const getAssignmentsByCourse = async (courseId) => {
-  try {
-    const res = await apiClient.get(`/api/ta/courses/${courseId}/assignments`);
-    return res.data;
-  } catch (error) {
-    console.error('과제 목록 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '과제 목록을 불러오지 못했습니다.');
-  }
+    try {
+        const res = await apiClient.get(`/api/ta/courses/${courseId}/assignments`);
+        return res.data;
+    } catch (error) {
+        console.error('과제 목록 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '과제 목록을 불러오지 못했습니다.');
+    }
 };
 
 // TA 과제 생성
-// POST /api/ta/courses/<course_id>/assignments
 export const createAssignment = async (courseId, { assignment_name, description, due_date }) => {
-  try {
-    const res = await apiClient.post(`/api/ta/courses/${courseId}/assignments`, {
-      assignment_name,
-      description,
-      due_date,
-    });
-    return res.data;
-  } catch (error) {
-    console.error('과제 생성 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '과제 생성에 실패했습니다.');
-  }
+    try {
+        const res = await apiClient.post(`/api/ta/courses/${courseId}/assignments`, {
+            assignment_name,
+            description,
+            due_date,
+        });
+        return res.data;
+    } catch (error) {
+        console.error('과제 생성 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '과제 생성에 실패했습니다.');
+    }
 };
 
 
 // 과제 정보 수정
-// PUT /api/ta/assignments/<assignment_id>
 export const updateAssignment = async (assignmentId, { assignment_name, description, due_date }) => {
-  try {
-    const res = await apiClient.put(`/api/ta/assignments/${assignmentId}`, {
-      assignment_name,
-      description,
-      due_date,
-    });
-    return res.data;
-  } catch (error) {
-    console.error('과제 수정 API 에러:', error.response || error);
-    // axios error handling: prefer server message
-    throw new Error(error.response?.data?.error || '과제 수정에 실패했습니다.');
-  }
+    try {
+        const res = await apiClient.put(`/api/ta/assignments/${assignmentId}`, {
+            assignment_name,
+            description,
+            due_date,
+        });
+        return res.data;
+    } catch (error) {
+        console.error('과제 수정 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '과제 수정에 실패했습니다.');
+    }
 };
 
 // 특정 과제 상세 조회 (TA용)
 export const getAssignmentDetail = async (assignmentId) => {
-  try {
-    const res = await apiClient.get(`/api/ta/assignments/${assignmentId}`);
-    return res.data;
-  } catch (error) {
-    console.error('과제 상세 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '과제 상세를 불러오지 못했습니다.');
-  }
+    try {
+        const res = await apiClient.get(`/api/ta/assignments/${assignmentId}`);
+        return res.data;
+    } catch (error) {
+        console.error('과제 상세 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '과제 상세를 불러오지 못했습니다.');
+    }
 };
 
-// GET assignment criteria helper (reads from assignment detail)
+// GET assignment criteria helper
 export const getAssignmentCriteria = async (assignmentId) => {
-  try {
-    // 신규 명세: GET /api/ta/assignments/<assignment_id>/criteria
-    const res = await apiClient.get(`/api/ta/assignments/${assignmentId}/criteria`);
-    // 응답 형태: { criteria_1: {...}, criteria_2: {...} }
-    return res.data;
-  } catch (error) {
-    console.error('채점 기준 조회 API 에러:', error.response || error);
-    if (error.response) {
-      throw new Error(error.response.data?.error || `HTTP ${error.response.status}`);
+    try {
+        const res = await apiClient.get(`/api/ta/assignments/${assignmentId}/criteria`);
+        return res.data;
+    } catch (error) {
+        console.error('채점 기준 조회 API 에러:', error.response || error);
+        if (error.response) {
+            throw new Error(error.response.data?.error || `HTTP ${error.response.status}`);
+        }
+        if (error.request) {
+            throw new Error('서버에 연결할 수 없습니다. 네트워크를 확인해주세요.');
+        }
+        throw new Error(error.message || '채점 기준을 불러오지 못했습니다.');
     }
-    if (error.request) {
-      throw new Error('서버에 연결할 수 없습니다. 네트워크를 확인해주세요.');
-    }
-    throw new Error(error.message || '채점 기준을 불러오지 못했습니다.');
-  }
 };
 
 
 export const getAssignmentSubmissions = async (assignmentId) => {
-  try {
-    const res = await apiClient.get(`/api/ta/assignments/${assignmentId}/submissions`);
-    return res.data;
-  } catch (error) {
-    console.error('제출물 목록 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '제출물 목록을 불러오지 못했습니다.');
-  }
+    try {
+        const res = await apiClient.get(`/api/ta/assignments/${assignmentId}/submissions`);
+        return res.data;
+    } catch (error) {
+        console.error('제출물 목록 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '제출물 목록을 불러오지 못했습니다.');
+    }
 };
 
 export const putAssignmentCriteria = async (assignmentId, criteriaPayload) => {
-  try {
-    const res = await apiClient.put(`/api/ta/assignments/${assignmentId}/criteria`, criteriaPayload);
-    return res.data;
-  } catch (error) {
-    console.error('채점 기준 저장 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '채점 기준 저장에 실패했습니다.');
-  }
+    try {
+        const res = await apiClient.put(`/api/ta/assignments/${assignmentId}/criteria`, criteriaPayload);
+        return res.data;
+    } catch (error) {
+        console.error('채점 기준 저장 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '채점 기준 저장에 실패했습니다.');
+    }
 };
 
 // ==================== TA 리포트 자동 채점 ====================
-// POST /api/ta/reports/<report_id>/auto-grade
 export const autoGradeReport = async (reportId) => {
-  try {
-    const res = await apiClient.post(`/api/ta/reports/${reportId}/auto-grade`);
-    // 202 Accepted -> background task started
-    if (res.status === 202) {
-      return { status: 'processing', message: res.data?.message };
+    try {
+        const res = await apiClient.post(`/api/ta/reports/${reportId}/auto-grade`);
+        // 202 Accepted -> background task started
+        if (res.status === 202) {
+            return { status: 'processing', message: res.data?.message };
+        }
+        return res.data;
+    } catch (error) {
+        console.error('리포트 자동 채점 API 에러:', error.response || error);
+        if (error.response) {
+            throw new Error(error.response.data?.error || `HTTP ${error.response.status}`);
+        }
+        throw new Error(error.message || '자동 채점 요청에 실패했습니다.');
     }
-    return res.data;
-  } catch (error) {
-    console.error('리포트 자동 채점 API 에러:', error.response || error);
-    if (error.response) {
-      throw new Error(error.response.data?.error || `HTTP ${error.response.status}`);
-    }
-    throw new Error(error.message || '자동 채점 요청에 실패했습니다.');
-  }
 };
 
 // ==================== TA 수동 채점 저장 ====================
-// POST /api/ta/reports/<report_id>/grade
 export const submitTaGrade = async (reportId, body) => {
-  try {
-    const res = await apiClient.post(`/api/ta/reports/${reportId}/grade`, body);
-    return res.data;
-  } catch (error) {
-    console.error('TA 채점 저장 API 에러:', error.response || error);
-    if (error.response) {
-      throw new Error(error.response.data?.error || `HTTP ${error.response.status}`);
+    try {
+        const res = await apiClient.post(`/api/ta/reports/${reportId}/grade`, body);
+        return res.data;
+    } catch (error) {
+        console.error('TA 채점 저장 API 에러:', error.response || error);
+        if (error.response) {
+            throw new Error(error.response.data?.error || `HTTP ${error.response.status}`);
+        }
+        throw new Error(error.message || 'TA 채점 저장에 실패했습니다.');
     }
-    throw new Error(error.message || 'TA 채점 저장에 실패했습니다.');
-  }
 };
+
+// 과제 삭제
+export const deleteAssignment = async (assignmentId) => {
+    try {
+        const res = await apiClient.delete(`/api/ta/assignments/${assignmentId}`);
+        return res.data;
+    } catch (error) {
+        console.error('과제 삭제 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '과제 삭제에 실패했습니다.');
+    }
+};
+
+// === 수강생 관리 API ===
+export const getCourseStudents = async (courseId) => {
+    try {
+        const res = await apiClient.get(`/api/ta/courses/${courseId}/students`);
+        return res.data;
+    } catch (error) {
+        console.error('수강생 목록 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '수강생 목록을 불러오지 못했습니다.');
+    }
+};
+
+export const addCourseStudent = async (courseId, { email }) => {
+    try {
+        const res = await apiClient.post(`/api/ta/courses/${courseId}/students`, { email });
+        return res.data;
+    } catch (error) {
+        console.error('수강생 추가 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '수강생 추가에 실패했습니다.');
+    }
+};
+
+export const deleteCourseStudent = async (courseId, studentId) => {
+    try {
+        const res = await apiClient.delete(`/api/ta/courses/${courseId}/students/${studentId}`);
+        return res.data;
+    } catch (error) {
+        console.error('수강생 삭제 API 에러:', error.response || error);
+        throw new Error(error.response?.data?.error || '수강생 삭제에 실패했습니다.');
+    }
+};
+
 
 // ==================== Axios Interceptor ====================
 
 apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('accessToken');
-  if (token) {
-    config.headers['Authorization'] = `Bearer ${token}`;
-  }
-  return config;
+    // 요청 시마다 로컬 스토리지에서 토큰을 가져와 헤더에 추가
+    const token = localStorage.getItem('accessToken');
+    if (token) {
+        config.headers['Authorization'] = `Bearer ${token}`;
+    }
+    return config;
 }, (error) => {
-  return Promise.reject(error);
+    return Promise.reject(error);
 });
 
 export { apiClient };
-// DELETE /api/ta/assignments/<assignment_id>
-export const deleteAssignment = async (assignmentId) => {
-  try {
-    const res = await apiClient.delete(`/api/ta/assignments/${assignmentId}`);
-    return res.data;
-  } catch (error) {
-    console.error('과제 삭제 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '과제 삭제에 실패했습니다.');
-  }
-};
-
-// === 수강생 관리 API ===
-// GET /api/ta/courses/<course_id>/students
-export const getCourseStudents = async (courseId) => {
-  try {
-    const res = await apiClient.get(`/api/ta/courses/${courseId}/students`);
-    // 예상: { students: [ { id, email, name, ... } ] }
-    return res.data;
-  } catch (error) {
-    console.error('수강생 목록 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '수강생 목록을 불러오지 못했습니다.');
-  }
-};
-
-// POST /api/ta/courses/<course_id>/students
-export const addCourseStudent = async (courseId, { email }) => {
-  try {
-    const res = await apiClient.post(`/api/ta/courses/${courseId}/students`, { email });
-    return res.data;
-  } catch (error) {
-    console.error('수강생 추가 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '수강생 추가에 실패했습니다.');
-  }
-};
-
-// DELETE /api/ta/courses/<course_id>/students/<student_id>
-export const deleteCourseStudent = async (courseId, studentId) => {
-  try {
-    const res = await apiClient.delete(`/api/ta/courses/${courseId}/students/${studentId}`);
-    return res.data;
-  } catch (error) {
-    console.error('수강생 삭제 API 에러:', error.response || error);
-    throw new Error(error.response?.data?.error || '수강생 삭제에 실패했습니다.');
-  }
-};

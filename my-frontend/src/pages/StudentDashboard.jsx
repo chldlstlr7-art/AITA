@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  Container,
   Box,
   Grid,
   Paper,
@@ -16,16 +15,31 @@ import {
   Refresh as RefreshIcon,
   Home as HomeIcon,
 } from '@mui/icons-material';
+
 import CourseList from '../components/student/CourseList.jsx';
 import AssignmentList from '../components/student/AssignmentList.jsx';
 import SubmissionDetail from '../components/student/SubmissionDetail.jsx';
 import UnsubmittedReports from '../components/student/UnsubmittedReports.jsx';
-import { getStudentDashboard, getStudentCourseAssignments } from '../services/api.js';
+
+import { 
+  getStudentDashboard, 
+  getStudentCourseAssignments,
+  getAssignmentsByCourse // 👈 [중요] 관리자용 과제 조회 API
+} from '../services/api.js';
 import { getUserIdFromToken } from '../utils/jwtHelper.js';
+
+// ==================== Constants ====================
+
+// 🔥 개발자(Admin) 이메일 목록
+const DEV_EMAILS = [
+  "dabok2@snu.ac.kr",
+  "dev2@snu.ac.kr",
+  "dev3@snu.ac.kr",
+  "dev@snu.ac.kr"
+];
 
 // ==================== Styled Components ====================
 
-// 🔥 전체 화면 컨테이너
 const PageContainer = styled(Box)(({ theme }) => ({
   minHeight: '100vh',
   backgroundColor: '#f8f9fa',
@@ -33,7 +47,6 @@ const PageContainer = styled(Box)(({ theme }) => ({
   width: '100%',
 }));
 
-// 🔥 전체 너비 컨텐츠 래퍼
 const ContentWrapper = styled(Box)(({ theme }) => ({
   width: '100%',
   maxWidth: '100%',
@@ -48,7 +61,6 @@ const WhiteContainer = styled(Paper)(({ theme }) => ({
   boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
 }));
 
-// 🔥 사이드바 - 고정 너비
 const Sidebar = styled(Paper)(({ theme }) => ({
   backgroundColor: 'white',
   borderRadius: theme.spacing(2),
@@ -61,20 +73,9 @@ const Sidebar = styled(Paper)(({ theme }) => ({
   width: '100%',
   minWidth: '200px',
   maxWidth: '250px',
-  // 🔥 스크롤바 스타일링
-  '&::-webkit-scrollbar': {
-    width: '6px',
-  },
-  '&::-webkit-scrollbar-track': {
-    backgroundColor: 'transparent',
-  },
-  '&::-webkit-scrollbar-thumb': {
-    backgroundColor: theme.palette.divider,
-    borderRadius: '3px',
-    '&:hover': {
-      backgroundColor: theme.palette.action.hover,
-    },
-  },
+  '&::-webkit-scrollbar': { width: '6px' },
+  '&::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
+  '&::-webkit-scrollbar-thumb': { backgroundColor: theme.palette.divider, borderRadius: '3px' },
 }));
 
 const MainContent = styled(Box)(({ theme }) => ({
@@ -113,14 +114,28 @@ function StudentDashboard() {
   const { userId: paramUserId } = useParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
   const [dashboardData, setDashboardData] = useState({
     student: null,
     courses: [],
     submitted_reports: [],
   });
+  
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // 현재 로그인한 사용자 이메일 확인
+  const getCurrentUserEmail = () => {
+    const token = localStorage.getItem('accessToken');
+    if (!token) return '';
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        return payload.email || '';
+    } catch (e) {
+        return '';
+    }
+  };
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -129,41 +144,53 @@ function StudentDashboard() {
         setError(null);
 
         const userId = paramUserId || getUserIdFromToken();
-        
-        if (!userId) {
-          throw new Error('로그인이 필요합니다.');
-        }
+        if (!userId) throw new Error('로그인이 필요합니다.');
 
-        console.log('[StudentDashboard] 📡 데이터 로드 시작:', userId);
-
+        // 1. 대시보드 기본 데이터 가져오기
+        // 개발자가 Admin 권한이 있다면, 이 API는 정상적으로 200 OK와 데이터를 반환합니다.
         const data = await getStudentDashboard(userId);
-        console.log('[StudentDashboard] ✅ 대시보드 조회 성공:', data);
+        
+        // 2. 개발자(Admin) 여부 확인
+        const currentUserEmail = getCurrentUserEmail();
+        const isDeveloper = DEV_EMAILS.includes(currentUserEmail);
 
-        // 🔥 각 과목의 과제 목록 추가 로드
+        console.log(`[Dashboard] TargetUser: ${userId}, LoginUser: ${currentUserEmail}, IsDev: ${isDeveloper}`);
+
         if (data.courses && data.courses.length > 0) {
-          console.log('[StudentDashboard] 📡 과제 목록 로드 시작...');
           
+          // 3. 각 과목의 과제 목록 가져오기
           const coursesWithAssignments = await Promise.all(
             data.courses.map(async (course) => {
               try {
-                const assignmentsData = await getStudentCourseAssignments(course.course_id);
-                console.log(`[StudentDashboard] ✅ 과목 ${course.course_code} 과제 로드:`, assignmentsData);
+                let assignmentsData = [];
+
+                if (isDeveloper) {
+                  // ✅ [Case A] 개발자(Admin)인 경우
+                  // Admin은 해당 과목의 수강생(Enrollment)이 아닐 확률이 높습니다.
+                  // 따라서 수강생 체크를 하는 학생용 API 대신, TA용 API를 써야 과제 목록이 보입니다.
+                  const res = await getAssignmentsByCourse(course.course_id);
+                  
+                  if (Array.isArray(res)) {
+                    assignmentsData = res;
+                  } else if (res && Array.isArray(res.assignments)) {
+                    assignmentsData = res.assignments;
+                  }
+                } else {
+                  // 🟦 [Case B] 일반 학생인 경우
+                  // 수강생 검증이 필요한 기존 API 사용
+                  assignmentsData = await getStudentCourseAssignments(course.course_id);
+                }
                 
                 return {
                   ...course,
                   assignments: Array.isArray(assignmentsData) ? assignmentsData : [],
                 };
               } catch (err) {
-                console.error(`[StudentDashboard] ❌ 과목 ${course.course_code} 과제 로드 실패:`, err);
-                return {
-                  ...course,
-                  assignments: [],
-                };
+                console.error(`[Dashboard] 과제 로드 실패 (${course.course_code}):`, err);
+                return { ...course, assignments: [] };
               }
             })
           );
-
-          console.log('[StudentDashboard] ✅ 모든 과제 로드 완료:', coursesWithAssignments);
 
           setDashboardData({
             student: data.student || null,
@@ -171,10 +198,9 @@ function StudentDashboard() {
             submitted_reports: Array.isArray(data.submitted_reports) ? data.submitted_reports : [],
           });
 
-          // 첫 번째 과목 자동 선택
-          const firstCourse = coursesWithAssignments[0];
-          setSelectedCourse(firstCourse);
-          console.log('[StudentDashboard] 🎯 첫 번째 과목 선택:', firstCourse);
+          if (coursesWithAssignments.length > 0) {
+            setSelectedCourse(coursesWithAssignments[0]);
+          }
 
         } else {
           setDashboardData({
@@ -185,7 +211,7 @@ function StudentDashboard() {
         }
 
       } catch (err) {
-        console.error('[StudentDashboard] ❌ 데이터 로드 실패:', err);
+        console.error('[StudentDashboard] 데이터 로드 실패:', err);
         setError(err.message || '데이터를 불러올 수 없습니다.');
       } finally {
         setLoading(false);
@@ -196,12 +222,10 @@ function StudentDashboard() {
   }, [paramUserId]);
 
   const handleCourseSelect = (course) => {
-    console.log('[StudentDashboard] 🎯 과목 선택:', course);
     setSelectedCourse(course);
     setSelectedAssignment(null);
   };
 
-  // 로딩 중
   if (loading) {
     return (
       <PageContainer>
@@ -209,9 +233,7 @@ function StudentDashboard() {
           <WhiteContainer>
             <LoadingContainer>
               <CircularProgress size={60} />
-              <Typography variant="h6" color="text.secondary">
-                대시보드 데이터를 불러오는 중...
-              </Typography>
+              <Typography variant="h6" color="text.secondary">대시보드 로딩 중...</Typography>
             </LoadingContainer>
           </WhiteContainer>
         </ContentWrapper>
@@ -219,40 +241,12 @@ function StudentDashboard() {
     );
   }
 
-  // 에러 발생 시
   if (error) {
     return (
       <PageContainer>
         <ContentWrapper>
           <WhiteContainer>
-            <Alert 
-              severity="error"
-              action={
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  <Button
-                    color="inherit"
-                    size="small"
-                    startIcon={<RefreshIcon />}
-                    onClick={() => window.location.reload()}
-                  >
-                    다시 시도
-                  </Button>
-                  <Button
-                    color="inherit"
-                    size="small"
-                    startIcon={<HomeIcon />}
-                    onClick={() => window.location.href = '/'}
-                  >
-                    홈으로
-                  </Button>
-                </Box>
-              }
-            >
-              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                데이터 로드 실패
-              </Typography>
-              {error}
-            </Alert>
+            <Alert severity="error">{error}</Alert>
           </WhiteContainer>
         </ContentWrapper>
       </PageContainer>
@@ -265,30 +259,19 @@ function StudentDashboard() {
     <PageContainer>
       <ContentWrapper>
         <PageHeader>
-          <PageTitle>
-            학생 대시보드
-          </PageTitle>
-          <PageSubtitle>
-            {student?.name || '학생'}님의 수강 과목과 제출 현황을 확인하세요
-          </PageSubtitle>
+          <PageTitle>학생 대시보드</PageTitle>
+          <PageSubtitle>{student?.name || '학생'}님의 학습 현황</PageSubtitle>
         </PageHeader>
 
-        {/* 🔥 전체 너비 Grid 레이아웃 */}
         <Grid container spacing={2} sx={{ width: '100%', margin: 0 }}>
-          {/* 왼쪽: 과목 리스트 - 고정 너비 */}
-          <Grid 
-            item 
-            xs={12} 
-            md="auto"
-            sx={{ 
-              flexShrink: 0,
-              width: { xs: '100%', md: '250px' },
-              paddingLeft: '0 !important',
-            }}
-          >
+          {/* 왼쪽: 과목 리스트 */}
+          <Grid item xs={12} md="auto" sx={{ flexShrink: 0, width: { xs: '100%', md: '250px' }, paddingLeft: '0 !important' }}>
             <Sidebar>
               <CourseList
                 courses={courses}
+                // 🔥 [핵심 수정] 이 props가 없어서 리포트 버튼이 안 떴던 것입니다.
+                unsubmittedReports={submitted_reports.filter(r => !r.assignment_id)}
+                
                 selectedCourse={selectedCourse}
                 onCourseSelect={handleCourseSelect}
                 onUnsubmittedClick={() => setDrawerOpen(true)}
@@ -296,89 +279,50 @@ function StudentDashboard() {
             </Sidebar>
           </Grid>
 
-          {/* 중앙: 과제 리스트 - 유연한 너비 */}
-          <Grid 
-            item 
-            xs={12} 
-            md
-            sx={{ 
-              flex: 1,
-              minWidth: 0,
-            }}
-          >
+          {/* 중앙: 과제 리스트 */}
+          <Grid item xs={12} md sx={{ flex: 1, minWidth: 0 }}>
             <MainContent>
               {selectedCourse ? (
                 <AssignmentList
                   course={selectedCourse}
-                  submissions={submitted_reports.filter(
-                    (report) => report.course_id === selectedCourse.course_id
-                  )}
+                  submissions={submitted_reports.filter((r) => r.course_id === selectedCourse.course_id)}
                   selectedAssignment={selectedAssignment}
                   onAssignmentSelect={setSelectedAssignment}
                 />
               ) : (
                 <WhiteContainer>
                   <Box sx={{ textAlign: 'center', py: 8 }}>
-                    <HomeIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
-                    <Typography variant="h6" color="text.secondary" gutterBottom>
-                      과목을 선택해주세요
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      왼쪽 목록에서 과목을 클릭하면 과제 목록을 확인할 수 있습니다
-                    </Typography>
+                    <HomeIcon sx={{ fontSize: 64, color: 'text.disabled' }} />
+                    <Typography color="text.secondary" sx={{ mt: 2 }}>과목을 선택해주세요</Typography>
                   </Box>
                 </WhiteContainer>
               )}
             </MainContent>
           </Grid>
 
-          {/* 오른쪽: 제출물 상세 - 고정 너비 */}
+          {/* 오른쪽: 제출물 상세 */}
           {selectedAssignment && (
-            <Grid 
-              item 
-              xs={12} 
-              md="auto"
-              sx={{ 
-                flexShrink: 0,
-                width: { xs: '100%', md: '400px' },
-              }}
-            >
+            <Grid item xs={12} md="auto" sx={{ flexShrink: 0, width: { xs: '100%', md: '400px' } }}>
               <SubmissionDetail
                 assignment={selectedAssignment}
                 course={selectedCourse}
-                submissions={submitted_reports.filter(
-                  (report) => 
-                    (report.assignment_id === selectedAssignment.assignment_id) ||
-                    (report.assignment_id === selectedAssignment.id)
+                submissions={submitted_reports.filter((r) => 
+                  (r.assignment_id === selectedAssignment.assignment_id) || (r.assignment_id === selectedAssignment.id)
                 )}
                 unsubmittedReports={submitted_reports.filter((r) => !r.assignment_id)}
                 onClose={() => setSelectedAssignment(null)}
-                onRefresh={async () => {
-                  // 데이터 새로고침
-                  const userId = paramUserId || getUserIdFromToken();
-                  const data = await getStudentDashboard(userId);
-                  setDashboardData({
-                    student: data.student || null,
-                    courses: data.courses || [],
-                    submitted_reports: Array.isArray(data.submitted_reports) ? data.submitted_reports : [],
-                  });
-                }}
+                onRefresh={() => window.location.reload()}
               />
             </Grid>
           )}
         </Grid>
 
-        {/* 제출하지 않은 리포트 Drawer */}
+        {/* 미제출 리포트 Drawer */}
         <Drawer
           anchor="right"
           open={drawerOpen}
           onClose={() => setDrawerOpen(false)}
-          PaperProps={{
-            sx: {
-              width: { xs: '100%', sm: 480 },
-              p: 3,
-            }
-          }}
+          PaperProps={{ sx: { width: { xs: '100%', sm: 480 }, p: 3 } }}
         >
           <UnsubmittedReports
             reports={submitted_reports.filter((r) => !r.assignment_id)}

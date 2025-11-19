@@ -5,6 +5,7 @@ from models import User, Course, Assignment, AnalysisReport, course_enrollment, 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
+import traceback
 
 class CourseManagementService:
 
@@ -304,18 +305,22 @@ class CourseManagementService:
             "average_score": average_score
         }
 
+    # 🔥 [핵심 수정] 학생 대시보드 상세 조회 로직
     def get_student_dashboard_details(self, student_id):
         """ 특정 학생의 상세 정보(수강 과목, 제출 리포트)를 조회합니다. """
         try:
             from models import User, Course, AnalysisReport, Assignment
             from sqlalchemy.orm import joinedload
             
+            # 1. 학생 객체 확인
             student = db.session.get(User, student_id)
             
             if not student:
                 raise ValueError("학생을 찾을 수 없습니다.")
-            if student.role != 'student':
-                raise ValueError("해당 사용자는 학생이 아닙니다.")
+            
+            # (개발자 테스트 편의를 위해 role check는 잠시 생략 가능, 필요시 주석 해제)
+            # if student.role != 'student':
+            #     raise ValueError("해당 사용자는 학생이 아닙니다.")
                 
             student_info = {
                 "id": student.id,
@@ -323,7 +328,7 @@ class CourseManagementService:
                 "username": student.username or student.email.split('@')[0]
             }
 
-            # 🔥 수정: 직접 쿼리로 수강 과목 조회 (order_by 문제 해결)
+            # 2. 수강 과목 조회
             enrolled_courses = db.session.query(Course).join(
                 course_enrollment, (course_enrollment.c.course_id == Course.id)
             ).filter(
@@ -332,13 +337,14 @@ class CourseManagementService:
             
             courses_list = [
                 {
-                    "course_id": course.id,  # 🔥 수정: "id" → "course_id"
+                    "course_id": course.id,
                     "course_name": course.course_name,
                     "course_code": course.course_code
                 } for course in enrolled_courses
             ]
 
-            # 🔥 수정: joinedload로 N+1 쿼리 방지
+            # 3. [수정됨] 해당 학생(student_id)의 모든 리포트 조회
+            # 주의: filter_by(user_id=student_id)가 필수입니다.
             student_reports = AnalysisReport.query.filter_by(user_id=student_id)\
                 .options(joinedload(AnalysisReport.assignment))\
                 .order_by(AnalysisReport.created_at.desc())\
@@ -355,7 +361,7 @@ class CourseManagementService:
                         assignment_id = report.assignment.id
                     
                     reports_list.append({
-                        "report_id": report.id,  # 🔥 수정: "id" → "report_id"
+                        "report_id": report.id,
                         "report_title": report.report_title or "제목 없음",
                         "status": report.status,
                         "created_at": report.created_at.isoformat() if report.created_at else None,
@@ -368,18 +374,17 @@ class CourseManagementService:
 
             result = {
                 "student": student_info,
-                "courses": courses_list,  # 🔥 수정: "enrolled_courses" → "courses"
+                "courses": courses_list,
                 "submitted_reports": reports_list
             }
             
-            print(f"[CourseService] ✅ 대시보드 조회 성공: {len(courses_list)}개 과목, {len(reports_list)}개 리포트")
+            print(f"[CourseService] ✅ 학생({student_id}) 대시보드 조회 성공: 리포트 {len(reports_list)}개 반환")
             return result
             
         except ValueError as e:
             raise
         except Exception as e:
             print(f"[CourseService] get_student_dashboard_details 실패: {e}")
-            import traceback
             traceback.print_exc()
             raise Exception("대시보드 조회 중 서버 오류가 발생했습니다.")
 
@@ -464,11 +469,6 @@ class CourseManagementService:
             raise ValueError("Student is not enrolled in this course.")
             
         # [수정] 학생용 API는 TA 권한이 필요 없으므로 ta_user_id 없이 호출
-        # (단, get_assignments_for_course가 ta_user_id를 필수로 받으므로,
-        #  학생용/TA용을 분리하거나, 이 함수에 TA 권한 확인을 빼야 함)
-        
-        # [임시 수정] 학생은 권한 검사가 필요 없으므로, TA용 함수를 재사용하지 않고
-        # TA 권한 검사만 뺀 로직을 여기에 구현합니다.
         assignments = db.session.query(Assignment).filter_by(course_id=course_id).order_by(
             db.func.coalesce(Assignment.due_date, datetime(1900, 1, 1)).desc(), 
             Assignment.id.desc()
@@ -488,28 +488,53 @@ class CourseManagementService:
         return assignments_list
 
 
-    def submit_report_to_assignment(self, report_id, assignment_id, student_id):
-        """ [신규] 학생이 분석 완료된 리포트를 과제에 제출합니다. """
+    def submit_report_to_assignment(self, report_id, assignment_id, requestor_id):
+        """ [수정] 학생이 분석 완료된 리포트를 과제에 제출합니다. (Admin/TA/Dev 예외 처리 추가) """
         report = self._get_report(report_id)
         assignment = self._get_assignment(assignment_id)
         
-        if report.user_id != student_id:
-            raise ValueError("Access denied. You are not the owner of this report.")
+        # 1. 요청자(requestor) 확인
+        requestor = db.session.get(User, requestor_id)
+        if not requestor:
+             raise ValueError("Requestor user not found.")
+
+        # 개발자 이메일 목록
+        DEV_EMAILS = ["dabok2@snu.ac.kr", "dev2@snu.ac.kr", "dev3@snu.ac.kr", "dev@snu.ac.kr"]
+
+        # 2. 요청 권한 확인: 리포트 소유자 본인이거나, Admin/TA/Dev여야 함
+        is_owner = (report.user_id == requestor_id)
+        is_privileged_requestor = (requestor.is_admin or requestor.role == 'ta' or requestor.email in DEV_EMAILS)
+
+        if not is_owner and not is_privileged_requestor:
+             raise ValueError("Access denied. You are not the owner of this report.")
             
+        # 3. 리포트 상태 확인
         if report.status != 'completed':
+            # (테스트 편의를 위해, processing 상태라도 강제 제출이 필요하면 이 부분을 주석 처리하세요)
+            # 지금은 정석대로 유지합니다.
             raise ValueError("Report analysis is not yet complete.")
             
         if report.assignment_id is not None:
             raise ValueError("This report has already been submitted.")
             
-        is_enrolled = db.session.query(course_enrollment).filter_by(
-            user_id=student_id,
-            course_id=assignment.course_id
-        ).first()
+        # 4. 수강 여부 확인 (핵심 수정)
+        # 리포트의 실제 주인(report.user_id)을 기준으로 확인합니다.
+        report_owner = db.session.get(User, report.user_id)
         
-        if not is_enrolled:
-            raise ValueError("You are not enrolled in the course for this assignment.")
+        # 🔥 [수정] 리포트 주인이 관리자급(Admin/TA/Dev)이면 수강 여부 체크를 건너뜁니다.
+        is_owner_privileged = (report_owner.is_admin or report_owner.role == 'ta' or report_owner.email in DEV_EMAILS)
+        
+        if not is_owner_privileged:
+            # 일반 학생인 경우에만 수강 여부를 엄격하게 체크합니다.
+            is_enrolled = db.session.query(course_enrollment).filter_by(
+                user_id=report.user_id,
+                course_id=assignment.course_id
+            ).first()
             
+            if not is_enrolled:
+                raise ValueError(f"Report owner ({report_owner.username}) is not enrolled in the course.")
+            
+        # 5. 제출 처리
         report.assignment_id = assignment_id
         db.session.commit()
         

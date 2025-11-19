@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Box, Typography, Stack, Divider, Fade, Paper, Button, Dialog, DialogTitle, DialogContent, DialogActions, MenuItem, Select, FormControl, InputLabel, CircularProgress } from '@mui/material';
+import React from 'react';
+import { Box, Typography, Stack, Divider, Fade, Paper, Button } from '@mui/material';
 import {
   AddCircleOutline as NewReportIcon,
   Dashboard as DashboardIcon,
@@ -7,15 +7,7 @@ import {
 } from '@mui/icons-material';
 import { styled, alpha } from '@mui/material/styles';
 
-// [수정] api.js에서 함수 임포트
-import { 
-  getStudentDashboard, 
-  getStudentCourseAssignments,
-  submitReportToAssignment 
-} from '../services/api'; // (경로가 맞는지 확인하세요)
-
-// ==================== Styled Components ====================
-// (스타일 코드는 동일)
+// ==================== Styled Components (기존 디자인 유지) ====================
 const ActionsContainer = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(4),
   marginTop: theme.spacing(4),
@@ -76,107 +68,10 @@ const ActionButton = styled(Button)(({ theme, variant: buttonVariant }) => {
     }),
   };
 });
-// =========================================================
 
-function AdvancementActions({ onNewReport, onViewDashboard, onSubmit, studentId, reportId }) {
-  // 과제 제출 Dialog 상태
-  const [open, setOpen] = useState(false);
-  const [courses, setCourses] = useState([]);
-  const [assignments, setAssignments] = useState([]);
-  const [selectedCourse, setSelectedCourse] = useState('');
-  const [selectedAssignment, setSelectedAssignment] = useState('');
-  const [loadingCourses, setLoadingCourses] = useState(false);
-  
-  // --- 👇 [수정] 이 줄이 누락되었습니다 ---
-  const [loadingAssignments, setLoadingAssignments] = useState(false);
-  // --- 👆 [수정] ---
-  
-  const [submitting, setSubmitting] = useState(false);
+// ==================== Component ====================
 
-  // Dialog 닫기 함수 추가
-  const handleClose = () => {
-    setOpen(false);
-  };
-
-  // Dialog 열기 시 학생 대시보드에서 과목 조회
-  const handleOpen = async () => {
-    setOpen(true);
-    setSelectedCourse('');
-    setSelectedAssignment('');
-    setAssignments([]);
-    setCourses([]);
-    setLoadingCourses(true);
-
-    try {
-      const data = await getStudentDashboard(studentId);
-      
-      // --- 👇 [수정] ---
-      // API 응답 로그에 'courses' 키로 데이터가 왔으므로 'courses'를 사용합니다.
-      const courseData = data.courses?.map(c => ({
-        course_id: c.course_id,
-        course_name: `${c.course_code} - ${c.course_name}` 
-      })) || [];
-      // --- 👆 [수정] ---
-      
-      setCourses(courseData);
-      
-    } catch (e) {
-      console.error("대시보드 로딩 실패:", e);
-      setCourses([]);
-      alert(e.message || '과목 정보를 불러오는데 실패했습니다.');
-    }
-    setLoadingCourses(false);
-  };
-
-  // 과목 선택 시 해당 과목의 과제 목록 API 호출
-  const handleCourseChange = async (e) => {
-    const courseId = e.target.value;
-    setSelectedCourse(courseId);
-    setSelectedAssignment('');
-    
-    if (!courseId) {
-      setAssignments([]);
-      return;
-    }
-
-    try {
-      setLoadingAssignments(true);
-      const assignmentData = await getStudentCourseAssignments(courseId);
-      setAssignments(assignmentData || []);
-    } catch (e) {
-      console.error("과제 목록 로딩 실패:", e);
-      alert(e.message || '과제 목록을 불러오는데 실패했습니다.');
-      setAssignments([]);
-    } finally {
-      setLoadingAssignments(false);
-    }
-  };
-
-  // 과제 선택
-  const handleAssignmentChange = (e) => {
-    setSelectedAssignment(e.target.value);
-  };
-
-  // 제출 요청
-  const handleSubmit = async () => {
-    if (!selectedAssignment) return;
-    setSubmitting(true);
-    try {
-      // [수정] api.js의 submitReportToAssignment 함수 사용
-      const json = await submitReportToAssignment(reportId, selectedAssignment);
-      
-      handleClose();
-      // 부모(AdvancementPage)의 onSubmit (스낵바 표시/이동) 호출
-      if (onSubmit) { 
-        onSubmit(json);
-      }
-      
-    } catch (e) {
-      alert(e.message || '서버 오류로 제출에 실패했습니다.');
-    }
-    setSubmitting(false);
-  };
-
+function AdvancementActions({ onNewReport, onViewDashboard, onSubmit }) {
   return (
     <Fade in timeout={1000}>
       <ActionsContainer elevation={0}>
@@ -234,8 +129,7 @@ function AdvancementActions({ onNewReport, onViewDashboard, onSubmit, studentId,
             variant="primary"
             fullWidth
             startIcon={<SubmitIcon />}
-            onClick={handleOpen}
-            disabled={submitting}
+            onClick={onSubmit} // 🔥 여기서 부모 컴포넌트(Page)의 다이얼로그 열기 함수를 실행
           >
             <Box sx={{ textAlign: 'left' }}>
               <Typography variant="body1" sx={{ fontWeight: 600 }}>
@@ -247,77 +141,6 @@ function AdvancementActions({ onNewReport, onViewDashboard, onSubmit, studentId,
             </Box>
           </ActionButton>
         </Stack>
-
-        {/* 제출 Dialog */}
-        <Dialog 
-          open={open} 
-          onClose={handleClose} 
-          maxWidth="xs" 
-          fullWidth
-          // --- 👇 [수정] 접근성 경고(aria-hidden) 해결 ---
-          PaperProps={{
-            tabIndex: -1,
-          }}
-          // --- 👆 [수정] ---
-        >
-          <DialogTitle>과제 제출</DialogTitle>
-          <DialogContent>
-            <Stack spacing={2} sx={{ pt: 1 }}>
-              <FormControl fullWidth>
-                <InputLabel>수강 중인 과목</InputLabel>
-                <Select
-                  value={selectedCourse}
-                  label="수강 중인 과목"
-                  onChange={handleCourseChange}
-                  disabled={loadingCourses}
-                >
-                  {loadingCourses && <MenuItem value=""><CircularProgress size={20} /></MenuItem>}
-                  {courses.length > 0 ? (
-                    courses.map(course => (
-                      <MenuItem key={course.course_id} value={course.course_id}>
-                        {course.course_name}
-                      </MenuItem>
-                    ))
-                  ) : (
-                    <MenuItem disabled>수강 중인 과목이 없습니다</MenuItem>
-                  )}
-                </Select>
-              </FormControl>
-              
-              <FormControl fullWidth disabled={!selectedCourse || loadingAssignments}>
-                <InputLabel>과제 선택</InputLabel>
-                <Select
-                  value={selectedAssignment}
-                  label="과제 선택"
-                  onChange={handleAssignmentChange}
-                >
-                  {loadingAssignments && <MenuItem value=""><CircularProgress size={20} /></MenuItem>}
-                  {assignments.length > 0 ? (
-                    assignments.map(assn => (
-                      <MenuItem key={assn.id} value={assn.id}>
-                        {assn.assignment_name}
-                      </MenuItem>
-                    ))
-                  ) : (
-                     <MenuItem disabled>
-                      {selectedCourse ? "선택 가능한 과제가 없습니다" : "과목을 먼저 선택하세요"}
-                     </MenuItem>
-                  )}
-                </Select>
-              </FormControl>
-            </Stack>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={handleClose}>취소</Button>
-            <Button 
-              variant="contained" 
-              onClick={handleSubmit} 
-              disabled={!selectedAssignment || submitting}
-            >
-              {submitting ? <CircularProgress size={20} /> : '제출'}
-            </Button>
-          </DialogActions>
-        </Dialog>
       </ActionsContainer>
     </Fade>
   );

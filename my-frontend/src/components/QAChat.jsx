@@ -19,7 +19,9 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SendIcon from '@mui/icons-material/Send';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { submitAnswer, getNextQuestion, getDeepDiveQuestion } from '../services/api.js';
+import { submitAnswer, getNextQuestion, requestDeepDiveQuestion, getReportStatus } from '../services/api.js';
+
+// ==================== Styled Components ====================
 
 const ChatContainer = styled(Box)(({ theme }) => ({
   width: '100%',
@@ -92,16 +94,6 @@ const InputRow = styled(Box)(({ theme }) => ({
   alignItems: 'stretch',
 }));
 
-// 중복 제거 헬퍼 (question_id 기준)
-const dedupeById = (arr = []) => {
-  const map = new Map();
-  for (const item of arr) {
-    if (!item) continue;
-    if (!map.has(item.question_id)) map.set(item.question_id, item);
-  }
-  return Array.from(map.values());
-};
-
 const formatTime = (ts) => {
   try {
     const d = new Date(ts);
@@ -111,13 +103,75 @@ const formatTime = (ts) => {
   }
 };
 
-// QAItem: 각 질문별 "채팅" 형태 UI
-function QAItem({ reportId, qaItem, onAnswerSubmit, onDeepDive, onRefreshQuestion, index }) {
-  // messages: [{ id, role: 'ai'|'user', text, ts, loading? }]
+// 🔥 데이터를 계층 구조로 변환하는 헬퍼 함수
+const groupQuestions = (flatQuestions) => {
+  if (!Array.isArray(flatQuestions)) return [];
+  
+  const questionMap = new Map();
+  const rootQuestions = [];
+
+  // 1. 모든 질문 등록
+  flatQuestions.forEach(q => {
+    questionMap.set(q.question_id, { ...q, children: [] });
+  });
+
+  // 2. 부모-자식 연결
+  flatQuestions.forEach(q => {
+    const current = questionMap.get(q.question_id);
+    if (q.parent_question_id && questionMap.has(q.parent_question_id)) {
+      const parent = questionMap.get(q.parent_question_id);
+      parent.children.push(current);
+    } else if (!q.parent_question_id) {
+      rootQuestions.push(current);
+    }
+  });
+
+  return rootQuestions;
+};
+
+// ==================== QAItem Component ====================
+
+function QAItem({ reportId, qaItem, onAnswerSubmit, onRefreshQuestion, index }) {
+  // 초기 메시지 구성
   const initialMessages = [];
-  if (qaItem.question) initialMessages.push({ id: `${qaItem.question_id}-q`, role: 'ai', text: qaItem.question, ts: Date.now() });
+  
+  // 1. 부모 질문
+  if (qaItem.question) {
+    initialMessages.push({ 
+      id: `${qaItem.question_id}-q`, 
+      role: 'ai', 
+      text: qaItem.question, 
+      ts: Date.now() 
+    });
+  }
+  // 2. 부모 답변
   if (qaItem.answer && qaItem.answer.trim()) {
-    initialMessages.push({ id: `${qaItem.question_id}-a`, role: 'user', text: qaItem.answer, ts: Date.now() - 1000 });
+    initialMessages.push({ 
+      id: `${qaItem.question_id}-a`, 
+      role: 'user', 
+      text: qaItem.answer, 
+      ts: Date.now() 
+    });
+  }
+
+  // 3. 자식(심화) 질문들 처리
+  if (qaItem.children && qaItem.children.length > 0) {
+    qaItem.children.forEach(child => {
+      initialMessages.push({
+        id: `${child.question_id}-q`,
+        role: 'ai',
+        text: child.question,
+        ts: Date.now() 
+      });
+      if (child.answer && child.answer.trim()) {
+        initialMessages.push({
+          id: `${child.question_id}-a`,
+          role: 'user',
+          text: child.answer,
+          ts: Date.now()
+        });
+      }
+    });
   }
 
   const [expanded, setExpanded] = useState(true);
@@ -126,9 +180,16 @@ function QAItem({ reportId, qaItem, onAnswerSubmit, onDeepDive, onRefreshQuestio
   const [isSending, setIsSending] = useState(false);
   const [isDeepDiveLoading, setIsDeepDiveLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [hasSubmittedAnswer, setHasSubmittedAnswer] = useState(!!qaItem.answer);
-  const [error, setError] = useState('');
+  
+  // 현재 대화가 끝난 시점의 질문 ID
+  const currentQuestionId = (qaItem.children && qaItem.children.length > 0)
+    ? qaItem.children[qaItem.children.length - 1].question_id
+    : qaItem.question_id;
 
+  // 답변 제출 여부 확인
+  const hasSubmittedAnswer = messages.length > 0 && messages[messages.length - 1].role === 'user';
+  
+  const [error, setError] = useState('');
   const msgsRef = useRef(null);
 
   useEffect(() => {
@@ -137,37 +198,25 @@ function QAItem({ reportId, qaItem, onAnswerSubmit, onDeepDive, onRefreshQuestio
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [messages.length, expanded]);
 
-  // 🆕 qaItem이 변경되면 messages를 업데이트 (새로고침 시)
-  useEffect(() => {
-    const newMessages = [];
-    if (qaItem.question) {
-      newMessages.push({ id: `${qaItem.question_id}-q`, role: 'ai', text: qaItem.question, ts: Date.now() });
-    }
-    if (qaItem.answer && qaItem.answer.trim()) {
-      newMessages.push({ id: `${qaItem.question_id}-a`, role: 'user', text: qaItem.answer, ts: Date.now() - 1000 });
-    }
-    setMessages(newMessages);
-    setHasSubmittedAnswer(!!qaItem.answer);
-  }, [qaItem.question_id, qaItem.question, qaItem.answer]);
-
   const handleSubmitAnswer = async () => {
     const text = input.trim();
     if (!text) return;
     
     setError('');
-    const msgId = `${qaItem.question_id}-u-${Date.now()}`;
+    const targetId = currentQuestionId;
+    
+    const msgId = `${targetId}-u-${Date.now()}`;
     const userMsg = { id: msgId, role: 'user', text: text, ts: Date.now() };
     setMessages((m) => [...m, userMsg]);
     setIsSending(true);
     setInput('');
 
     try {
-      const res = await submitAnswer(reportId, qaItem.question_id, text);
-      onAnswerSubmit(qaItem.question_id, text);
-      setHasSubmittedAnswer(true);
+      const res = await submitAnswer(reportId, targetId, text);
+      onAnswerSubmit(targetId, text); 
 
       if (res && res.assistant_reply) {
-        const aiId = `${qaItem.question_id}-ai-${Date.now()}`;
+        const aiId = `${targetId}-ai-${Date.now()}`;
         setMessages((m) => [...m, { id: aiId, role: 'ai', text: res.assistant_reply, ts: Date.now() }]);
       }
       setExpanded(true);
@@ -183,33 +232,53 @@ function QAItem({ reportId, qaItem, onAnswerSubmit, onDeepDive, onRefreshQuestio
     
     setError('');
     setIsDeepDiveLoading(true);
-    const tempId = `${qaItem.question_id}-deep-temp-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
-    const tempMsg = { id: tempId, role: 'ai', text: '심화 질문을 생성 중입니다...', ts: Date.now(), loading: true };
+
+    const targetId = currentQuestionId;
+    const tempId = `${targetId}-deep-temp-${Date.now()}`;
+    const tempMsg = { id: tempId, role: 'ai', text: '심화 질문을 생성하고 있습니다...', ts: Date.now(), loading: true };
     setMessages((m) => [...m, tempMsg]);
     
     try {
-      const deepText = await onDeepDive(qaItem.question_id);
-      const finalText = deepText || '심화 질문을 생성하지 못했습니다.';
-      setMessages((m) => m.map(msg => msg.id === tempId ? { ...msg, text: finalText, loading: false, ts: Date.now() } : msg));
+      await requestDeepDiveQuestion(reportId, targetId);
+      
+      let foundQuestion = null;
+      const maxAttempts = 15; 
+      
+      for (let i = 0; i < maxAttempts; i++) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const statusRes = await getReportStatus(reportId);
+        const history = statusRes.data?.qa_history || [];
+        foundQuestion = history.find(q => q.parent_question_id === targetId);
+        if (foundQuestion) break;
+      }
+
+      if (foundQuestion) {
+        setMessages((m) => m.map(msg => 
+          msg.id === tempId 
+            ? { ...msg, text: foundQuestion.question, loading: false, ts: Date.now() } 
+            : msg
+        ));
+      } else {
+        throw new Error("시간 내에 심화 질문을 가져오지 못했습니다.");
+      }
       setExpanded(true);
     } catch (err) {
+      console.error("Deep dive error:", err);
       const errText = err?.message || '심화 질문 요청 중 오류가 발생했습니다.';
-      setMessages((m) => m.map(msg => msg.id === tempId ? { ...msg, text: errText, loading: false, ts: Date.now() } : msg));
-      setError(err?.message || '심화 질문 요청 중 오류가 발생했습니다.');
+      setMessages((m) => m.map(msg => msg.id === tempId ? { ...msg, text: `[오류] ${errText}`, loading: false, ts: Date.now() } : msg));
+      setError(errText);
     } finally {
       setIsDeepDiveLoading(false);
     }
   };
 
   const handleRefresh = async () => {
-    if (hasSubmittedAnswer) {
-      setError('이미 답변을 제출한 질문은 새로고침할 수 없습니다.');
+    if (hasSubmittedAnswer || (qaItem.children && qaItem.children.length > 0)) {
+      setError('이미 답변을 제출했거나 심화 질문이 있는 경우 새로고침할 수 없습니다.');
       return;
     }
-
     setIsRefreshing(true);
     setError('');
-    
     try {
       await onRefreshQuestion(qaItem.question_id);
     } catch (err) {
@@ -241,20 +310,17 @@ function QAItem({ reportId, qaItem, onAnswerSubmit, onDeepDive, onRefreshQuestio
           </Typography>
         </Box>
 
-        {/* 🆕 질문 새로고침 버튼 (답변 제출 전에만 표시) */}
-        {!hasSubmittedAnswer && (
+        {messages.length === 1 && (
           <IconButton 
             size="small" 
             onClick={handleRefresh}
             disabled={isRefreshing || isSending}
-            aria-label="질문 새로고침"
-            title="질문 새로고침"
           >
             {isRefreshing ? <CircularProgress size={20} /> : <RefreshIcon />}
           </IconButton>
         )}
 
-        <IconButton size="small" onClick={() => setExpanded(!expanded)} aria-label={expanded ? '접기' : '펼치기'}>
+        <IconButton size="small" onClick={() => setExpanded(!expanded)}>
           {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
         </IconButton>
       </MetaRow>
@@ -284,9 +350,6 @@ function QAItem({ reportId, qaItem, onAnswerSubmit, onDeepDive, onRefreshQuestio
                     <Typography variant="caption" color="text.secondary">
                       {formatTime(m.ts)}
                     </Typography>
-                    {m.role === 'ai' && m.loading === true && (
-                      <Typography variant="caption" color="text.secondary">생성 중…</Typography>
-                    )}
                   </MessageMeta>
                 </Box>
                 {m.role === 'user' && <Avatar sx={{ bgcolor: (t) => t.palette.primary.main, width: 28, height: 28 }}><ChatBubbleOutlineIcon fontSize="small" /></Avatar>}
@@ -313,23 +376,41 @@ function QAItem({ reportId, qaItem, onAnswerSubmit, onDeepDive, onRefreshQuestio
                 onClick={handleSubmitAnswer} 
                 disabled={isSending || isDeepDiveLoading || !input.trim() || isRefreshing}
                 startIcon={isSending ? <CircularProgress size={18} color="inherit" /> : <SendIcon />}
-                sx={{ 
-                  minWidth: 120,
-                  alignSelf: 'stretch',
-                }}
+                sx={{ minWidth: 120, alignSelf: 'stretch' }}
               >
                 {isSending ? '전송 중...' : '답변 제출'}
               </Button>
             </InputRow>
-
+            
+            {/* 🔥 [수정됨] 심화 질문 버튼 - Solid(채움) 스타일 적용 */}
             <Button 
               fullWidth
-              variant="outlined" 
-              color="secondary"
+              variant="contained" 
+              color="secondary" 
               onClick={handleDeepDive} 
               disabled={!hasSubmittedAnswer || isDeepDiveLoading || isSending || isRefreshing}
               startIcon={isDeepDiveLoading ? <CircularProgress size={18} color="inherit" /> : <AutoAwesomeIcon />}
-              sx={{ mt: 1, height: 44 }}
+              sx={{ 
+                mt: 1, 
+                height: 44,
+                fontWeight: 700, // 굵은 글씨
+                boxShadow: 2, // 약간의 그림자
+                color: 'white', // 흰색 글씨 (배경이 노란색/주황색일 때 잘 보이도록)
+                
+                // 활성화 상태 스타일
+                backgroundColor: 'secondary.main',
+                '&:hover': {
+                    backgroundColor: 'secondary.dark',
+                    transform: 'translateY(-1px)',
+                    boxShadow: 3,
+                },
+                
+                // 비활성화 상태 스타일
+                '&.Mui-disabled': {
+                    backgroundColor: 'action.disabledBackground',
+                    color: 'text.disabled'
+                }
+              }}
             >
               {isDeepDiveLoading ? '생성 중...' : '심화 질문 생성'}
             </Button>
@@ -342,7 +423,8 @@ function QAItem({ reportId, qaItem, onAnswerSubmit, onDeepDive, onRefreshQuestio
   );
 }
 
-// 메인 QAChat: 여러 QAItem을 채팅처럼 렌더
+// ==================== QAChat Component ====================
+
 function QAChat({ 
   reportId, 
   initialQuestions, 
@@ -350,12 +432,19 @@ function QAChat({
   questionsPoolCount, 
   isRefilling 
 }) {
-  const init = dedupeById(qaHistory || initialQuestions || []);
-  const [history, setHistory] = useState(init);
-  const [poolCount, setPoolCount] = useState(questionsPoolCount || 0); // 🆕 실제 pool 카운트
+  const rawHistory = qaHistory || initialQuestions || [];
+  const groupedHistory = groupQuestions(rawHistory);
+
+  const [history, setHistory] = useState(groupedHistory);
+  const [poolCount, setPoolCount] = useState(questionsPoolCount || 0);
   const [isLoadingNext, setIsLoadingNext] = useState(false);
   const [isLoadingRefill, setIsLoadingRefill] = useState(isRefilling || false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    const newGrouped = groupQuestions(qaHistory || initialQuestions || []);
+    setHistory(newGrouped);
+  }, [qaHistory, initialQuestions]);
 
   const handleAddQuestion = async () => {
     setIsLoadingNext(true);
@@ -363,11 +452,8 @@ function QAChat({
     try {
       const newQuestion = await getNextQuestion(reportId);
       if (!newQuestion) return;
-      const exists = history.some(h => h.question_id === newQuestion.question_id);
-      if (!exists) {
-        setHistory((h) => [...h, newQuestion]);
-        setPoolCount((c) => Math.max(0, c - 1)); // 🆕 pool 카운트 감소
-      }
+      setHistory((h) => [...h, { ...newQuestion, children: [] }]);
+      setPoolCount((c) => Math.max(0, c - 1));
     } catch (err) {
       setError(err?.message || '추가 질문을 불러오는 중 오류가 발생했습니다.');
     } finally {
@@ -376,49 +462,21 @@ function QAChat({
   };
 
   const handleAnswerSubmit = (questionId, userAnswer) => {
-    setHistory((currentHistory) => 
-      currentHistory.map(item => 
-        item.question_id === questionId 
-          ? { ...item, answer: userAnswer } 
-          : item
-      )
-    );
+    // 로컬 상태 처리는 QAItem에서 담당
   };
 
-  const handleDeepDive = useCallback(async (parentQuestionId) => {
-    setError('');
-    try {
-      const res = await getDeepDiveQuestion(reportId, parentQuestionId);
-      const text = res?.question || res?.text || res?.prompt || (typeof res === 'string' ? res : null);
-      return text || null;
-    } catch (err) {
-      setError(err?.message || '심화 질문 생성 중 오류가 발생했습니다.');
-      throw err;
-    }
-  }, [reportId]);
-
-  // 🆕 질문 새로고침 핸들러: pool을 유지하기 위해 백엔드에서 새 질문을 받아옴
   const handleRefreshQuestion = useCallback(async (questionId) => {
     setError('');
     try {
-      // 백엔드에서 새 질문 가져오기
       const newQuestion = await getNextQuestion(reportId);
-      if (!newQuestion) {
-        throw new Error('새 질문을 가져올 수 없습니다.');
-      }
+      if (!newQuestion) throw new Error('새 질문을 가져올 수 없습니다.');
       
-      // 기존 질문을 새 질문으로 교체
       setHistory((currentHistory) => 
         currentHistory.map(item => 
-          item.question_id === questionId 
-            ? newQuestion 
-            : item
+          item.question_id === questionId ? { ...newQuestion, children: [] } : item
         )
       );
-      
-      // 🆕 pool 카운트 감소 (새로고침도 pool에서 가져오므로)
       setPoolCount((c) => Math.max(0, c - 1));
-      
     } catch (err) {
       setError(err?.message || '질문 새로고침 중 오류가 발생했습니다.');
       throw err;
@@ -452,7 +510,6 @@ function QAChat({
               qaItem={item}
               index={idx}
               onAnswerSubmit={handleAnswerSubmit}
-              onDeepDive={handleDeepDive}
               onRefreshQuestion={handleRefreshQuestion}
             />
           )) : (
@@ -476,7 +533,7 @@ function QAChat({
           >
             {isLoadingNext ? <CircularProgress size={20} color="inherit" /> :
              isLoadingRefill ? 'AI가 질문 리필 중...' : 
-             poolCount === 0 ? '남은 질문 없음' : `추가 질문 (${poolCount})`} {/* 🆕 실제 pool 카운트 표시 */}
+             poolCount === 0 ? '남은 질문 없음' : `추가 질문 (${poolCount})`}
           </Button>
 
           <Button 
