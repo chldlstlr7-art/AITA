@@ -816,38 +816,6 @@ def debug_font():
     return jsonify(check_system_fonts_debug())
 
 
-네, 맞습니다. 심층 분석(Deep Analysis)은 외부 API(네이버) 호출과 복잡한 로직 때문에 시간이 오래 걸리므로(30초~60초 이상), 일반적인 HTTP 요청으로 기다리면 브라우저나 서버(Render/Nginx)에서 Timeout으로 끊어버립니다.
-
-이 문제를 해결하려면 **"비동기 처리(Asynchronous Processing)"**를 해야 합니다. 사용자 요청이 들어오면 "알겠습니다. 작업 시작했습니다." 하고 즉시 응답(202 Accepted)을 주고, 실제 분석은 백그라운드 스레드에서 돌리는 방식입니다.
-
-student_api.py를 아래와 같이 수정해 주세요.
-
-🛠️ student_api.py 수정 (스레딩 적용)
-핵심 변경 사항:
-
-threading 모듈 사용.
-
-분석 로직을 별도의 함수(_background_deep_analysis)로 분리.
-
-API는 스레드만 실행시키고 즉시 반환.
-
-**Flask Context(app_context)**를 스레드에 전달해야 DB 접근이 가능함.
-
-Python
-
-import threading
-from flask import Blueprint, request, jsonify, current_app
-from extensions import db
-from models import AnalysisReport
-import json
-import traceback
-
-# [서비스 모듈]
-from deep_analysis_service import perform_deep_analysis
-
-student_bp = Blueprint('student', __name__)
-
-# ----------------------------------------------------------------
 # [내부 함수] 백그라운드에서 실행될 실제 분석 로직
 # ----------------------------------------------------------------
 def _background_deep_analysis(app, report_id):
