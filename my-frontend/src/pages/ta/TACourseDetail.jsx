@@ -25,7 +25,7 @@ import AddIcon from '@mui/icons-material/Add';
 import PersonIcon from '@mui/icons-material/Person';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
-import { getCourseDetail, getAssignmentsByCourse, getTaCourses, updateCourse, createAssignment, getCourseStudents, addCourseStudent, deleteCourseStudent } from '../../services/api.js';
+import { getCourseDetail, getAssignmentsByCourse, getTaCourses, getAssignmentSubmissions, getTaGrade, updateCourse, createAssignment, getCourseStudents, addCourseStudent, deleteCourseStudent } from '../../services/api.js';
 
 const HeaderPaper = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
@@ -185,20 +185,51 @@ export default function TACourseDetail() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
     const fetchAssignments = async () => {
       setLoadingAssignments(true);
       try {
         const data = await getAssignmentsByCourse(courseId);
-        setAssignments(data?.assignments || []);
+        const list = data?.assignments || [];
+        if (!mounted) return;
+        setAssignments(list);
+
+        // Preload submissions + ta_grade flags for assignments that don't have submissions loaded
+        try {
+          const toLoad = (list || []).filter((a) => !Array.isArray(a.submissions) || a.submissions.length === 0).map((a) => a.id);
+          if (toLoad.length > 0) {
+            const results = await Promise.all(toLoad.map(async (aid) => {
+              try {
+                const resSub = await getAssignmentSubmissions(aid);
+                const subs = resSub?.submissions || resSub || [];
+                const checks = await Promise.allSettled((subs || []).map((s) => getTaGrade(s.id || s.report_id)));
+                const subsWithTa = (subs || []).map((s, idx) => ({ ...s, ta_grade_exists: isTaGradeMeaningful(checks[idx] && checks[idx].status === 'fulfilled' ? checks[idx].value : null) }));
+                return { assignmentId: aid, submissions: subsWithTa };
+              } catch (e) {
+                console.warn('Failed to preload submissions for assignment', aid, e);
+                return null;
+              }
+            }));
+
+            if (!mounted) return;
+            setAssignments((prev) => prev.map((a) => {
+              const found = results.find((r) => r && String(r.assignmentId) === String(a.id));
+              return found ? { ...a, submissions: found.submissions } : a;
+            }));
+          }
+        } catch (e) {
+          console.error('Preload submissions failed', e);
+        }
       } catch (err) {
         console.error(err);
         setAssignmentError(err.message || '과제 목록을 불러오는 중 문제가 발생했습니다.');
         setAssignments([]);
       } finally {
-        setLoadingAssignments(false);
+        if (mounted) setLoadingAssignments(false);
       }
     };
     fetchAssignments();
+    return () => { mounted = false; };
   }, [courseId]);
 
   const handleEditCourse = () => {
@@ -310,6 +341,21 @@ export default function TACourseDetail() {
 
   const SIDEBAR_WIDTH = { xs: '180px', sm: '220px', md: '260px' };
 
+  // Helper: determine if TA-grade payload contains meaningful grading
+  const isTaGradeMeaningful = (val) => {
+    if (!val) return false;
+    const feedback = (typeof val.feedback === 'string' ? val.feedback : '') || (val.score_details && typeof val.score_details.feedback === 'string' ? val.score_details.feedback : '');
+    if (feedback && String(feedback).trim().length > 0) return true;
+    const scores = val.score_details && Array.isArray(val.score_details.scores) ? val.score_details.scores : [];
+    if (scores.length === 0) return false;
+    for (let i = 0; i < scores.length; i++) {
+      const sVal = scores[i];
+      const sc = sVal && (sVal.score ?? sVal.value ?? sVal.points);
+      if (sc != null && Number(sc) !== 0) return true;
+    }
+    return false;
+  };
+
   return (
     <Box sx={{ mt: 4, px: { xs: 1, md: 1 }, boxSizing: 'border-box' }}>
       <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
@@ -396,7 +442,7 @@ export default function TACourseDetail() {
               <List disablePadding>
                 {assignments.map((a) => {
                   const dueText = formatKoreanDateTime(a.due_date);
-                  const submitted = a.report_count ?? a.submission_count ?? a.submissions ?? 0;
+                  const submitted = a.report_count ?? a.submission_count ?? (Array.isArray(a.submissions) ? a.submissions.length : 0);
                   const total = a.total_students ?? undefined;
                   const submissionLabel = total ? `${submitted}/${total}명 제출` : `${submitted}명 제출`;
 
@@ -560,13 +606,16 @@ export default function TACourseDetail() {
 
                   // try several possible fields for graded count; fallback to counting submissions with score/graded flag
                   let graded = a.graded_count ?? a.graded_reports ?? a.graded_submissions ?? 0;
+                  // Count TA-saved grading records (ta_grade_exists) if submissions are present
+                  const taGradedCount = Array.isArray(a.submissions) ? a.submissions.filter((s) => s && s.ta_grade_exists).length : 0;
                   if (!graded && Array.isArray(a.submissions)) {
                     graded = a.submissions.filter((s) => s && (s.graded === true || s.score != null || String(s.status || '').toLowerCase() === 'graded')).length;
                   }
 
                   const submittedOk = typeof total === 'number' ? submitted >= total : null;
-                  // graded 비교 기준을 전체(total)가 아니라 '제출한 학생 수(submitted)'로 변경
-                  const gradedOk = typeof submitted === 'number' && submitted > 0 ? graded >= submitted : null;
+                  // Use taGradedCount to show how many submissions have TA-saved grades; fall back to graded when submissions absent
+                  const gradedDisplay = taGradedCount || graded || 0;
+                  const gradedOk = typeof submitted === 'number' && submitted > 0 ? gradedDisplay >= submitted : null;
 
                   return (
                     <ListItemButton key={a.id} onClick={() => handleAssignmentClick(a)} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 1 }}>
@@ -598,7 +647,7 @@ export default function TACourseDetail() {
                         />
 
                         <Chip
-                          label={submitted ? `채점 ${graded}/${submitted}` : `채점완료 ${graded}`}
+                          label={submitted ? `채점 ${gradedDisplay}/${submitted}` : `채점완료 ${gradedDisplay}`}
                           size="medium"
                           clickable
                           onClick={(e) => {
