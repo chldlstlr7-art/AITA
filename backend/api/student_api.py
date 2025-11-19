@@ -840,7 +840,7 @@ def _background_deep_analysis(app, report_id):
                 summary_json = report.summary
 
             # text_snippet이 없으면 content 사용 (모델 정의에 따라 조정)
-            raw_text = getattr(report, 'text_snippet', report.content)
+            raw_text = getattr(report, 'text_snippet', report.snippet)
 
             # 3. 서비스 호출 (오래 걸리는 작업)
             deep_result = perform_deep_analysis(summary_json, raw_text)
