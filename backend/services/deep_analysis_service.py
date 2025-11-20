@@ -200,7 +200,7 @@ def analyze_logic_neuron_map(text, key_concepts_str, core_thesis):
                 if c1 in p and c2 in p:
                     physical_score += 1.0
                     if not context_sent: context_sent = p # 첫 발견 문장 저장
-            physical_score = min(physical_score / 3.0, 1.0)
+            physical_score = min(physical_score / 2.0, 1.0)
 
             # (B) 의미적 거리 계산
             if concept_vectors[i] is not None:
@@ -211,7 +211,7 @@ def analyze_logic_neuron_map(text, key_concepts_str, core_thesis):
             # --- Zone 판별 및 엣지 생성 ---
             
             # Case 1: Zone C (창의적/억지 연결 의심) -> 배치 리스트에 추가
-            if semantic_score < 0.4 and physical_score >= 0.3:
+            if semantic_score < 0.4 and physical_score >= 0.5:
                 edges.append({
                     "source": c1, "target": c2, 
                     "weight": round(semantic_score, 2),
