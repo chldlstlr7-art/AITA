@@ -21,7 +21,7 @@ from services.qa_service import generate_initial_questions, generate_deep_dive_q
 from services.analysis_ta_service import AnalysisTAService 
 from services.grading_service import GradingService
 from services.course_management_service import CourseManagementService
-from services.deep_analysis_service import perform_deep_analysis
+from services.deep_analysis_service import perform_deep_analysis_async
 
 
 from config import Config, JSON_SYSTEM_PROMPT, COMPARISON_SYSTEM_PROMPT

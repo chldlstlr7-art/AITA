@@ -783,15 +783,11 @@ def get_flow_graph(report_id):
         nodes = {} # 에러 시 빈 딕셔너리로 초기화
         edges = []
 
-   if not nodes: # nodes_dict가 비어있는 경우
+    if not nodes: # nodes_dict가 비어있는 경우
         print(f"[get_flow_graph:{report_id}] No valid nodes found after parsing summary's Flow_Pattern.")
         return jsonify({"status": "error", "message": "No logic flow data available to generate graph."}), 404
 
-    # ============================================================
-    # [추가] "결론" 노드 고립 처리 (엣지 제거 로직)
-    # ============================================================
-    # 내용(summary)에 '결론'이라는 단어가 포함된 노드의 ID를 찾습니다.
-    # (예: "[결론]", "[종합 결론]", "최종 결론" 등)
+
     conclusion_node_ids = {nid for nid, text in nodes.items() if "결론" in text}
 
     if conclusion_node_ids:
