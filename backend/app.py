@@ -42,7 +42,8 @@ CORS(app,
          "http://localhost:3000", 
          "http://localhost:5173",
          "https://cautious-doodle-q75wx75gv596hx57r-5173.app.github.dev",
-         "https://laughing-carnival-75w7wwr4rq7fx4qx-5173.app.github.dev"
+         "https://laughing-carnival-75w7wwr4rq7fx4qx-5173.app.github.dev",
+         "https://animated-rotary-phone-69xwx79q64wwfxr4q-5173.app.github.dev"
      ],
      supports_credentials=True
 )
