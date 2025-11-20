@@ -944,7 +944,7 @@ def _background_deep_analysis(app, report_id):
 # ----------------------------------------------------------------
 # [API] 분석 요청 (POST)
 # ----------------------------------------------------------------
-@student_bp.route('/reports/<int:report_id>/deep-analysis', methods=['POST'])
+@student_bp.route('/reports/<report_id>/deep-analysis', methods=['POST'])
 def run_deep_analysis(report_id):
     try:
         report = AnalysisReport.query.get_or_404(report_id)
@@ -970,7 +970,7 @@ def run_deep_analysis(report_id):
 # ----------------------------------------------------------------
 # [API] 결과 조회 (GET) - 폴링용
 # ----------------------------------------------------------------
-@student_bp.route('/reports/<int:report_id>/deep-analysis', methods=['GET'])
+@student_bp.route('/reports/<report_id>/deep-analysis', methods=['GET'])
 def get_deep_analysis(report_id):
     try:
         report = AnalysisReport.query.get_or_404(report_id)
