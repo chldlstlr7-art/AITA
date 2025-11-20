@@ -18,7 +18,7 @@ from config import INTEGRITY_SCANNER_PROMPT, BRIDGE_CONCEPT_PROMPT, LOGIC_FLOW_C
 # [네이버 API 설정]
 # [설정 변경]
 # NAVER_GATEWAY_KEY는 이제 삭제하셔도 됩니다.
-NAVER_CLOVA_URL = os.environ.get('NAVER_CLOVA_URL') # "https://clovastudio.stream..."
+NAVER_CLOVA_URL = os.environ.get('NAVER_CLOVA_URL2') # "https://clovastudio.stream..."
 NAVER_API_KEY = os.environ.get('NAVER_API_KEY')     # "nv-...." (새로 발급받은 키)
 
 # S-BERT 설정 (유지)
@@ -63,7 +63,7 @@ def _call_llm_json(prompt_text):
         ],
         "topP": 0.8,
         "topK": 0,
-        "maxTokens": 2048,
+        "maxCompletionTokens": 4096,
         "temperature": 0.2,
         "repeatPenalty": 1.5,
         "stopBefore": [],

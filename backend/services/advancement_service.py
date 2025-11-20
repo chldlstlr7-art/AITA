@@ -1,52 +1,109 @@
-# services/advancement_service.py
-
 import os
 import json
-import google.generativeai as genai
+import requests
+import re
+import ast
 from time import sleep
 from config import IDEA_GENERATION_PROMPT
-# ... (1. 전역 설정 및 모델 로드 ) ...
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-ADVANCEMENT_MODEL_NAME = 'gemini-2.5-pro' 
-llm_client_pro = None
+
+# --------------------------------------------------------------------------------------
+# --- 1. 전역 설정 (Naver HyperCLOVA X) ---
+# --------------------------------------------------------------------------------------
+
+NAVER_CLOVA_URL = os.environ.get('NAVER_CLOVA_URL2') # 예: https://clovastudio.stream...
+NAVER_API_KEY = os.environ.get('NAVER_API_KEY')     # 예: nv-... (Bearer Token)
+
 MAX_RETRIES = 3
 
-if GEMINI_API_KEY:
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        llm_client_pro = genai.GenerativeModel(ADVANCEMENT_MODEL_NAME)
-        print(f"[Service ADV] LLM Model '{ADVANCEMENT_MODEL_NAME}' loaded.")
-    except Exception as e:
-        print(f"[Service ADV] CRITICAL: Gemini Client failed to load: {e}")
+if NAVER_CLOVA_URL and NAVER_API_KEY:
+    print("[Service ADV] Naver HyperCLOVA X (Bearer) Configured.")
 else:
-    print("[Service ADV] WARNING: GEMINI_API_KEY not found. Advancement Service will fail.")
+    print("[Service ADV] WARNING: NAVER API Keys not found. Advancement Service will fail.")
 
 
 # --------------------------------------------------------------------------------------
-# --- 3. [수정됨] 헬퍼 함수 (JSON 호출기 추가) ---
+# --- 2. 헬퍼 함수 (네이버 API 호출 및 JSON 파싱) ---
 # --------------------------------------------------------------------------------------
 
 def _call_llm_json(prompt_text):
-    """[신규] LLM을 호출하고 JSON 응답을 파싱하는 내부 함수"""
-    if not llm_client_pro:
-        print("[Service ADV] CRITICAL: LLM Client not initialized.")
+    """
+    [수정] Naver API를 호출하고 JSON 응답을 파싱하는 내부 함수
+    """
+    if not NAVER_CLOVA_URL or not NAVER_API_KEY:
+        print("[Service ADV] CRITICAL: API Keys missing.")
         return None
 
-    # JSON 응답을 강제하는 설정
-    config = genai.GenerationConfig(response_mime_type="application/json")
-    
+    headers = {
+        'Authorization': f'Bearer {NAVER_API_KEY}',
+        'Content-Type': 'application/json; charset=utf-8',
+        'Accept': 'application/json'
+    }
+
+    # 발전 아이디어 생성은 창의성이 필요하므로 temperature를 약간 높게(0.5~0.6) 설정
+    data = {
+        "messages": [
+            {
+                "role": "system",
+                "content": "너는 창의적인 사고 촉진자야. 결과는 반드시 유효한 JSON 리스트 포맷으로만 출력해. 마크다운이나 부가 설명 없이 순수 JSON 데이터만 반환해."
+            },
+            {
+                "role": "user",
+                "content": prompt_text
+            }
+        ],
+        "topP": 0.8,
+        "topK": 0,
+        "maxCompletionTokens": 4096,
+        "temperature": 0.6, 
+        "repeatPenalty": 5.0,
+        "stopBefore": [],
+        "includeAiFilters": True,
+        "seed": 0
+    }
+
     for attempt in range(MAX_RETRIES):
         try:
-            response = llm_client_pro.generate_content(
-                contents=[prompt_text],
-                generation_config=config
-            )
-            if not response.text:
-                raise Exception("Empty response from LLM (Advancement JSON)")
+            response = requests.post(NAVER_CLOVA_URL, headers=headers, json=data, stream=False)
+            response.raise_for_status()
             
-            # 텍스트를 JSON 객체(Python List/Dict)로 파싱
-            return json.loads(response.text)
-        
+            res_json = response.json()
+            content_text = res_json.get('result', {}).get('message', {}).get('content', '')
+            
+            if not content_text:
+                raise Exception("Empty response from Naver API")
+
+            # --- [JSON 파싱 로직 (3단계 방어)] ---
+            
+            # 1. Markdown 코드블록 제거
+            json_str = ""
+            match = re.search(r"```json\s*([\s\S]+?)\s*```", content_text)
+            if match:
+                json_str = match.group(1)
+            else:
+                # 2. 가장 바깥쪽 대괄호([]) 추출 (리스트 형태가 예상되므로)
+                json_match = re.search(r"(\[[\s\S]*\])", content_text.strip())
+                json_str = json_match.group(1) if json_match else content_text.strip()
+
+            # 3. 파싱 시도
+            try:
+                return json.loads(json_str, strict=False)
+            except json.JSONDecodeError:
+                pass
+
+            try:
+                return ast.literal_eval(json_str)
+            except:
+                pass
+
+            try:
+                json_str_clean = json_str.replace('\n', '\\n').replace('\r', '')
+                return json.loads(json_str_clean, strict=False)
+            except:
+                pass
+            
+            print(f"[Service ADV] JSON Parsing Failed (Attempt {attempt+1}). Raw: {content_text[:100]}...")
+            raise ValueError("JSON parsing failed")
+
         except Exception as e:
             print(f"[Service ADV] LLM Call Error (Attempt {attempt + 1}/{MAX_RETRIES}): {e}")
             if attempt < MAX_RETRIES - 1:
@@ -54,14 +111,12 @@ def _call_llm_json(prompt_text):
             else:
                 return None # 모든 재시도 실패
 
-# (기존 _call_llm_text 함수는 이제 필요 없으므로 삭제 가능)
 
 def _format_conversation_history(qa_history_list):
     """
     qa_history(JSON list)를 LLM이 읽기 쉬운 '대화 흐름' 텍스트로 변환합니다.
-    (이 함수는 수정할 필요가 없습니다. LLM의 '입력'용이므로 그대로 둡니다.)
+    (기존 로직 유지)
     """
-    # ... (이전과 동일한 로직) ...
     if not qa_history_list:
         return "[대화 기록 없음]"
 
@@ -69,7 +124,8 @@ def _format_conversation_history(qa_history_list):
     deep_dive_qas = {} 
 
     for item in qa_history_list:
-        if item.get('answer') is None or not item.get('answer').strip():
+        # 답변이 없는 항목 건너뛰기
+        if item.get('answer') is None or not str(item.get('answer')).strip():
             continue
             
         parent_id = item.get('parent_question_id')
@@ -88,17 +144,17 @@ def _format_conversation_history(qa_history_list):
     flow_counter = 1
     
     for main_qa in main_qas:
-        main_qa_id = main_qa['question_id']
+        main_qa_id = main_qa.get('question_id')
         
         formatted_text_parts.append(f"--- 대화 흐름 {flow_counter} ---")
-        formatted_text_parts.append(f"Q: {main_qa['question']}")
-        formatted_text_parts.append(f"A: {main_qa['answer']}")
+        formatted_text_parts.append(f"Q: {main_qa.get('question', '')}")
+        formatted_text_parts.append(f"A: {main_qa.get('answer', '')}")
         
         if main_qa_id in deep_dive_qas:
             for child_qa in deep_dive_qas[main_qa_id]:
                 formatted_text_parts.append("") 
-                formatted_text_parts.append(f"  └─ (심화 질문) Q: {child_qa['question']}")
-                formatted_text_parts.append(f"  └─ (심화 답변) A: {child_qa['answer']}")
+                formatted_text_parts.append(f"  └─ (심화 질문) Q: {child_qa.get('question', '')}")
+                formatted_text_parts.append(f"  └─ (심화 답변) A: {child_qa.get('answer', '')}")
         
         formatted_text_parts.append("\n") 
         flow_counter += 1
@@ -107,7 +163,7 @@ def _format_conversation_history(qa_history_list):
 
 
 # --------------------------------------------------------------------------------------
-# --- 4. [수정됨] 메인 서비스 함수 (JSON 반환) ---
+# --- 3. 메인 서비스 함수 (JSON 반환) ---
 # --------------------------------------------------------------------------------------
 
 def generate_advancement_ideas(summary_dict, snippet, qa_history_list):
@@ -117,7 +173,7 @@ def generate_advancement_ideas(summary_dict, snippet, qa_history_list):
     """
     print("[Service ADV] Generating advancement ideas (JSON)...")
 
-    # 1. 입력 데이터 포맷팅 (변경 없음)
+    # 1. 입력 데이터 포맷팅
     try:
         formatted_history = _format_conversation_history(qa_history_list)
         summary_text = f"""
@@ -129,7 +185,8 @@ def generate_advancement_ideas(summary_dict, snippet, qa_history_list):
         print(f"[Service ADV] FAILED: Error formatting input data: {e}")
         return None
 
-    # 2. LLM 프롬프트 (변경 없음)
+    # 2. LLM 프롬프트 구성
+    # IDEA_GENERATION_PROMPT는 config.py에 정의되어 있으며 JSON 포맷을 요구함
     final_prompt = f"""
 {IDEA_GENERATION_PROMPT}
 
@@ -143,13 +200,12 @@ def generate_advancement_ideas(summary_dict, snippet, qa_history_list):
 {formatted_history}
 """
     
-    # 3. [수정] LLM 호출 (JSON 응답)
-    ideas_json = _call_llm_json(final_prompt) # _call_llm_text 대신 호출
+    # 3. LLM 호출 (네이버 API + JSON 파싱)
+    ideas_json = _call_llm_json(final_prompt)
     
     if not ideas_json:
         print(f"[Service ADV] FAILED: Did not receive valid JSON response from LLM.")
         return None
         
-    # ideas_json은 이미 Python 객체 (e.g., list)
     print("[Service ADV] Successfully generated advancement ideas (JSON).")
     return ideas_json

@@ -64,32 +64,32 @@ class Config:
 
 # 1. 자료 분석 요약 프롬프트
 JSON_SYSTEM_PROMPT = (
-    "You are an expert academic text analyst. Your task is to dissect the provided text and "
-    "produce a high-resolution logical-structural analysis in JSON format.\n"
-    "You must capture the **unique logical signature** of the text, distinguishing generic arguments from specific rhetorical moves.\n"
-    "Answer in **Korean** with full, natural sentences.\n\n"
+    "당신은 학술 텍스트 분석 전문가입니다. 당신의 임무는 제공된 텍스트를 정밀 분석하여 "
+    "JSON 형식의 '고해상도 논리 구조 분석' 결과를 생성하는 것입니다.\n"
+    "텍스트의 **고유한 논리적 특징(signature)**을 포착해야 하며, 일반적인 주장과 해당 텍스트만의 구체적인 수사적 전개를 명확히 구분하십시오.\n"
+    "답변은 **한국어**로, 완전하고 자연스러운 문장을 사용해 작성하십시오.\n\n"
 
-    "Field Definitions:\n"
-    "1. **Core_Thesis**: The central specific argument. (NOT just the topic 'AI ethics', but 'AI ethics requires a mandatory strict licensing system'.)\n"
-    "2. **Problem_Framing**: How the intro frames the issue. Does it start with a specific anecdote, a statistic, or a philosophical question? Be specific.\n"
-    "3. **Claim**: The overarching conclusion or main assertion.\n"
-    "4. **Reasoning_Logic**: Analyze the abstract logical structure. (e.g., 'Starts with a concession to the opposing view, then refutes it using utilitarian logic'.)\n"
-    "5. **Specific_Evidence**: [CRITICAL] List unique proper nouns, specific statistics, specific metaphors, or distinct examples used. (e.g., 'Mention of the 2024 UN Report', 'Metaphor of a double-edged sword', 'Case study of Company X'). This is for plagiarism fingerprinting.\n"
-    "6. **Flow_Pattern** - Construct a **hierarchical logical graph** (Tree/Pyramid structure), NOT a simple linear summary.\n"
-    "   - **Structure Rules**:\n"
-    "     1. **Root**: Start with the **[Problem/Topic]** (문제/주제) at the top.\n"
-    "     2. **Thesis**: Connect the Problem to the **[Main Claim]** (핵심 주장).\n"
-    "     3. **Branches**: From the Main Claim, branch out to multiple **[Reason]** (근거) nodes.\n"
-    "     4. **Details**: If a Reason has specific examples or data, attach child nodes labeled **[Evidence/Example]** (세부 근거/예시) under that Reason.\n"
-    "     5. **Conclusion**: The **[Conclusion]** (결론) should flow from the Claims and Reasons.\n"
-    "   - **Output Format**:\n"
-    "     - \"nodes\": A dictionary with IDs (e.g., \"P1\", \"C1\", \"R1\", \"E1\") and values. The value format must be \"[Category]\\n [Summary]\".\n"
-    "     - \"edges\": A list of directed connections [\"Parent_ID\", \"Child_ID\"].\n"
-    "   - **Categories**: Use strict tags: [문제 제기], [핵심 주장], [근거], [세부 예시], [반론], [재반박], [결론].\n"
-    "7. **Conclusion_Framing**: rhetorical focus of the ending (e.g., emotional appeal vs. policy call-to-action).\n"
-    "8. **key_concepts**: 5-7 unique keywords.\n\n"
+    "필드 정의:\n"
+    "1. **Core_Thesis**: 핵심 구체적 논지. (단순히 'AI 윤리'라는 주제가 아니라, 'AI 윤리는 강제적이고 엄격한 라이선스 시스템을 필요로 한다'와 같이 구체적이어야 함.)\n"
+    "2. **Problem_Framing**: 서론에서 문제를 제기하는 방식. 구체적인 일화, 통계, 혹은 철학적 질문으로 시작하는가? 구체적으로 기술할 것.\n"
+    "3. **Claim**: 전체적인 결론 또는 주된 주장.\n"
+    "4. **Reasoning_Logic**: 추상적인 논리 전개 구조 분석. (예: '반대 의견을 일부 수용한 후, 공리주의적 논리를 사용하여 이를 반박함'.)\n"
+    "5. **Specific_Evidence**: [중요] 본문에 사용된 고유명사, 구체적인 통계, 특정한 은유, 또는 독특한 예시들을 나열할 것. (예: '2024 UN 보고서 언급', '양날의 검이라는 은유', 'X 기업의 사례 연구'). 이는 표절 식별(지문)을 위함임.\n"
+    "6. **Flow_Pattern** - 단순한 선형 요약이 아닌, **계층적 논리 그래프** (트리/피라미드 구조)를 구성할 것.\n"
+    "   - **구조 규칙**:\n"
+    "     1. **Root**: 최상단은 **[문제/주제]**로 시작.\n"
+    "     2. **Thesis**: 문제와 **[핵심 주장]**을 연결.\n"
+    "     3. **Branches**: 핵심 주장에서 여러 **[근거]** 노드로 분기.\n"
+    "     4. **Details**: 근거에 구체적인 예시나 데이터가 있다면, 해당 근거 하위에 **[세부 근거/예시]** 자식 노드를 연결.\n"
+    "     5. **Conclusion**: **[결론]**은 주장과 근거로부터 자연스럽게 도출되어야 함.\n"
+    "   - **출력 형식**:\n"
+    "     - \"nodes\": ID(예: \"P1\", \"C1\", \"R1\", \"E1\")와 값을 가진 딕셔너리. 값의 형식은 반드시 \"[카테고리]\\n [요약]\"이어야 함.\n"
+    "     - \"edges\": 방향성 있는 연결 리스트 [\"부모_ID\", \"자식_ID\"].\n"
+    "   - **카테고리**: 다음 태그를 엄격히 준수할 것: [문제 제기], [핵심 주장], [근거], [세부 예시], [반론], [재반박], [결론].\n"
+    "7. **Conclusion_Framing**: 결론의 수사적 강조점 (예: 감정적 호소 vs 정책적 행동 촉구).\n"
+    "8. **key_concepts**: 5~7개의 고유한 핵심 키워드.\n\n"
 
-    "You must output strictly in the following JSON format (in Korean). Do NOT change the Key names:\n\n"
+    "반드시 아래의 JSON 형식을 엄격히 준수하여 출력하십시오 (한국어 작성). Key 이름은 절대 변경하지 마십시오:\n\n"
     "```json\n"
     "{\n"
     "  \"assignment_type\": \"[문자열: 글의 유형 예: 논설문, 연구계획서]\",\n"
@@ -120,55 +120,56 @@ JSON_SYSTEM_PROMPT = (
     "  \"key_concepts\": \"[문자열: 핵심 키워드 5~7개, 쉼표로 구분]\"\n"
     "}\n"
     "```\n\n"
-    "Answer in Korean. Ensure valid JSON format."
+    "한국어로 답변하십시오. 유효한 JSON 형식을 보장하십시오."
 )
+
 COMPARISON_SYSTEM_PROMPT = (
-    "You are a **Forensic Logic Analyst** specializing in detecting structural plagiarism. "
-    "Your task is to compare two analysis reports (Submission vs. Candidate) and calculate a 'Structural & Logical Similarity Score'.\n"
-    "Your ultimate goal is to filter out **'Coincidental Topic Overlap'** (similar subject, different logic) and identify **'Structural Clones'** (same logic, same evidence flow).\n\n"
+    "당신은 구조적 표절을 탐지하는 전문 **포렌식 논리 분석가(Forensic Logic Analyst)**입니다. "
+    "당신의 임무는 두 개의 분석 보고서(제출본 vs. 후보본)를 비교하고 '구조적 및 논리적 유사도 점수'를 계산하는 것입니다.\n"
+    "최종 목표는 **'우연한 주제 중복'**(주제는 같으나 논리가 다름)을 걸러내고, **'구조적 복제'**(논리와 근거 흐름이 동일함)를 식별하는 것입니다.\n\n"
 
-    "--- (Submission JSON) ---\n{submission_json_str}\n"
-    "--- (Candidate JSON) ---\n{candidate_json_str}\n\n"
+    "--- (제출본 JSON) ---\n{submission_json_str}\n"
+    "--- (후보본 JSON) ---\n{candidate_json_str}\n\n"
 
-    "**⚖️ Scoring Standards (Strict Anchoring):**\n"
-    "- **0~3 (Distinct):** Same topic, but completely different arguments/evidence.\n"
-    "- **4~6 (Generic):** Shared topic and standard arguments (e.g., 'Exercise is good for health'), but different specific examples or structure.\n"
-    "- **7~8 (Suspicious):** Same logical flow and arguments, but different phrasing or slightly different examples.\n"
-    "- **9~10 (Clone):** **Identical logical architecture** AND **matching specific evidence** (proper nouns, statistics, specific metaphors from 'Specific_Evidence' field).\n\n"
+    "** 채점 기준 (엄격한 기준점):**\n"
+    "- **0~3 (별개):** 주제는 같지만 주장과 근거가 완전히 다름.\n"
+    "- **4~6 (일반적):** 주제와 일반적인 주장(예: '운동은 건강에 좋다')은 공유하지만, 구체적인 예시나 구조가 다름.\n"
+    "- **7~8 (의심):** 논리 흐름과 주장이 동일하지만, 표현이나 예시가 약간 다름.\n"
+    "- **9~10 (복제):** **동일한 논리 아키텍처**를 가지며 **구체적 증거가 일치함** ('Specific_Evidence' 필드의 고유명사, 통계, 특정 은유 등이 일치).\n\n"
 
-    "**🕵️ Evaluation Criteria:**\n"
-    "1. **Core Thesis** (0-10): Do they advocate for the *exact same specific solution*? (e.g., Generic 'AI needs ethics' vs. Specific 'AI needs a 3-step government audit').\n"
-    "2. **Problem Framing** (0-10): Compare the 'Problem_Framing' field. Do they use the same lens (economic vs. ethical vs. social) to introduce the issue?\n"
-    "3. **Claim Direction** (0-10): Is the final conclusion/claim identical in nuance and strength?\n"
-    "4. **Reasoning & Evidence** (0-10): **[CRITICAL]** Compare the **'Reasoning_Logic'** and **'Specific_Evidence'** fields.\n"
-    "   - If Text A cites 'Study X' and Text B cites 'Study Y', the score MUST be low (< 5).\n"
-    "   - High scores are ONLY for matching proper nouns, statistics, or unique metaphors.\n"
-    "5. **Flow Pattern** (0-10): Compare the **Hierarchical Graph (Tree Structure)** in 'Flow_Pattern'.\n"
-    "   - Do the branches (Reasons) split at the same point?\n"
-    "   - Do the leaf nodes (Examples) attach to the same parent nodes?\n"
-    "6. **Conclusion Framing** (0-10): Do they share the same rhetorical ending strategy (e.g., call-to-action vs. summary)?\n\n"
+    "** 평가 항목:**\n"
+    "1. **Core Thesis (핵심 논지)** (0-10): *정확히 동일한 구체적 해결책*을 주장하는가? (예: 일반적인 'AI 윤리 필요' vs 구체적인 'AI 3단계 정부 감사 필요').\n"
+    "2. **Problem Framing (문제 제기)** (0-10): 'Problem_Framing' 필드를 비교하라. 문제를 바라보는 렌즈(경제적 vs 윤리적 vs 사회적)가 동일한가?\n"
+    "3. **Claim Direction (주장 방향)** (0-10): 최종 결론/주장의 뉘앙스와 강도가 동일한가?\n"
+    "4. **Reasoning & Evidence (추론 및 근거)** (0-10): **[매우 중요]** **'Reasoning_Logic'**과 **'Specific_Evidence'** 필드를 비교하라.\n"
+    "   - 문서 A가 '연구 X'를 인용하고 문서 B가 '연구 Y'를 인용했다면, 점수는 반드시 낮아야 함(5점 미만).\n"
+    "   - 높은 점수는 오직 고유명사, 통계, 독창적인 은유가 일치할 때만 부여 가능.\n"
+    "5. **Flow Pattern (흐름 패턴)** (0-10): 'Flow_Pattern'의 **계층적 그래프(트리 구조)**를 비교하라.\n"
+    "   - 분기점(근거)이 동일한 지점에서 갈라지는가?\n"
+    "   - 말단 노드(예시)가 동일한 부모 노드에 붙어있는가?\n"
+    "6. **Conclusion Framing (결론 방식)** (0-10): 수사적 결론 전략이 동일한가? (예: 행동 촉구 vs 요약 정리)\n\n"
 
-    "Output format (Korean):\n"
-    "- **Overall Comment:** [A sharp critique summarizing whether this is plagiarism or just a shared topic.]\n"
+    "출력 형식 (한국어):\n"
+    "- **Overall Comment:** [이것이 표절인지 단순 주제 공유인지 요약하는 날카로운 비평]\n"
     "- **Detailed Scoring:**\n"
-    "  1. Core Thesis Similarity: [Score 0-10] – [Reason]\n"
-    "  2. Problem Framing Similarity: [Score 0-10] – [Reason]\n"
-    "  3. Claim Similarity: [Score 0-10] – [Reason]\n"
-    "  4. Reasoning Similarity: [Score 0-10] – [Compare specific evidence/logic explicitly]\n"
-    "  5. Flow Pattern Similarity: [Score 0-10] – [Analyze the tree structure match]\n"
-    "  6. Conclusion Framing Similarity: [Score 0-10] – [Reason]\n"
+    "  1. Core Thesis Similarity: [점수 0-10] – [이유]\n"
+    "  2. Problem Framing Similarity: [점수 0-10] – [이유]\n"
+    "  3. Claim Similarity: [점수 0-10] – [이유]\n"
+    "  4. Reasoning Similarity: [점수 0-10] – [구체적인 증거/논리 명시적 비교]\n"
+    "  5. Flow Pattern Similarity: [점수 0-10] – [트리 구조 일치 여부 분석]\n"
+    "  6. Conclusion Framing Similarity: [점수 0-10] – [이유]\n"
 )
  
-IDEA_GENERATION_PROMPT = """You are an expert academic dialogue analyst and creative thinking facilitator.
-You will be given the student's original essay summary, a snippet, and a pre-formatted 'Conversation Flow'.
-Your task is to analyze this entire flow and generate **3 new or evolved perspectives or ideas**.
+IDEA_GENERATION_PROMPT = """당신은 학술 대화 분석 전문가이자 창의적 사고 촉진자입니다.
+학생의 원문 요약, 발췌문, 그리고 포맷팅된 '대화 흐름'이 주어집니다.
+당신의 임무는 전체 흐름을 분석하여 **3가지의 새롭거나 발전된 관점 및 아이디어**를 생성하는 것입니다.
 
-Guidelines:
-1. Each idea must be a natural, reflective, and invitational sentence (e.g., "~~한 시각에서 ~~한 문제를 바라보는 건 어때요?", "~~라는 관점으로 확장해보는 건 어떨까요?").
-2. For each idea, provide 1-3 Q&A pairs from the 'Conversation Flow' that most strongly inspired it. You must *summarize* the Q and A.
+가이드라인:
+1. 각 아이디어는 자연스럽고, 성찰적이며, 권유하는 문장이어야 합니다. (예: "~~한 시각에서 ~~한 문제를 바라보는 건 어때요?", "~~라는 관점으로 확장해보는 건 어떨까요?").
+2. 각 아이디어마다 영감을 준 '대화 흐름' 속 Q&A 쌍을 1~3개 제시해야 합니다. 질문(Q)과 답변(A)은 요약해서 작성하십시오.
 
-Output format (in Korean):
-Your output must be *only* a valid JSON list (starting with '[' and ending with ']') matching this *exact* structure:
+출력 형식 (한국어):
+반드시 아래의 **정확한 구조**를 가진 유효한 JSON 리스트( '['로 시작하고 ']'로 끝나는)만 출력하십시오:
 [
   {
     "idea": "첫 번째 발전 아이디어 제안 문장...",
@@ -192,50 +193,49 @@ Your output must be *only* a valid JSON list (starting with '[' and ending with 
 ]
 """
 question_making_prompt = """
-You are a 'Socratic Mentor' and 'Innovation Strategist' who sharply critiques a student's logical gaps and blind spots.
-Your sole purpose is to force the student to "actively" and "critically" rethink their arguments, helping them discover deeper insights and original perspectives on their own.
+당신은 학생의 논리적 허점과 사각지대를 날카롭게 비판하는 '소크라테스식 멘토'이자 '혁신 전략가'입니다.
+당신의 유일한 목적은 학생이 자신의 주장을 "능동적"이고 "비판적"으로 다시 생각하게 만들어, 스스로 더 깊은 통찰과 독창적인 관점을 발견하게 돕는 것입니다.
 
-Do NOT provide 'obvious' advice or 'generic AI' niceties. Your questions must be provocative, specific, and directly challenge the student's logic.
+뻔한 조언이나 'AI스러운 친절한 말'은 절대 하지 마십시오. 당신의 질문은 도발적이고 구체적이어야 하며, 학생의 논리를 정면으로 도전해야 합니다.
 
-The structured summary and plagiarism analysis of the student's submitted report are provided below in [INPUT DATA].
-Thoroughly analyze this data to grasp the student's core thesis and evidence.
+아래 [입력 데이터]에 제공된 학생의 리포트 요약과 표절 분석 결과(유사도 정보)를 철저히 분석하여 핵심 주장과 근거를 파악하십시오.
 
-**CRITICAL RULE regarding [Plagiarism Analysis Results]:**
-1. Use the plagiarism information ONLY when generating 'perspective' and 'innovative' questions.
-2. Do NOT explicitly mention words like "plagiarism", "similarity score", "copied", or "other documents".
-3. Instead, if high similarity is found, use the content of the similar text to identify "common/cliché arguments." Then, ask questions that subtly force the student to differentiate their views from those common arguments or to expand beyond the scope of the similar text.
+**[표절 분석 결과] 활용 시 절대 규칙:**
+1. 이 정보는 오직 'perspective'(관점 전환)와 'innovative'(혁신 및 확장) 질문을 생성할 때만 활용하십시오.
+2. 질문 내용에 "표절", "유사도 점수", "베낌", "다른 문서" 등의 단어를 **절대 명시적으로 언급하지 마십시오.**
+3. 대신, 높은 유사도가 발견되었다면 해당 텍스트에 포함된 내용이 "흔하거나 상투적인 주장"임을 인지하고, 학생에게 그 흔한 주장들과 자신의 견해가 어떻게 다른지 차별화하거나 그 범위를 넘어서도록 유도하는 질문을 던지십시오.
 
-You must generate exactly 3 questions for each of the following 3 categories, for a total of 9 questions:
+다음 3가지 카테고리에 대해 각각 정확히 3개씩, 총 9개의 질문을 생성하십시오:
 
-1. 'critical' (Critical Thinking Questions):
-   - Focus strictly on the [Submitted Report Summary] and [Snippet].
-   - Attack the internal logic, logical leaps, weak evidence, or hidden assumptions within the student's own text. (e.g., "Your argument relies heavily on premise X, but how does that hold up if condition Y changes?")
+1. 'critical' (비판적 사고 질문):
+   - 오직 [제출된 리포트 요약]과 [원문 일부]에만 집중하십시오.
+   - 학생 글 내부의 논리적 비약, 약한 근거, 숨겨진 가정을 공격하십시오. (예: "당신의 주장은 전제 X에 크게 의존하고 있는데, 만약 조건 Y가 변한다면 그 논리가 어떻게 성립합니까?")
 
-2. 'perspective' (Perspective-Shifting Questions):
-   - Utilize [Plagiarism Analysis Results] here. Identify the viewpoints found in the similar documents.
-   - Force the student to look at their topic from a specific angle that is DIFFERENT from the similar documents or their own current argument.
-   - If the student's text mirrors a source too closely, ask a question that adopts a counter-perspective to that source, compelling the student to defend their uniqueness.
+2. 'perspective' (관점 전환 질문):
+   - [표절 분석 결과]를 활용하십시오. 유사한 문서들에서 발견된 관점을 파악하십시오.
+   - 학생이 유사 문서들이나 자신의 현재 주장과는 **다른** 특정 각도에서 주제를 바라보게 강제하십시오.
+   - 학생의 글이 소스와 너무 비슷하다면, 그 소스에 대한 반대 관점을 채택하여 학생이 자신의 독창성을 방어하게 만드십시오.
 
-3. 'innovative' (Innovation & Extension Questions):
-   - Utilize [Plagiarism Analysis Results] here. Identify the boundaries or conclusions of the similar documents.
-   - Push the student's idea to an extreme 'what if' scenario that goes BEYOND what was covered in the similar text.
-   - Challenge them to twist the core concept to create a novel value proposition that the similar text did not propose.
+3. 'innovative' (혁신 및 확장 질문):
+   - [표절 분석 결과]를 활용하십시오. 유사 문서들의 결론이나 한계를 파악하십시오.
+   - 학생의 아이디어를 유사 텍스트가 다루지 않은 **극한의 '만약의(what if)' 시나리오**로 밀어붙이십시오.
+   - 핵심 개념을 비틀어 유사 텍스트가 제안하지 않은 새로운 가치 제안을 만들도록 도전하십시오.
 
-[INPUT DATA]
+[입력 데이터]
 
-[Plagiarism Analysis Results]
+[표절 분석 결과]
 {plagiarism_data}
 
-[Submitted Report Summary]
+[제출된 리포트 요약]
 {summary_data}
 
-[Submitted Report Original Snippet]
+[제출된 리포트 원문 일부]
 {snippet_data}
 
-**IMPORTANT: The 'question' content in the output JSON MUST be in Korean (한국어).**
+**중요: 출력되는 JSON 내의 'question' 값은 반드시 한국어로 작성되어야 합니다.**
 
-[OUTPUT FORMAT]
-The output must be strictly in the following JSON list format. Return *only* the JSON without any other explanation.
+[출력 포맷]
+결과는 반드시 아래의 JSON 리스트 포맷으로만 출력하십시오. 다른 설명은 절대 포함하지 말고 오직 JSON 데이터만 반환하십시오.
 [
  {{"type": "critical", "question": "[첫 번째 비판적 사고 질문]"}},
  {{"type": "critical", "question": "[두 번째 비판적 사고 질문]"}},
@@ -249,26 +249,21 @@ The output must be strictly in the following JSON list format. Return *only* the
 ]
 """
 deep_dive_prompt = """
-You are a 'Socratic Mentor' whose role is to shatter a student's complacent thinking and unlock their potential.
-You are given the conversation history and the main topic.
+당신은 학생의 고정관념을 깨뜨리고 잠재력을 이끌어내는 '소크라테스식 멘토'입니다.
+아래 제공된 대화 기록과 주제를 바탕으로, 학생 논리의 '가장 취약한 부분'이나 '미처 생각하지 못한 사각지대'를 찌르는 **단 하나의 핵심 후속 질문**을 던지세요.
 
-Analyze the student's last response meticulously. Your goal is to generate a single 'key follow-up question' that precisely targets the 'weakest link' or 'unexplored blind spot' in their logic.
-
-This question MUST prevent the student from staying complacent with their current logic by doing one of the following:
-1. (Critical Thinking) Force them to directly re-examine a 'hidden assumption' or 'logical leap' they haven't recognized.
-2. (Creative/Perspective Expansion) Force them to imagine an 'extreme' application of their current argument or to explore a 'completely opposite' viewpoint.
-
-[Topic of Conversation]
+[주제 요약]
 {summary_data}
 
-[Conversation History]
+[대화 기록]
 {history_data}
 
-**IMPORTANT: The 'Key Follow-up Question' (the output) MUST be in Korean (한국어).**
-
-[Key Follow-up Question] (Generate as a single sentence, text only):
+**[출력 포맷]**
+반드시 아래와 같은 JSON 형식으로만 출력하십시오. (설명 금지)
+{{
+    "question": "여기에 날카로운 질문 문장 하나를 작성"
+}}
 """
-
 
 
 # --- 2. [수정] 논리 정합성 스캐너 (한국어 최적화) ---

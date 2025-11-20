@@ -899,7 +899,7 @@ def _background_deep_analysis(app, report_id):
                 summary_json = report.summary
             
             # text_snippet 필드명 확인 (모델에 따라 content일 수도 있음)
-            raw_text = getattr(report, 'text_snippet', report.content)
+            raw_text = getattr(report, 'text_snippet', report.text_snippet)
 
             # ---------------------------------------------------------
             # [콜백 함수] 부분 업데이트 로직
