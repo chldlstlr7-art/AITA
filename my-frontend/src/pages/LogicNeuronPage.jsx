@@ -125,6 +125,7 @@ const GhostEdge = ({ sourceX, sourceY, targetX, targetY, sourcePosition, targetP
    );
 };
 
+// ✅ [Fix] edgeTypes를 컴포넌트 밖으로 이동하여 리렌더링 시 경고 방지
 const edgeTypes = { spark: SparkEdge, ghost: GhostEdge };
 
 // -----------------------------------------------------------------------------
@@ -159,31 +160,72 @@ const calculateForceLayout = (nodes, edges) => {
 // -----------------------------------------------------------------------------
 
 const useAnalysisPolling = (reportId) => {
-  const [status, setStatus] = useState('init'); // init | processing | partial | done
-  const [data, setData] = useState({}); // 빈 객체로 초기화하여 undefined 에러 방지
+  // 상태 정의: init | processing | partial | done | failed (새로 추가)
+  const [status, setStatus] = useState('init'); 
+  const [data, setData] = useState({}); 
   const pollingRef = useRef(null);
 
   const stopPolling = useCallback(() => {
-    if (pollingRef.current) clearInterval(pollingRef.current);
-  }, []);
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+      console.log(`[Polling] 🛑 Report #${reportId}: 폴링 중지됨.`);
+    }
+  }, [reportId]);
 
   const pollData = useCallback(async () => {
+    const now = new Date().toLocaleTimeString();
+    console.log(`[Polling] 🔄 Report #${reportId}: 결과 조회 시도... (${now})`);
+    
     try {
       const res = await getDeepAnalysisResult(reportId);
+
+      // API 응답 구조를 기반으로 상태 확인
+      const apiStatus = res?.status || 'unknown';
+      console.log(`[Polling] ✅ Report #${reportId}: 응답 수신. Status=${apiStatus}`);
+
+      // ************ 🐛 디버깅 로그 ************
+      if (apiStatus === 'error' || apiStatus === 'unknown' || res?.data?.status === 'error') {
+          console.error(`[Polling DEBUG] 🚨 Status=${apiStatus} 이므로, 수신된 전체 Data 객체 확인:`, res?.data);
+      }
+      // *******************************************
+
       if (res?.data) {
-        setData(res.data); // 데이터가 들어오는 대로 상태 업데이트 (부분 렌더링 트리거)
+        setData(res.data);
         
-        // 상태 결정 로직: 하나라도 데이터가 있으면 partial
-        const hasAnyData = res.data.neuron_map || res.data.integrity_issues || res.data.flow_disconnects;
-        if (hasAnyData) setStatus((prev) => (prev === 'done' ? 'done' : 'partial'));
+        // --- [수정된 부분]: 오류 상태 확인 및 폴링 중지 ---
+        if (res.data.status === 'error') {
+          setStatus('failed'); // 'failed' 상태로 변경
+          stopPolling();
+          console.error(`[Polling] ⛔ 백엔드 분석 오류 확인. 폴링 중지. 메시지: ${res.data.message}`);
+          return;
+        }
+        // ---------------------------------------------
         
         if (res.data.status === 'completed') {
           setStatus('done');
           stopPolling();
+          console.log(`[Polling] 🏆 최종 완료 상태 확인. 폴링 중지.`);
+          return; // 완료 시 이후 코드 실행 방지
         }
+        
+        // 상태 결정 로직: 완료나 에러가 아닐 경우, 부분 데이터 수신 여부 확인
+        const hasAnyData = res.data.neuron_map || res.data.integrity_issues || res.data.flow_disconnects;
+        if (hasAnyData) {
+            // 'done' 상태가 아니라면 'partial'로 설정
+            setStatus((prev) => (prev === 'done' ? 'done' : 'partial')); 
+            console.log(`[Polling] 📈 부분 데이터 수신 완료. UI 업데이트.`);
+        }
+        
+      } else if (apiStatus === 'pending') {
+         console.log(`[Polling] ⏳ 분석 결과 미완료 (Pending 상태). 다음 폴링 대기.`);
       }
+
     } catch (error) {
-      console.warn("Polling error, retrying...", error);
+      // AxiosError가 발생했거나, getDeepAnalysisResult에서 throw된 경우
+      const errorStatus = error.response?.status || 'Network/Unknown';
+      console.error(`[Polling] ❌ Report #${reportId}: 폴링 에러 발생. Status: ${errorStatus}`, error);
+      // 에러가 나더라도 폴링은 계속 시도함 (네트워크 일시적 문제 가정)
     }
   }, [reportId, stopPolling]);
 
@@ -191,27 +233,47 @@ const useAnalysisPolling = (reportId) => {
     if (!reportId) return;
     
     const start = async () => {
+      console.log(`[Polling] 🚀 Report #${reportId} 폴링 초기화 시작.`);
       setStatus('processing');
+      stopPolling(); // 혹시 모를 이전 인터벌 정리
+
       try {
+        // 1. 초기 데이터 상태 체크 (분석이 이미 완료되었는지 확인)
         let res = await getDeepAnalysisResult(reportId);
-        if (!res?.data) {
-            try { await requestDeepAnalysis(reportId); } catch (e) { /* ignore */ }
-        } else if (res.data.status === 'completed') {
+        console.log(`[Polling] 💡 초기 상태 체크 결과: Status=${res?.status}`);
+        
+        if (res?.data?.status === 'completed' || res?.data?.status === 'error') {
             setData(res.data);
-            setStatus('done');
+            setStatus(res.data.status === 'completed' ? 'done' : 'failed'); // 초기에도 에러 핸들링
+            console.log(`[Polling] 🎯 초기 체크에서 ${res.data.status} 상태 확인. 폴링 불필요.`);
             return;
-        } else if (res.data) {
-            setData(res.data); // 초기 데이터가 있으면 바로 세팅
+        } 
+        
+        // 2. 결과가 없거나 (pending), 진행 중인 상태인 경우
+        if (res?.status === 'pending') {
+            // 결과가 없으면 분석 요청을 시도
+            try { 
+                console.log('[Polling] ➡️ 결과가 없어 분석 요청 시도...');
+                await requestDeepAnalysis(reportId); 
+            } catch (e) { 
+                console.warn('[Polling] 분석 요청 API 오류 발생 (이미 진행 중일 수 있음).');
+            }
         }
+        
+        // 3. 폴링 시작
         pollingRef.current = setInterval(pollData, 3000);
+        console.log(`[Polling] ⏱️ 3초 간격으로 폴링 시작.`);
+
       } catch (error) {
-        try { await requestDeepAnalysis(reportId); } catch(e) { /* ignore */ }
+        // 초기 체크 자체가 실패한 경우 (API 에러 등) -> 분석 요청 후 폴링 시작
+        console.error('[Polling] 초기 getDeepAnalysisResult 에러 발생. 분석 요청 후 폴링 시작.', error);
+        try { await requestDeepAnalysis(reportId); } catch(e) { console.warn('[Polling] 분석 요청 API도 실패했습니다.'); }
         pollingRef.current = setInterval(pollData, 3000);
       }
     };
 
     start();
-    return stopPolling;
+    return stopPolling; // 컴포넌트 언마운트 시 폴링 중지
   }, [reportId, pollData, stopPolling]);
 
   return { status, data };
@@ -289,7 +351,7 @@ const useGraphTransformation = (rawMap, onEdgeClickCallback) => {
 };
 
 // -----------------------------------------------------------------------------
-// 5. Sub-Components for UI (Added Side Panel for Partial Rendering)
+// 5. Sub-Components for UI
 // -----------------------------------------------------------------------------
 
 const AnalysisHeader = ({ status }) => (
@@ -320,7 +382,7 @@ const AnalysisHeader = ({ status }) => (
   </Box>
 );
 
-// [New] Side Panel Component for Partial Loading (Integrity & Flow)
+// ✅ [Fix] 중괄호 닫기 오류 수정됨
 const AnalysisSidePanel = ({ integrity, flow }) => {
   return (
     <Paper elevation={3} sx={{ 
@@ -411,7 +473,6 @@ const AnalysisSidePanel = ({ integrity, flow }) => {
            </Box>
         )}
       </Box>
-
     </Paper>
   );
 };
@@ -557,7 +618,7 @@ const LogicNeuronContent = () => {
               nodes={nodes} edges={edges}
               onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
               onNodeClick={onNodeClick} onEdgeClick={onEdgeClickAdapter}
-              edgeTypes={edgeTypes}
+              edgeTypes={edgeTypes} // ✅ 바깥에서 선언된 객체 사용
               fitView minZoom={0.3} maxZoom={4} attributionPosition="bottom-right"
             >
               <Background color="#b0bec5" gap={30} size={1} />
