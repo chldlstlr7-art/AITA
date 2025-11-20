@@ -7,7 +7,7 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from time import time, sleep
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
+import threading
 # 프롬프트 설정 로드
 from config import INTEGRITY_SCANNER_PROMPT, BRIDGE_CONCEPT_PROMPT, LOGIC_FLOW_CHECK_PROMPT, CREATIVE_CONNECTION_PROMPT
 
@@ -346,9 +346,8 @@ def scan_logical_integrity(text):
     print(f"✅ [Integrity] (Naver) 완료. 시간: {time() - start_time:.3f}초")
     return issues or []
 
-
 def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
-    """[기능 3] 흐름 단절 검사 (Naver Judge)"""
+    """[기능 3] 흐름 단절 검사 (최적화 + 디버깅 적용)"""
     start_time = time()
     print("🌊 [Disconnect] (Naver) 시작.")
     
@@ -357,10 +356,29 @@ def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
 
     nodes = flow_pattern_json['nodes']
     edges = flow_pattern_json['edges']
+    
+    # 1. 문장 분리
+    split_start = time()
     raw_sentences = [s.strip() for s in re.split(r'[.?!]\s+', raw_text) if len(s.strip()) > 10]
+    print(f"   [Debug] 문장 분리 완료 ({len(raw_sentences)}문장). 소요: {time() - split_start:.3f}초")
     
     edges_context = []
     snippets_context = {}
+
+    # ------------------------------------------------------------------
+    # [최적화 핵심] 본문 임베딩을 루프 밖에서 1회만 수행 (Pre-calculation)
+    # ------------------------------------------------------------------
+    embed_start = time()
+    if embedding_model and raw_sentences:
+        # 본문 전체를 한 번에 벡터화 (가장 무거운 작업)
+        doc_embeddings = embedding_model.encode(raw_sentences)
+        print(f"   [Debug] 본문 전체 임베딩 완료. 소요: {time() - embed_start:.3f}초")
+    else:
+        doc_embeddings = None
+        print("   [Debug] 임베딩 모델 없음. 스킵.")
+
+    # 2. 증거 문장 추출 (Retrieval)
+    retrieval_start = time()
     
     for idx, edge in enumerate(edges):
         parent_id, child_id = edge
@@ -369,8 +387,23 @@ def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
         
         if not parent_summary or not child_summary: continue
 
-        p_rep = extract_representative_sentences(raw_sentences, parent_summary)
-        c_rep = extract_representative_sentences(raw_sentences, child_summary)
+        # [최적화된 추출 로직]
+        # 이미 계산된 doc_embeddings를 재사용하므로 속도가 매우 빠름 (단순 행렬곱 연산)
+        p_rep = ""
+        c_rep = ""
+        
+        if embedding_model and doc_embeddings is not None:
+            # Parent 쿼리 임베딩
+            p_query_vec = embedding_model.encode(parent_summary)
+            p_sims = cosine_similarity([p_query_vec], doc_embeddings)[0]
+            p_idx = np.argmax(p_sims) # 가장 유사한 문장 인덱스
+            p_rep = raw_sentences[p_idx]
+
+            # Child 쿼리 임베딩
+            c_query_vec = embedding_model.encode(child_summary)
+            c_sims = cosine_similarity([c_query_vec], doc_embeddings)[0]
+            c_idx = np.argmax(c_sims)
+            c_rep = raw_sentences[c_idx]
         
         edge_key = f"{parent_id}->{child_id}"
         edges_context.append(edge_key)
@@ -381,34 +414,94 @@ def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
             "child_snippet": c_rep
         }
 
+    print(f"   [Debug] 스니펫 추출(Retrieval) 완료. 엣지 {len(edges)}개 처리 소요: {time() - retrieval_start:.3f}초")
+
     if not edges_context: return []
 
+    # 3. LLM 판결 (Judge)
     prompt_content = f"""
     {LOGIC_FLOW_CHECK_PROMPT}
     [Structure Edges] {json.dumps(edges_context, ensure_ascii=False)}
     [Text Snippets] {json.dumps(snippets_context, ensure_ascii=False)}
     """
 
+    llm_start = time()
+    print(f"   [Debug] LLM 호출 시작... (데이터 크기: {len(prompt_content)} chars)")
+    
+    # 여기서 시간이 가장 많이 걸림 (네이버 서버 처리 시간)
     weak_links_result = _call_llm_json(prompt_content)
-    print(f"✅ [Disconnect] (Naver) 완료. 시간: {time() - start_time:.3f}초")
-    return weak_links_result or []
+    
+    print(f"   [Debug] LLM 응답 수신 완료. 소요: {time() - llm_start:.3f}초")
 
+    # 필터링 (Strong 제외)
+    filtered_result = []
+    if weak_links_result:
+        filtered_result = [
+            item for item in weak_links_result 
+            if item.get('issue_type') in ['Weak', 'Bridge Needed'] 
+        ]
+
+    print(f"✅ [Disconnect] (Naver) 최종 완료. 총 소요 시간: {time() - start_time:.3f}초")
+    return filtered_result
 # --------------------------------------------------------------------------------------
 # --- 4. 메인 진입 ---
 # --------------------------------------------------------------------------------------
-
-def perform_deep_analysis(summary_json, raw_text):
+def perform_deep_analysis_async(summary_json, raw_text, on_task_complete):
+    """
+    [비동기 병렬 처리]
+    3개의 분석 작업을 동시에 시작하고, 끝나는 대로 on_task_complete 콜백을 호출합니다.
+    """
     start_time = time()
-    results = {}
-    print("\n--- 🧠 [DEEP ANALYSIS (Naver)] 시작 ---")
+    print("\n--- 🧠 [DEEP ANALYSIS] 병렬 처리 시작 ---")
     
     key_concepts = summary_json.get('key_concepts', '')
     core_thesis = summary_json.get('Core_Thesis', '')
     flow_pattern = summary_json.get('Flow_Pattern', {})
 
-    results['neuron_map'] = analyze_logic_neuron_map(raw_text, key_concepts, core_thesis)
-    results['integrity_issues'] = scan_logical_integrity(raw_text)
-    results['flow_disconnects'] = check_flow_disconnects_with_llm(flow_pattern, raw_text)
+    # 작업 정의 (함수명, 인자 리스트, 결과 키 이름)
+    tasks = [
+        {
+            "func": analyze_logic_neuron_map,
+            "args": (raw_text, key_concepts, core_thesis),
+            "key": "neuron_map"
+        },
+        {
+            "func": scan_logical_integrity,
+            "args": (raw_text,),
+            "key": "integrity_issues"
+        },
+        {
+            "func": check_flow_disconnects_with_llm,
+            "args": (flow_pattern, raw_text),
+            "key": "flow_disconnects"
+        }
+    ]
+
+    results = {}
     
-    print(f"--- ✅ [DEEP ANALYSIS (Naver)] 전체 완료. 시간: {time() - start_time:.3f}초 ---\n")
+    # ThreadPool로 3개 함수 동시 실행
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_to_key = {
+            executor.submit(task["func"], *task["args"]): task["key"] 
+            for task in tasks
+        }
+
+        for future in as_completed(future_to_key):
+            key = future_to_key[future]
+            try:
+                data = future.result()
+                results[key] = data
+                print(f"⚡ [Async] '{key}' 완료. DB 업데이트 요청.")
+                
+                # [핵심] 작업 하나 끝날 때마다 콜백 호출 -> DB 저장
+                if on_task_complete:
+                    on_task_complete(key, data)
+                    
+            except Exception as e:
+                print(f"❌ [Async Error] '{key}' 실패: {e}")
+                if on_task_complete:
+                    on_task_complete(key, {"error": str(e)})
+
+    total_time = time() - start_time
+    print(f"--- ✅ [DEEP ANALYSIS] 전체 병렬 처리 완료. 시간: {total_time:.3f}초 ---\n")
     return results

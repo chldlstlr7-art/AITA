@@ -13,7 +13,7 @@ from services.qa_service import generate_deep_dive_question
 from services.advancement_service import generate_advancement_ideas
 from services.course_management_service import CourseManagementService
 from services.flow_graph_services import _create_flow_graph_figure, check_system_fonts_debug
-from services.deep_analysis_service import perform_deep_analysis
+from services.deep_analysis_service import perform_deep_analysis_async
 
 
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -783,10 +783,25 @@ def get_flow_graph(report_id):
         nodes = {} # 에러 시 빈 딕셔너리로 초기화
         edges = []
 
-    # 5. [기존 4번] 노드 유효성 검사 (변환된 'nodes' 딕셔너리 기준)
-    if not nodes: # nodes_dict가 비어있는 경우
+   if not nodes: # nodes_dict가 비어있는 경우
         print(f"[get_flow_graph:{report_id}] No valid nodes found after parsing summary's Flow_Pattern.")
         return jsonify({"status": "error", "message": "No logic flow data available to generate graph."}), 404
+
+    # ============================================================
+    # [추가] "결론" 노드 고립 처리 (엣지 제거 로직)
+    # ============================================================
+    # 내용(summary)에 '결론'이라는 단어가 포함된 노드의 ID를 찾습니다.
+    # (예: "[결론]", "[종합 결론]", "최종 결론" 등)
+    conclusion_node_ids = {nid for nid, text in nodes.items() if "결론" in text}
+
+    if conclusion_node_ids:
+        # 결론 노드가 출발점(u)이거나 도착점(v)인 모든 엣지를 제거하여 리스트를 재구성합니다.
+        original_edge_count = len(edges)
+        edges = [
+            (u, v) for u, v in edges
+            if u not in conclusion_node_ids and v not in conclusion_node_ids
+        ]
+        print(f"[get_flow_graph:{report_id}] Isolated 'Conclusion' nodes: {conclusion_node_ids}. Edges reduced from {original_edge_count} to {len(edges)}.")
 
     # 6. [기존 5번] 그래프 생성
     try:
@@ -856,69 +871,124 @@ def _background_deep_analysis(app, report_id):
             print(f"❌ [Background Error] Report #{report_id}: {e}")
             traceback.print_exc()
 
+def _background_deep_analysis(app, report_id):
+    """
+    별도 스레드에서 실행.
+    분석 서비스에 '콜백 함수'를 넘겨서, 작업이 하나 끝날 때마다 DB를 업데이트함.
+    """
+    # DB 동시 쓰기 방지를 위한 Lock
+    db_lock = threading.Lock()
+
+    with app.app_context():
+        try:
+            print(f"🔄 [Background] Report #{report_id} 스레드 시작.")
+
+            # 1. 초기 상태 설정 (빈 JSON 뼈대 만들기)
+            report = AnalysisReport.query.get(report_id)
+            if not report: return
+
+            initial_data = {
+                "status": "processing",
+                "neuron_map": None,       # 로딩 중...
+                "integrity_issues": None, # 로딩 중...
+                "flow_disconnects": None  # 로딩 중...
+            }
+            report.deep_analysis_data = json.dumps(initial_data)
+            db.session.commit()
+
+            # 2. 데이터 준비
+            try:
+                summary_json = json.loads(report.summary) if isinstance(report.summary, str) else report.summary
+            except:
+                summary_json = report.summary
+            
+            # text_snippet 필드명 확인 (모델에 따라 content일 수도 있음)
+            raw_text = getattr(report, 'text_snippet', report.content)
+
+            # ---------------------------------------------------------
+            # [콜백 함수] 부분 업데이트 로직
+            # ---------------------------------------------------------
+            def save_partial_result(key, data):
+                # Lock을 걸어 여러 스레드가 동시에 DB 커밋하는 충돌 방지
+                with db_lock:
+                    with app.app_context(): # 컨텍스트 재진입 안전장치
+                        # 최신 데이터 다시 조회 (중요: 덮어쓰기 방지)
+                        repo = AnalysisReport.query.get(report_id)
+                        if not repo or not repo.deep_analysis_data: return
+                        
+                        # 기존 JSON 로드 -> 키 업데이트 -> 저장
+                        current_json = json.loads(repo.deep_analysis_data)
+                        current_json[key] = data
+                        repo.deep_analysis_data = json.dumps(current_json, ensure_ascii=False)
+                        db.session.commit()
+                        print(f"💾 [DB] Report #{report_id} - '{key}' 부분 저장 완료.")
+
+            # 3. 병렬 서비스 호출 (콜백 전달)
+            perform_deep_analysis_async(summary_json, raw_text, on_task_complete=save_partial_result)
+
+            # 4. 최종 상태 'completed'로 변경
+            with db_lock:
+                repo = AnalysisReport.query.get(report_id)
+                current_json = json.loads(repo.deep_analysis_data)
+                current_json["status"] = "completed"
+                repo.deep_analysis_data = json.dumps(current_json, ensure_ascii=False)
+                db.session.commit()
+                print(f"✅ [Background] Report #{report_id} 모든 작업 완료.")
+
+        except Exception as e:
+            print(f"❌ [Background Error] {e}")
+            traceback.print_exc()
+            # 에러 상태 저장
+            with app.app_context():
+                repo = AnalysisReport.query.get(report_id)
+                if repo:
+                    repo.deep_analysis_data = json.dumps({"status": "error", "message": str(e)})
+                    db.session.commit()
 
 # ----------------------------------------------------------------
-# [API] 2단계 심층 분석 수행 (비동기 스레드 실행)
-# URL: /reports/<id>/deep-analysis
-# Method: POST
+# [API] 분석 요청 (POST)
 # ----------------------------------------------------------------
-@student_bp.route('/reports/<report_id>/deep-analysis', methods=['POST'])
+@student_bp.route('/reports/<int:report_id>/deep-analysis', methods=['POST'])
 def run_deep_analysis(report_id):
     try:
-        # 1. 리포트 존재 여부만 가볍게 확인
         report = AnalysisReport.query.get_or_404(report_id)
-
         if not report.summary:
-            return jsonify({"status": "error", "message": "1단계 분석이 필요합니다."}), 400
+            return jsonify({"status": "error", "message": "1단계 분석 필요"}), 400
 
-        # 2. 이미 분석된 결과가 있는지 확인 (선택 사항)
-        # if report.deep_analysis_data:
-        #     return jsonify({"status": "completed", "message": "Already analyzed."}), 200
-
-        # 3. 백그라운드 스레드 실행
-        # current_app._get_current_object()를 넘겨줘야 스레드 안에서 DB를 쓸 수 있음
+        # 비동기 스레드 실행
         app = current_app._get_current_object()
-        
         thread = threading.Thread(target=_background_deep_analysis, args=(app, report_id))
-        thread.daemon = True # 메인 프로세스 종료 시 같이 종료
+        thread.daemon = True
         thread.start()
 
-        print(f"🚀 [API] Report #{report_id} 백그라운드 분석 요청됨. (202 응답)")
-
-        # 4. 기다리지 않고 즉시 응답 (202 Accepted)
         return jsonify({
             "status": "processing",
-            "message": "심층 분석이 백그라운드에서 시작되었습니다. 잠시 후 조회해주세요.",
+            "message": "심층 분석이 시작되었습니다.",
             "report_id": report_id
         }), 202
 
     except Exception as e:
-        print(f"❌ [API Error] {str(e)}")
+        print(f"❌ [API Error] {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-
 # ----------------------------------------------------------------
-# [API] 심층 분석 결과 조회 (Fetch Result Only)
-# URL: /reports/<id>/deep-analysis
-# Method: GET
+# [API] 결과 조회 (GET) - 폴링용
 # ----------------------------------------------------------------
-@student_bp.route('/reports/<report_id>/deep-analysis', methods=['GET'])
+@student_bp.route('/reports/<int:report_id>/deep-analysis', methods=['GET'])
 def get_deep_analysis(report_id):
     try:
         report = AnalysisReport.query.get_or_404(report_id)
-
+        
         if not report.deep_analysis_data:
-            return jsonify({
-                "status": "pending", 
-                "message": "심층 분석 결과가 없습니다. POST 요청으로 분석을 시작하세요.",
-                "data": None
-            }), 404
+            return jsonify({"status": "pending", "data": None}), 200 # 200 OK지만 데이터 없음
 
-        # 저장된 JSON 문자열을 파싱해서 반환
         data = json.loads(report.deep_analysis_data)
         
+        # status 필드가 있으면 그것을 사용, 없으면 success 간주
+        status = data.get("status", "success")
+        
         return jsonify({
-            "status": "success",
+            "status": status,
             "data": data
         }), 200
 

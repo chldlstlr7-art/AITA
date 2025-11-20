@@ -79,7 +79,7 @@ def run_test():
 
     try:
         # 서비스 호출
-        result = perform_deep_analysis(TEST_SUMMARY_JSON, TEST_TEXT)
+        result = perform_deep_analysis_async(TEST_SUMMARY_JSON, TEST_TEXT)
         
         print("\n" + "="*70)
         print("✅ [최종 분석 결과 리포트]")
