@@ -6,133 +6,183 @@ from flask import Flask
 from unittest.mock import MagicMock
 
 # [중요] 실제 서비스 로직 임포트
-# (services 폴더가 있고 그 안에 deep_analysis_service.py가 있어야 함)
 try:
     from services.deep_analysis_service import perform_deep_analysis_async
-except ImportError:
-    print("❌ 'services.deep_analysis_service'를 찾을 수 없습니다.")
-    print("   이전 답변의 코드를 'services/deep_analysis_service.py'로 저장해주세요.")
-    exit(1)
+except Exception as e:
+    print(f"⚠️ [Import Error] {e}")
 
 # ======================================================================================
 # 1. [Mock Setup] Flask, DB, Model 가상화
-#    (실제 DB 없이 로직 흐름을 검증하기 위함)
 # ======================================================================================
 
 # 가짜 Flask 앱
 app = Flask(__name__)
 
-# 가짜 DB 세션 및 모델
+# 가짜 DB 및 세션 설정
 class MockDB:
-    session = MagicMock()
+    def __init__(self):
+        # 실제 Flask-SQLAlchemy처럼 engine 속성(Mock)을 가짐
+        self.engine = MagicMock() 
+        self.session = MagicMock()
     
     def commit(self):
-        # 실제 commit은 안 하지만, 호출되었다는 로그는 남김
-        # print("   💾 [MockDB] commit() called.")
         pass
 
 db = MockDB()
 
-# 가짜 리포트 모델 (SQLAlchemy Model 흉내)
+# 가짜 리포트 모델
 class MockAnalysisReport:
     def __init__(self, report_id, summary, text_snippet):
         self.id = report_id
         self.summary = summary
-        self.text_snippet = text_snippet # 또는 content
-        self.deep_analysis_data = None   # JSON 문자열이 저장될 곳
-
-    # 쿼리 메서드 흉내
-    @classmethod
-    def query_get(cls, report_id):
-        # 테스트용 전역 저장소에서 가져옴
-        return MOCK_DB_STORAGE.get(report_id)
+        self.text_snippet = text_snippet
+        self.deep_analysis_data = None
 
 # 테스트용 인메모리 DB 저장소
 MOCK_DB_STORAGE = {}
 
-# AnalysisReport 클래스에 query 속성 주입
+# AnalysisReport 클래스 (가짜)
 AnalysisReport = MagicMock()
-AnalysisReport.query.get = MockAnalysisReport.query_get
+
+# session.get(Model, id) 동작을 흉내내는 함수
+def mock_session_get(model, report_id):
+    # model 인자는 무시하고(어차피 가짜니까), 저장소에서 ID로 조회
+    return MOCK_DB_STORAGE.get(report_id)
+
+# db.session.get이 호출되면 위 함수를 실행하도록 설정
+db.session.get.side_effect = mock_session_get
 
 
 # ======================================================================================
-# 2. [Target Logic] student_api.py의 핵심 함수 가져오기
-#    (사용자가 제공한 코드를 그대로 사용하되, import만 위에서 정의한 Mock으로 연결)
+# 2. [Mock SQLAlchemy] 실제 라이브러리 대신 가짜 함수 정의
+#    (주의: 여기에 from sqlalchemy... 를 절대 쓰면 안 됩니다!)
 # ======================================================================================
+
+def sessionmaker(bind=None):
+    """
+    sessionmaker는 원래 '세션 공장'을 반환합니다.
+    여기서는 아무 의미 없는 Mock을 반환해도 됩니다.
+    """
+    return MagicMock()
+
+def scoped_session(session_factory):
+    """
+    scoped_session은 원래 '스레드 로컬 세션'을 반환합니다.
+    테스트에서는 우리가 준비한 db.session(MagicMock)을 그대로 반환하여
+    모든 동작이 mock_session_get 등을 타도록 유도합니다.
+    """
+    return db.session
+
+
+# ======================================================================================
+# 3. [Target Logic] 테스트 대상 함수
+# ======================================================================================
+
+# [수정 포인트] from sqlalchemy.orm ... 임포트 라인을 삭제했습니다!
+# 이제 위에서 정의한 가짜 sessionmaker, scoped_session이 사용됩니다.
 
 def _background_deep_analysis(app, report_id):
     """
-    [Test Target] student_api.py에 있는 함수 로직 그대로.
-    단, perform_deep_analysis_async는 '실제 모듈'을 사용함.
+    별도 스레드에서 실행.
+    독립적인 DB 세션을 사용하여 충돌을 방지함.
     """
-    # DB 동시 쓰기 방지를 위한 Lock
+    # Thread-local DB Session 생성
+    with app.app_context():
+        Session = sessionmaker(bind=db.engine)
+        local_session = scoped_session(Session)
+
+    # Lock은 여전히 유효함
     db_lock = threading.Lock()
 
-    with app.app_context():
+    try:
+        print(f"🔄 [Background] Report #{report_id} 스레드 시작.")
+
+        # 1. 초기 상태 설정
+        # local_session은 db.session(Mock)이므로 side_effect인 mock_session_get이 실행됨
+        report = local_session.get(AnalysisReport, report_id)
+        
+        if not report: 
+            print(f"❌ Report #{report_id} not found in Mock DB.")
+            local_session.remove()
+            return
+
+        initial_data = {
+            "status": "processing",
+            "neuron_map": None,
+            "integrity_issues": None,
+            "flow_disconnects": None
+        }
+        report.deep_analysis_data = json.dumps(initial_data)
+        
+        local_session.commit()
+
+        # 2. 데이터 준비
         try:
-            print(f"🔄 [Background] Report #{report_id} 스레드 시작.")
+            summary_json = json.loads(report.summary) if isinstance(report.summary, str) else report.summary
+        except:
+            summary_json = report.summary
+        
+        raw_text = str(getattr(report, 'text_snippet', report.text_snippet))
+        
+        local_session.remove()
 
-            # 1. 초기 상태 설정
-            report = AnalysisReport.query.get(report_id)
-            if not report: 
-                print("❌ 리포트 없음")
-                return
-
-            initial_data = {
-                "status": "processing",
-                "neuron_map": None,
-                "integrity_issues": None,
-                "flow_disconnects": None
-            }
-            report.deep_analysis_data = json.dumps(initial_data)
-            db.session.commit() # Mock DB commit
-
-            # 2. 데이터 준비
-            try:
-                summary_json = json.loads(report.summary) if isinstance(report.summary, str) else report.summary
-            except:
-                summary_json = report.summary
-            
-            raw_text = report.text_snippet
-
-            # ---------------------------------------------------------
-            # [콜백 함수] 부분 업데이트 로직
-            # ---------------------------------------------------------
-            def save_partial_result(key, data):
-                with db_lock:
-                    with app.app_context():
-                        # 최신 데이터 다시 조회
-                        repo = AnalysisReport.query.get(report_id)
-                        if not repo: return
-                        
-                        # [검증 포인트] 여기서 실제로 데이터가 업데이트되는지 확인
-                        current_json = json.loads(repo.deep_analysis_data) if repo.deep_analysis_data else {}
-                        current_json[key] = data
-                        repo.deep_analysis_data = json.dumps(current_json, ensure_ascii=False)
-                        
-                        db.session.commit()
-                        
-                        # 시각적 확인을 위한 출력
-                        preview = str(data)[:] + "..." if len(str(data)) > 30 else str(data)
-                        print(f"   💾 [DB Update Callback] Key='{key}' | Data={preview}")
-
-            # 3. [핵심] 실제 서비스 모듈 호출 (Mock 아님!)
-            print("   🚀 [Service] perform_deep_analysis_async 호출 (실제 API 연동)")
-            perform_deep_analysis_async(summary_json, raw_text, on_task_complete=save_partial_result)
-
-            # 4. 최종 상태 완료 처리
+        # ---------------------------------------------------------
+        # [콜백 함수]
+        # ---------------------------------------------------------
+        def save_partial_result(key, data):
             with db_lock:
-                repo = AnalysisReport.query.get(report_id)
-                current_json = json.loads(repo.deep_analysis_data)
-                current_json["status"] = "completed"
-                repo.deep_analysis_data = json.dumps(current_json, ensure_ascii=False)
-                db.session.commit()
-                print(f"✅ [Background] Report #{report_id} 모든 작업 완료 (Status: completed).")
+                callback_session = scoped_session(Session)
+                try:
+                    repo = callback_session.get(AnalysisReport, report_id)
+                    if not repo: 
+                        return
+                    
+                    if not repo.deep_analysis_data:
+                        repo.deep_analysis_data = "{}"
 
-        except Exception as e:
-            print(f"❌ [Background Error] {e}")
-            import traceback
-            traceback.print_exc()
+                    current_json = json.loads(repo.deep_analysis_data)
+                    current_json[key] = data
+                    repo.deep_analysis_data = json.dumps(current_json, ensure_ascii=False)
+                    
+                    callback_session.commit()
+                    print(f"💾 [DB] Report #{report_id} - '{key}' 부분 저장 완료.")
+                except Exception as e:
+                    callback_session.rollback()
+                    print(f"⚠️ [Partial Save Error] {e}")
+                finally:
+                    callback_session.remove()
+
+        # 3. 병렬 서비스 호출
+        perform_deep_analysis_async(summary_json, raw_text, on_task_complete=save_partial_result)
+
+        # 4. 최종 완료 상태 업데이트
+        final_session = scoped_session(Session)
+        try:
+            with db_lock:
+                repo = final_session.get(AnalysisReport, report_id)
+                if repo:
+                    if not repo.deep_analysis_data: repo.deep_analysis_data = "{}"
+                    current_json = json.loads(repo.deep_analysis_data)
+                    current_json["status"] = "completed"
+                    repo.deep_analysis_data = json.dumps(current_json, ensure_ascii=False)
+                    final_session.commit()
+                    print(f"✅ [Background] Report #{report_id} 모든 작업 완료.")
+        finally:
+            final_session.remove()
+
+    except Exception as e:
+        print(f"❌ [Background Error] {e}")
+        import traceback
+        traceback.print_exc()
+        
+        error_session = scoped_session(Session)
+        try:
+            repo = error_session.get(AnalysisReport, report_id)
+            if repo:
+                repo.deep_analysis_data = json.dumps({"status": "error", "message": str(e)})
+                error_session.commit()
+        finally:
+            error_session.remove()
 
 
 # ======================================================================================

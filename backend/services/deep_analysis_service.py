@@ -9,7 +9,7 @@ from time import time, sleep
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 # 프롬프트 설정 로드
-from config import INTEGRITY_SCANNER_PROMPT, BRIDGE_CONCEPT_PROMPT, LOGIC_FLOW_CHECK_PROMPT, CREATIVE_CONNECTION_PROMPT
+from config import INTEGRITY_SCANNER_PROMPT, BRIDGE_CONCEPT_BATCH_PROMPT, LOGIC_FLOW_CHECK_PROMPT, CREATIVE_CONNECTION_BATCH_PROMPT
 
 # --------------------------------------------------------------------------------------
 # --- 1. 설정 및 모델 로드 ---
@@ -63,7 +63,7 @@ def _call_llm_json(prompt_text):
         ],
         "topP": 0.8,
         "topK": 0,
-        "maxCompletionTokens": 4096,
+        "maxCompletionTokens": 2048,
         "temperature": 0.2,
         "repeatPenalty": 1.5,
         "stopBefore": [],
@@ -149,36 +149,33 @@ def extract_representative_sentences(text_sentences, query_summary, top_k=1):
 # --------------------------------------------------------------------------------------
 # --- 3. 핵심 기능 구현 (로직은 유지하되, 순차 처리는 API 제한에 따라 조정) ---
 # --------------------------------------------------------------------------------------
-# 네이버 유료 API는 보통 Rate Limit이 넉넉하므로 다시 '병렬 처리'를 시도해볼 만합니다.
-# 하지만 안전하게 '순차 처리' 코드를 유지하겠습니다.
-
 def analyze_logic_neuron_map(text, key_concepts_str, core_thesis):
     """
-    [Zone 기반 고도화] 논리 뉴런 맵 생성
-    - Zone A (Strong): 엣지 생성 (실선)
-    - Zone B (Bridge): 외딴 섬 발생 시 우선 연결 후보로 사용
-    - Zone C (Creative): 엣지 생성 (물결선) + LLM 창의성 검증 수행
+    [Zone 기반 고도화] 논리 뉴런 맵 생성 (Full Batch Optimization)
+    - LLM 호출을 단 2회(Zone C 1회 + Bridge 1회)로 최소화하여 속도 최적화
     """
     start_time = time()
-    print("🚀 [Neuron Map] (Naver) 1/4 시작: Zone 기반 분석.")
+    print("🚀 [Neuron Map] (Naver/Batch) 분석 시작.")
     
-    if not key_concepts_str: return {"nodes": [], "edges": [], "suggestions": [], "creative_feedbacks": []}
+    # 0. 기본 데이터 검증
+    if not key_concepts_str: 
+        return {"nodes": [], "edges": [], "suggestions": [], "creative_feedbacks": []}
     
     concepts = [c.strip() for c in key_concepts_str.split(',') if c.strip()]
-    if not concepts: return {"nodes": [], "edges": [], "suggestions": [], "creative_feedbacks": []}
+    if not concepts: 
+        return {"nodes": [], "edges": [], "suggestions": [], "creative_feedbacks": []}
 
     nodes = [{"id": c, "label": c} for c in concepts]
     edges = []
     
-    # 각 노드의 연결 상태 추적 (True면 외딴 섬 아님)
+    # 상태 추적 변수
     connected_status = {c: False for c in concepts}
+    potential_bridges = {} # Zone B 저장용
     
-    # Zone B (잠재적 연결) 후보 저장소: {(c1, c2): semantic_score}
-    potential_bridges = {}
+    # [배치 처리를 위한 데이터 컨테이너]
+    zone_c_candidates = [] # [{'id': 0, 'source': 'A', 'target': 'B', 'context': '...'}, ...]
+    bridge_candidates = [] # [{'id': 0, 'iso': 'A', 'partner': 'B'}, ...]
     
-    # Zone C (창의성 검증) Task 저장소
-    zone_c_tasks = []
-
     paragraphs = [p for p in text.split('\n') if len(p) > 20]
 
     # 1. S-BERT Batch Encoding
@@ -188,94 +185,88 @@ def analyze_logic_neuron_map(text, key_concepts_str, core_thesis):
         concept_vectors = [None] * len(concepts) 
 
     # 2. Pairwise 분석 (N x N)
+    print("   [Neuron Map] Pairwise 계산 및 Zone 분류...")
+    zone_c_idx = 0 # Zone C 배치 ID 카운터
+
     for i in range(len(concepts)):
         for j in range(i + 1, len(concepts)):
             c1 = concepts[i]
             c2 = concepts[j]
             
-            # (A) 물리적 거리 (0.0 ~ 1.0)
+            # (A) 물리적 거리 계산
             physical_score = 0.0
-            context_sent = "" # Zone C 검증용 문장
+            context_sent = ""
             for p in paragraphs:
                 if c1 in p and c2 in p:
                     physical_score += 1.0
-                    if not context_sent: context_sent = p # 첫 번째 발견된 문장 저장
-            physical_score = min(physical_score / 2.0, 1.0) # 2번만 같이 나와도 만점 (완화)
+                    if not context_sent: context_sent = p # 첫 발견 문장 저장
+            physical_score = min(physical_score / 3.0, 1.0)
 
-            # (B) 의미적 거리 (0.0 ~ 1.0)
+            # (B) 의미적 거리 계산
             if concept_vectors[i] is not None:
                 semantic_score = float(cosine_similarity([concept_vectors[i]], [concept_vectors[j]])[0][0])
             else:
                 semantic_score = 0.0
             
-            # --- 📊 Zone 판별 로직 ---
+            # --- Zone 판별 및 엣지 생성 ---
             
-            # 1. Zone C: 창의적/작위적 연결 (의미 멂 + 물리 가까움)
-            # S-BERT는 멀다고 하는데(0.4 미만), 글에서는 붙여놓음(0.5 이상)
-            if semantic_score < 0.4 and physical_score >= 0.5:
+            # Case 1: Zone C (창의적/억지 연결 의심) -> 배치 리스트에 추가
+            if semantic_score < 0.4 and physical_score >= 0.3:
                 edges.append({
                     "source": c1, "target": c2, 
                     "weight": round(semantic_score, 2),
-                    "type": "questionable" # 프론트에서 물결선/점선 등으로 표시
+                    "type": "questionable" # 프론트엔드에서 점선/물결선 표시
                 })
                 connected_status[c1] = True
                 connected_status[c2] = True
                 
-                # LLM 검증 대기열 추가
                 if context_sent:
-                    prompt = CREATIVE_CONNECTION_PROMPT.format(
-                        concept_a=c1, concept_b=c2, context_sentence=context_sent
-                    )
-                    zone_c_tasks.append({"source": c1, "target": c2, "prompt": prompt})
+                    zone_c_candidates.append({
+                        "id": zone_c_idx,
+                        "source": c1,
+                        "target": c2,
+                        "context": context_sent[:200] # 너무 길면 자름
+                    })
+                    zone_c_idx += 1
 
-            # 2. Zone B: 잠재적 연결 (의미 가까움 + 물리 멂)
-            # S-BERT는 가깝다고 하는데(0.65 이상), 글에서는 따로 놈(0.2 미만)
-            elif semantic_score > 0.65 and physical_score < 0.2:
-                # 엣지는 추가하지 않음 (글에 없으니까)
-                # 나중에 외딴 섬 발생 시, 이 커플을 최우선으로 추천함
+            # Case 2: Zone B (잠재적 연결) -> 나중에 Bridge 후보로 사용
+            elif semantic_score > 0.55 and physical_score < 0.2:
                 potential_bridges[(c1, c2)] = semantic_score
-                # (주의: connected_status는 True로 바꾸지 않음 -> 외딴 섬으로 남겨둠)
 
-            # 3. Zone A & Normal: 일반적인 연결 (가중치 합산)
+            # Case 3: Zone A (일반적 강한 연결)
             else:
                 total_weight = (physical_score * 0.4) + (semantic_score * 0.6)
-                if total_weight > 0.35:
+                if total_weight > 0.3:
                     edges.append({
                         "source": c1, "target": c2, 
                         "weight": round(total_weight, 2),
-                        "type": "strong" if total_weight > 0.65 else "normal"
+                        "type": "strong" if total_weight > 0.6 else "normal"
                     })
                     connected_status[c1] = True
                     connected_status[c2] = True
 
-    # 3. 외딴 섬(Isolated Node) 구출 작전 (Bridge 제안)
-    suggestions = []
-    bridge_tasks = []
-    
-    # 아직 연결되지 않은 노드들 찾기
+    # 3. 외딴 섬(Isolated Node) Bridge 후보 선정
     isolated_nodes = [node for node, connected in connected_status.items() if not connected]
-    
-    processed_iso_nodes = set() # 중복 처리 방지
+    processed_iso_nodes = set()
+    bridge_idx = 0 # Bridge 배치 ID 카운터
 
     for iso_node in isolated_nodes:
         if iso_node in processed_iso_nodes: continue
         
         best_partner = None
+        best_score = -1.0
         
-        # 전략 1: Zone B (잠재적 연결) 리스트에서 파트너가 있는지 먼저 확인
-        # (의미적으로 가장 가까운 놈을 찾음)
-        best_zone_b_score = -1.0
-        
+        # 전략 1: Zone B (잠재적 연결) 활용
         for (p1, p2), score in potential_bridges.items():
             partner = None
             if p1 == iso_node: partner = p2
             elif p2 == iso_node: partner = p1
             
-            if partner and score > best_zone_b_score:
-                best_zone_b_score = score
+            if partner and score > best_score:
+                best_score = score
                 best_partner = partner
 
-        # 전략 2: Zone B에도 없다면, 그냥 전체 중에서 S-BERT 가장 높은 놈 찾기 (Fallback)
+        # 전략 2: Fallback (S-BERT 유사도 전체 검색)
         if not best_partner:
             try: iso_idx = concepts.index(iso_node)
             except: continue
@@ -289,52 +280,96 @@ def analyze_logic_neuron_map(text, key_concepts_str, core_thesis):
                     best_sim = sim
                     best_partner = other
 
-        # Task 추가
+        # 후보 등록
         if best_partner:
-            prompt = BRIDGE_CONCEPT_PROMPT.format(
-                concept_a=iso_node, concept_b=best_partner, core_thesis=core_thesis
-            )
-            bridge_tasks.append({
-                "iso_node": iso_node, "partner": best_partner, "prompt": prompt
+            bridge_candidates.append({
+                "id": bridge_idx,
+                "iso_node": iso_node,
+                "partner_node": best_partner
             })
+            bridge_idx += 1
             processed_iso_nodes.add(iso_node)
 
-    # 4. LLM 순차 호출 (Bridge 제안)
-    if bridge_tasks:
-        print(f"   [Neuron Map] 3/4 Bridge 제안 {len(bridge_tasks)}건 순차 처리.")
-        for i, task in enumerate(bridge_tasks):
-            if i > 0: sleep(1.0) # Rate Limit 방지
-            res = _call_llm_json(task['prompt'])
-            if res:
-                suggestions.append({
-                    "target_node": task['iso_node'],
-                    "partner_node": task['partner'],
-                    "suggestion": res
-                })
 
-    # 5. LLM 순차 호출 (Zone C 창의성 검증)
+    # ----------------------------------------------------------------
+    # [배치 처리 1] Zone C 창의성 검증 (LLM 1회 호출)
+    # ----------------------------------------------------------------
     creative_feedbacks = []
-    if zone_c_tasks:
-        print(f"   [Neuron Map] 4/4 Zone C(창의성) 검증 {len(zone_c_tasks)}건 순차 처리.")
-        for i, task in enumerate(zone_c_tasks):
-            if i > 0 or bridge_tasks: sleep(1.0) # 앞 작업이 있었으면 휴식
-            res = _call_llm_json(task['prompt'])
-            if res:
-                creative_feedbacks.append({
-                    "concepts": [task['source'], task['target']],
-                    "judgment": res.get('judgment'),
-                    "reason": res.get('reason'),
-                    "feedback": res.get('feedback')
-                })
     
+    if zone_c_candidates:
+        print(f"   [Neuron Map] Zone C 검증 {len(zone_c_candidates)}건 일괄 처리 중...")
+        
+        # 1. 프롬프트용 텍스트 블록 생성
+        items_block = ""
+        for item in zone_c_candidates:
+            items_block += f"- ID {item['id']}: '{item['source']}' - '{item['target']}' (문맥: \"{item['context']}\")\n"
+        
+        # 2. LLM 호출
+        prompt = CREATIVE_CONNECTION_BATCH_PROMPT.format(items_block=items_block)
+        batch_result = _call_llm_json(prompt)
+        
+        # 3. 결과 매핑
+        if batch_result and isinstance(batch_result, list):
+            result_map = {res.get('id'): res for res in batch_result}
+            
+            for item in zone_c_candidates:
+                res = result_map.get(item['id'])
+                if res:
+                    creative_feedbacks.append({
+                        "concepts": [item['source'], item['target']],
+                        "judgment": res.get('judgment', 'Forced'),
+                        "reason": res.get('reason', ''),
+                        "feedback": res.get('feedback', '')
+                    })
+    else:
+        print("   [Neuron Map] Zone C(창의성 검증) 대상 없음.")
+
+
+    # ----------------------------------------------------------------
+    # [배치 처리 2] Bridge 제안 생성 (LLM 1회 호출)
+    # ----------------------------------------------------------------
+    suggestions = []
+    
+    if bridge_candidates:
+        print(f"   [Neuron Map] Bridge 제안 {len(bridge_candidates)}건 일괄 처리 중...")
+        
+        # 1. 프롬프트용 텍스트 블록 생성
+        pairs_block = ""
+        for item in bridge_candidates:
+            pairs_block += f"- ID {item['id']}: '{item['iso_node']}' <-> '{item['partner_node']}'\n"
+            
+        # 2. LLM 호출
+        prompt = BRIDGE_CONCEPT_BATCH_PROMPT.format(
+            core_thesis=core_thesis, 
+            pairs_block=pairs_block
+        )
+        batch_result = _call_llm_json(prompt)
+        
+        # 3. 결과 매핑
+        if batch_result and isinstance(batch_result, list):
+            result_map = {res.get('id'): res.get('socratic_guide') for res in batch_result}
+            
+            for item in bridge_candidates:
+                guide = result_map.get(item['id'])
+                if guide:
+                    suggestions.append({
+                        "target_node": item['iso_node'],
+                        "partner_node": item['partner_node'],
+                        "suggestion": guide
+                    })
+    else:
+        print("   [Neuron Map] 외딴 섬(Isolated Node) 없음.")
+
+
+    # 최종 완료
     total_time = time() - start_time
-    print(f"✅ [Neuron Map] (Naver) 완료. 시간: {total_time:.3f}초")
+    print(f"✅ [Neuron Map] 완료. (총 소요시간: {total_time:.3f}초)")
     
     return {
         "nodes": nodes, 
         "edges": edges, 
-        "suggestions": suggestions,         # Zone B 기반 (외딴 섬 연결)
-        "creative_feedbacks": creative_feedbacks # Zone C 기반 (창의/억지 판단)
+        "suggestions": suggestions, 
+        "creative_feedbacks": creative_feedbacks
     }
 
 def scan_logical_integrity(text):

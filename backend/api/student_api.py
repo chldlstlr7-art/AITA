@@ -14,7 +14,7 @@ from services.advancement_service import generate_advancement_ideas
 from services.course_management_service import CourseManagementService
 from services.flow_graph_services import _create_flow_graph_figure, check_system_fonts_debug
 from services.deep_analysis_service import perform_deep_analysis_async
-
+from sqlalchemy.orm import scoped_session, sessionmaker
 
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
@@ -829,118 +829,108 @@ def debug_font():
 
 # [내부 함수] 백그라운드에서 실행될 실제 분석 로직
 # ----------------------------------------------------------------
-def _background_deep_analysis(app, report_id):
-    """
-    별도 스레드에서 실행되는 작업입니다.
-    app_context를 명시적으로 사용해야 DB에 접근할 수 있습니다.
-    """
-    with app.app_context():
-        try:
-            print(f"🔄 [Background] Report #{report_id} 분석 스레드 시작...")
-            
-            # 1. 리포트 재조회 (스레드 내에서 세션 관리)
-            report = AnalysisReport.query.get(report_id)
-            if not report:
-                print(f"❌ [Background] Report #{report_id} not found.")
-                return
-
-            # 2. 데이터 준비
-            try:
-                summary_json = json.loads(report.summary) if isinstance(report.summary, str) else report.summary
-            except:
-                summary_json = report.summary
-
-            # text_snippet이 없으면 content 사용 (모델 정의에 따라 조정)
-            raw_text = getattr(report, 'text_snippet', report.text_snippet)
-
-            # 3. 서비스 호출 (오래 걸리는 작업)
-            deep_result = perform_deep_analysis(summary_json, raw_text)
-
-            # 4. DB 저장
-            report.deep_analysis_data = json.dumps(deep_result, ensure_ascii=False)
-            db.session.commit()
-            
-            print(f"✅ [Background] Report #{report_id} 분석 완료 및 DB 저장 성공.")
-
-        except Exception as e:
-            db.session.rollback()
-            print(f"❌ [Background Error] Report #{report_id}: {e}")
-            traceback.print_exc()
 
 def _background_deep_analysis(app, report_id):
     """
     별도 스레드에서 실행.
-    분석 서비스에 '콜백 함수'를 넘겨서, 작업이 하나 끝날 때마다 DB를 업데이트함.
+    독립적인 DB 세션을 사용하여 충돌을 방지함.
     """
-    # DB 동시 쓰기 방지를 위한 Lock
+    # Thread-local DB Session 생성 (가장 중요!)
+    # 기존 db.session 대신 이 세션을 사용해야 스레드 간 간섭이 없음
+    with app.app_context():
+        Session = sessionmaker(bind=db.engine)
+        local_session = scoped_session(Session)
+
+    # Lock은 여전히 유효함 (파이썬 레벨에서의 동시 접근 제어)
     db_lock = threading.Lock()
 
-    with app.app_context():
+    try:
+        print(f"🔄 [Background] Report #{report_id} 스레드 시작.")
+
+        # 1. 초기 상태 설정
+        # local_session을 사용하여 쿼리 및 커밋
+        report = local_session.get(AnalysisReport, report_id)
+        if not report: 
+            local_session.remove()
+            return
+
+        initial_data = {
+            "status": "processing",
+            "neuron_map": None,
+            "integrity_issues": None,
+            "flow_disconnects": None
+        }
+        report.deep_analysis_data = json.dumps(initial_data)
+        local_session.commit()
+
+        # 2. 데이터 준비 (객체가 Detach 되는 것을 방지하기 위해 데이터 미리 추출)
         try:
-            print(f"🔄 [Background] Report #{report_id} 스레드 시작.")
+            summary_json = json.loads(report.summary) if isinstance(report.summary, str) else report.summary
+        except:
+            summary_json = report.summary
+        
+        # text_snippet 접근 후 바로 변수에 저장 (세션 닫혀도 쓸 수 있게)
+        raw_text = str(getattr(report, 'text_snippet', report.text_snippet))
+        
+        # 중요: 긴 작업 들어가기 전에 세션 정리 (Connection Pool 반환)
+        # 읽기 작업 끝났으므로 일단 닫아줌. 콜백에서 다시 열 것임.
+        local_session.remove()
 
-            # 1. 초기 상태 설정 (빈 JSON 뼈대 만들기)
-            report = AnalysisReport.query.get(report_id)
-            if not report: return
-
-            initial_data = {
-                "status": "processing",
-                "neuron_map": None,       # 로딩 중...
-                "integrity_issues": None, # 로딩 중...
-                "flow_disconnects": None  # 로딩 중...
-            }
-            report.deep_analysis_data = json.dumps(initial_data)
-            db.session.commit()
-
-            # 2. 데이터 준비
-            try:
-                summary_json = json.loads(report.summary) if isinstance(report.summary, str) else report.summary
-            except:
-                summary_json = report.summary
-            
-            # text_snippet 필드명 확인 (모델에 따라 content일 수도 있음)
-            raw_text = getattr(report, 'text_snippet', report.text_snippet)
-
-            # ---------------------------------------------------------
-            # [콜백 함수] 부분 업데이트 로직
-            # ---------------------------------------------------------
-            def save_partial_result(key, data):
-                # Lock을 걸어 여러 스레드가 동시에 DB 커밋하는 충돌 방지
-                with db_lock:
-                    with app.app_context(): # 컨텍스트 재진입 안전장치
-                        # 최신 데이터 다시 조회 (중요: 덮어쓰기 방지)
-                        repo = AnalysisReport.query.get(report_id)
-                        if not repo or not repo.deep_analysis_data: return
-                        
-                        # 기존 JSON 로드 -> 키 업데이트 -> 저장
-                        current_json = json.loads(repo.deep_analysis_data)
-                        current_json[key] = data
-                        repo.deep_analysis_data = json.dumps(current_json, ensure_ascii=False)
-                        db.session.commit()
-                        print(f"💾 [DB] Report #{report_id} - '{key}' 부분 저장 완료.")
-
-            # 3. 병렬 서비스 호출 (콜백 전달)
-            perform_deep_analysis_async(summary_json, raw_text, on_task_complete=save_partial_result)
-
-            # 4. 최종 상태 'completed'로 변경
+        # ---------------------------------------------------------
+        # [콜백 함수] 독립 세션 사용 업데이트
+        # ---------------------------------------------------------
+        def save_partial_result(key, data):
             with db_lock:
-                repo = AnalysisReport.query.get(report_id)
-                current_json = json.loads(repo.deep_analysis_data)
-                current_json["status"] = "completed"
-                repo.deep_analysis_data = json.dumps(current_json, ensure_ascii=False)
-                db.session.commit()
-                print(f"✅ [Background] Report #{report_id} 모든 작업 완료.")
+                # 콜백 호출 시마다 새로운 로컬 세션 생성/사용
+                callback_session = scoped_session(Session)
+                try:
+                    repo = callback_session.get(AnalysisReport, report_id)
+                    if not repo or not repo.deep_analysis_data: 
+                        return
+                    
+                    current_json = json.loads(repo.deep_analysis_data)
+                    current_json[key] = data
+                    repo.deep_analysis_data = json.dumps(current_json, ensure_ascii=False)
+                    
+                    callback_session.commit()
+                    print(f"💾 [DB] Report #{report_id} - '{key}' 부분 저장 완료.")
+                except Exception as e:
+                    callback_session.rollback()
+                    print(f"⚠️ [Partial Save Error] {e}")
+                finally:
+                    callback_session.remove() # 반드시 닫기!
 
-        except Exception as e:
-            print(f"❌ [Background Error] {e}")
-            traceback.print_exc()
-            # 에러 상태 저장
-            with app.app_context():
-                repo = AnalysisReport.query.get(report_id)
+        # 3. 병렬 서비스 호출 (콜백 전달)
+        # 이 함수는 DB와 무관하게 CPU/API 작업만 수행해야 함
+        perform_deep_analysis_async(summary_json, raw_text, on_task_complete=save_partial_result)
+
+        # 4. 최종 완료 상태 업데이트
+        final_session = scoped_session(Session)
+        try:
+            with db_lock:
+                repo = final_session.get(AnalysisReport, report_id)
                 if repo:
-                    repo.deep_analysis_data = json.dumps({"status": "error", "message": str(e)})
-                    db.session.commit()
+                    current_json = json.loads(repo.deep_analysis_data)
+                    current_json["status"] = "completed"
+                    repo.deep_analysis_data = json.dumps(current_json, ensure_ascii=False)
+                    final_session.commit()
+                    print(f"✅ [Background] Report #{report_id} 모든 작업 완료.")
+        finally:
+            final_session.remove()
 
+    except Exception as e:
+        print(f"❌ [Background Error] {e}")
+        traceback.print_exc()
+        
+        # 에러 상태 저장 (별도 세션)
+        error_session = scoped_session(Session)
+        try:
+            repo = error_session.get(AnalysisReport, report_id)
+            if repo:
+                repo.deep_analysis_data = json.dumps({"status": "error", "message": str(e)})
+                error_session.commit()
+        finally:
+            error_session.remove()
 # ----------------------------------------------------------------
 # [API] 분석 요청 (POST)
 # ----------------------------------------------------------------
