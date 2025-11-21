@@ -211,7 +211,7 @@ def analyze_logic_neuron_map(text, key_concepts_str, core_thesis):
             # --- Zone 판별 및 엣지 생성 ---
             
             # Case 1: Zone C (창의적/억지 연결 의심) -> 배치 리스트에 추가
-            if semantic_score < 0.4 and physical_score >= 0.5:
+            if semantic_score < 0.2 and physical_score >= 0.5:
                 edges.append({
                     "source": c1, "target": c2, 
                     "weight": round(semantic_score, 2),
@@ -235,12 +235,12 @@ def analyze_logic_neuron_map(text, key_concepts_str, core_thesis):
 
             # Case 3: Zone A (일반적 강한 연결)
             else:
-                total_weight = (physical_score * 0.4) + (semantic_score * 0.6)
-                if total_weight > 0.3:
+                total_weight = (physical_score * 0.3) + (semantic_score * 0.7)
+                if total_weight >= 0.3:
                     edges.append({
                         "source": c1, "target": c2, 
                         "weight": round(total_weight, 2),
-                        "type": "strong" if total_weight > 0.6 else "normal"
+                        "type": "strong" if total_weight > 0.55 else "normal"
                     })
                     connected_status[c1] = True
                     connected_status[c2] = True
@@ -382,8 +382,8 @@ def scan_logical_integrity(text):
     return issues or []
 
 def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
-    """[기능 3] 흐름 단절 검사 (최적화 + 디버깅 적용)"""
-    start_time = time()
+    """[기능 3] 흐름 단절 검사 (최적화 + 가독성 향상 적용)"""
+    start_time = time.time()
     print("🌊 [Disconnect] (Naver) 시작.")
     
     if not flow_pattern_json or 'nodes' not in flow_pattern_json or 'edges' not in flow_pattern_json:
@@ -393,54 +393,69 @@ def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
     edges = flow_pattern_json['edges']
     
     # 1. 문장 분리
-    split_start = time()
+    split_start = time.time()
     raw_sentences = [s.strip() for s in re.split(r'[.?!]\s+', raw_text) if len(s.strip()) > 10]
-    print(f"   [Debug] 문장 분리 완료 ({len(raw_sentences)}문장). 소요: {time() - split_start:.3f}초")
+    print(f"   [Debug] 문장 분리 완료 ({len(raw_sentences)}문장). 소요: {time.time() - split_start:.3f}초")
     
     edges_context = []
     snippets_context = {}
 
     # ------------------------------------------------------------------
-    # [최적화 핵심] 본문 임베딩을 루프 밖에서 1회만 수행 (Pre-calculation)
+    # [최적화] 본문 임베딩 Pre-calculation
     # ------------------------------------------------------------------
-    embed_start = time()
+    embed_start = time.time()
     if embedding_model and raw_sentences:
-        # 본문 전체를 한 번에 벡터화 (가장 무거운 작업)
         doc_embeddings = embedding_model.encode(raw_sentences)
-        print(f"   [Debug] 본문 전체 임베딩 완료. 소요: {time() - embed_start:.3f}초")
+        print(f"   [Debug] 본문 전체 임베딩 완료. 소요: {time.time() - embed_start:.3f}초")
     else:
         doc_embeddings = None
         print("   [Debug] 임베딩 모델 없음. 스킵.")
 
     # 2. 증거 문장 추출 (Retrieval)
-    retrieval_start = time()
+    retrieval_start = time.time()
     
     for idx, edge in enumerate(edges):
         parent_id, child_id = edge
-        parent_summary = nodes.get(parent_id, "").split('\n')[-1].strip()
-        child_summary = nodes.get(child_id, "").split('\n')[-1].strip()
+        
+        # 노드 전체 텍스트 가져오기
+        parent_full_text = nodes.get(parent_id, "")
+        child_full_text = nodes.get(child_id, "")
+        
+        # [수정] 대괄호 [] 안의 카테고리 명 추출 (예: "문제 제기", "핵심 주장")
+        # 정규식: 문자열 시작 부분의 [ ... ] 패턴을 찾음
+        p_match = re.search(r'\[(.*?)\]', parent_full_text)
+        c_match = re.search(r'\[(.*?)\]', child_full_text)
+        
+        p_label = p_match.group(1) if p_match else parent_id
+        c_label = c_match.group(1) if c_match else child_id
+        
+        # 요약 내용 추출 (마지막 줄)
+        parent_summary = parent_full_text.split('\n')[-1].strip()
+        child_summary = child_full_text.split('\n')[-1].strip()
         
         if not parent_summary or not child_summary: continue
 
         # [최적화된 추출 로직]
-        # 이미 계산된 doc_embeddings를 재사용하므로 속도가 매우 빠름 (단순 행렬곱 연산)
         p_rep = ""
         c_rep = ""
         
         if embedding_model and doc_embeddings is not None:
-            # Parent 쿼리 임베딩
+            # Parent 쿼리
             p_query_vec = embedding_model.encode(parent_summary)
             p_sims = cosine_similarity([p_query_vec], doc_embeddings)[0]
-            p_idx = np.argmax(p_sims) # 가장 유사한 문장 인덱스
+            p_idx = np.argmax(p_sims)
             p_rep = raw_sentences[p_idx]
 
-            # Child 쿼리 임베딩
+            # Child 쿼리
             c_query_vec = embedding_model.encode(child_summary)
             c_sims = cosine_similarity([c_query_vec], doc_embeddings)[0]
             c_idx = np.argmax(c_sims)
             c_rep = raw_sentences[c_idx]
         
-        edge_key = f"{parent_id}->{child_id}"
+        # [핵심 수정] Edge Key를 가독성 있게 변경
+        # 예: "[문제 제기] P1 -> [핵심 주장] T1"
+        edge_key = f"[{p_label}] {parent_id} -> [{c_label}] {child_id}"
+        
         edges_context.append(edge_key)
         snippets_context[edge_key] = {
             "parent_summary": parent_summary,
@@ -449,7 +464,7 @@ def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
             "child_snippet": c_rep
         }
 
-    print(f"   [Debug] 스니펫 추출(Retrieval) 완료. 엣지 {len(edges)}개 처리 소요: {time() - retrieval_start:.3f}초")
+    print(f"   [Debug] 스니펫 추출 완료. 엣지 {len(edges)}개 처리 소요: {time.time() - retrieval_start:.3f}초")
 
     if not edges_context: return []
 
@@ -460,13 +475,13 @@ def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
     [Text Snippets] {json.dumps(snippets_context, ensure_ascii=False)}
     """
 
-    llm_start = time()
+    llm_start = time.time()
     print(f"   [Debug] LLM 호출 시작... (데이터 크기: {len(prompt_content)} chars)")
     
-    # 여기서 시간이 가장 많이 걸림 (네이버 서버 처리 시간)
+    # 네이버 API 호출
     weak_links_result = _call_llm_json(prompt_content)
     
-    print(f"   [Debug] LLM 응답 수신 완료. 소요: {time() - llm_start:.3f}초")
+    print(f"   [Debug] LLM 응답 수신 완료. 소요: {time.time() - llm_start:.3f}초")
 
     # 필터링 (Strong 제외)
     filtered_result = []
@@ -476,7 +491,7 @@ def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
             if item.get('issue_type') in ['Weak', 'Bridge Needed'] 
         ]
 
-    print(f"✅ [Disconnect] (Naver) 최종 완료. 총 소요 시간: {time() - start_time:.3f}초")
+    print(f"✅ [Disconnect] (Naver) 최종 완료. 총 소요 시간: {time.time() - start_time:.3f}초")
     return filtered_result
 # --------------------------------------------------------------------------------------
 # --- 4. 메인 진입 ---
