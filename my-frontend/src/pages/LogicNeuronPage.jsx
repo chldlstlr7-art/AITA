@@ -2,18 +2,14 @@ import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react'
 // Edge Issue Sidebar (좌측)
 const EdgeIssueSidebar = ({ edgeIssues, onSelect, selectedId, nodeMap, isAnalyzing }) => (
   <Box sx={{
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    height: '100vh',
-    width: 340,
+    position: 'relative',
+    width: '100%',
     bgcolor: 'background.paper',
-    borderRight: '1px solid',
+    borderBottom: '1px solid',
     borderColor: 'divider',
-    zIndex: 120,
     p: 2,
     overflowY: 'auto',
-    boxShadow: 3,
+    boxShadow: 1,
     display: 'flex',
     flexDirection: 'column',
     gap: 2
@@ -86,8 +82,9 @@ import 'reactflow/dist/style.css';
 // Physics Engine (D3)
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from 'd3-force';
 
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { requestDeepAnalysis, getDeepAnalysisResult, getFlowGraphImage } from '../services/api';
+import { saveDeepAnalysis } from '../services/deepAnalysisStore';
 
 // MUI Components
 import { 
@@ -96,16 +93,16 @@ import {
   CircularProgress, Alert, Snackbar,
   Fade, LinearProgress, GlobalStyles,
   List, ListItem, ListItemText, Divider,
-  Drawer, IconButton, Tooltip, useTheme,
-  Accordion, AccordionSummary, AccordionDetails
+  IconButton, Tooltip, useTheme,
+  
 } from '@mui/material';
 import { styled, alpha } from '@mui/material/styles';
 
 // Icons
-import EmojiObjectsIcon from '@mui/icons-material/EmojiObjects'; 
-import CloseIcon from '@mui/icons-material/Close'; 
+import EmojiObjectsIcon from '@mui/icons-material/EmojiObjects';
+import CloseIcon from '@mui/icons-material/Close';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
-import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew';
+import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
 
 // -----------------------------------------------------------------------------
 // 1. Styles & Constants
@@ -294,6 +291,7 @@ const useBackendAnalysis = (reportId) => {
 
       if (innerData) {
         setResultData(innerData);
+        try { saveDeepAnalysis(reportId, innerData); } catch (err) { console.warn('saveDeepAnalysis failed', err); }
 
         if (innerData.status === 'error') {
           setStatus('failed');
@@ -458,7 +456,7 @@ const useGraphLayout = (neuronMap, onEdgeClick) => {
 // 4. UI Sub-Components
 // -----------------------------------------------------------------------------
 
-// [화면 중앙 하단] Integrity Panel (문장 정합성 검사)
+// [화면 중앙 하단] Integrity Panel (문장 정합성 검사) - 아코디언 없이 심플하게 나열
 const integrityTypeKoMap = {
   Ambiguity: '모호한 표현',
   Overgeneralization: '성급한 일반화',
@@ -472,28 +470,20 @@ const IntegrityPanel = ({ integrity, status }) => {
   const theme = useTheme();
   const safeIntegrity = Array.isArray(integrity) ? integrity : [];
   const isLoading = (status === 'processing' || status === 'init') && integrity == null;
-  // 아코디언 확장 상태 관리
-  const [expanded, setExpanded] = React.useState(false);
-  const handleAccordionChange = (panel) => (event, isExpanded) => {
-    setExpanded(isExpanded ? panel : false);
-  };
 
   return (
-    <Paper elevation={0} sx={{ 
-      width: '100%', height: '100%', display: 'flex', flexDirection: 'column', 
-      bgcolor: theme.palette.background.paper, borderTop: `2px solid ${theme.palette.primary.main}`, overflowY: 'auto'
-    }}>
-      <Box sx={{ p: 2, borderBottom: `2px solid ${theme.palette.primary.main}`, bgcolor: theme.palette.primary.main, display:'flex', alignItems:'center', gap:1, position: 'sticky', top: 0, zIndex: 5 }}>
-        <Typography variant="h6" sx={{fontWeight:800, color: theme.palette.primary.contrastText}}>
+    <Paper elevation={0} sx={{ width: '100%', bgcolor: theme.palette.background.paper, mt: 2, p: 0 }}>
+      <Box sx={{ p: 2, borderTopLeftRadius: 8, borderTopRightRadius: 8, borderBottom: `2px solid ${theme.palette.primary.main}`, bgcolor: theme.palette.primary.main, display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Typography variant="h6" sx={{ fontWeight: 800, color: theme.palette.primary.contrastText }}>
           문장 정합성 검사
         </Typography>
         {safeIntegrity.length > 0 && (
-          <Chip label={`${safeIntegrity.length}건 발견`} size="small" sx={{fontWeight:'bold', bgcolor: theme.palette.primary.contrastText, color: theme.palette.primary.main}} />
+          <Chip label={`${safeIntegrity.length}건 발견`} size="small" sx={{ fontWeight: 'bold', bgcolor: theme.palette.primary.contrastText, color: theme.palette.primary.main }} />
         )}
       </Box>
-      <Box sx={{ p: 2, pt: 3 }}>
+      <Box sx={{ p: 2, maxHeight: 520, overflowY: 'auto' }}>
         {isLoading ? (
-          <Box sx={{ display:'flex', alignItems:'center', gap: 2, p:1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 1 }}>
             <CircularProgress size={20} color="primary" />
             <Typography variant="body2" color="primary.main">분석 중...</Typography>
           </Box>
@@ -506,72 +496,35 @@ const IntegrityPanel = ({ integrity, status }) => {
             <Typography variant="body2" fontWeight="bold">모든 문장이 논리적으로 완벽합니다!</Typography>
           </Box>
         ) : (
-          <Box>
-            {/* 아코디언 리스트로 이슈 정리 */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {safeIntegrity.map((issue, idx) => (
-              <Accordion
-                key={idx}
-                expanded={expanded === idx}
-                onChange={handleAccordionChange(idx)}
-                disableGutters
-                sx={{
-                  mb: 1.5,
-                  borderRadius: 3,
-                  boxShadow: theme.shadows[expanded === idx ? 4 : 1],
-                  bgcolor: theme.palette.background.paper,
-                  '&:before': { display: 'none' },
-                  overflow: 'hidden',
-                  border: `1.5px solid ${expanded === idx ? theme.palette.primary.main : alpha(theme.palette.primary.main, 0.15)}`
-                }}
-              >
-                <AccordionSummary
-                  expandIcon={<ArrowBackIosNewIcon sx={{ transform: expanded === idx ? 'rotate(-90deg)' : 'rotate(90deg)', color: theme.palette.primary.main, fontSize: 20 }} />}
-                  aria-controls={`panel${idx}-content`}
-                  id={`panel${idx}-header`}
-                  sx={{
-                    bgcolor: expanded === idx ? alpha(theme.palette.primary.main, 0.08) : alpha(theme.palette.primary.main, 0.04),
-                    px: 2, py: 1.5, minHeight: 0,
-                    borderBottom: expanded === idx ? `2px solid ${theme.palette.primary.main}` : 'none',
-                    transition: 'background 0.2s',
-                    alignItems: 'center',
-                  }}
-                >
-                  <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
-                    {/* 문제 문장(quote) 메인 강조 */}
-                    {issue.quote && (
-                      <Typography variant="body1" sx={{ fontWeight: 700, color: theme.palette.primary.main, fontSize: '1.13rem', mb: 0.5, lineHeight: 1.6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontStyle: 'italic' }}>
-                        "{issue.quote}"
-                      </Typography>
-                    )}
-                    {/* 유형 및 이유 */}
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Typography variant="subtitle2" fontWeight="bold" color="primary.main" sx={{ fontSize: '1.01rem' }}>
-                        {integrityTypeKoMap[issue.type] || issue.type || '유형 미상'}
-                      </Typography>
-                      {issue.reason && (
-                        <Typography variant="body2" sx={{ color: theme.palette.primary.main, fontWeight: 500, opacity: 0.85 }}>
-                          {issue.reason}
-                        </Typography>
-                      )}
-                    </Box>
-                  </Box>
-                </AccordionSummary>
-                <AccordionDetails sx={{ px: 3, py: 2.5, bgcolor: alpha(theme.palette.primary.main, 0.03) }}>
-                  {issue.quote && (
-                    <Box sx={{ mb:2, opacity:0.95, bgcolor: alpha(theme.palette.primary.main, 0.06), p:1.5, borderRadius:2 }}>
-                      <Typography variant="body1" sx={{ fontStyle:'italic', color: theme.palette.primary.main, lineHeight:1.6 }}>
-                        "{issue.quote}"
-                      </Typography>
-                    </Box>
+              <Paper key={idx} elevation={2} sx={{ p: 2, borderRadius: 2, bgcolor: alpha(theme.palette.primary.main, 0.03), borderLeft: `6px solid ${theme.palette.primary.main}`, transition: 'transform 0.18s ease, box-shadow 0.18s ease', '&:hover': { transform: 'translateY(-6px)', boxShadow: '0 14px 36px rgba(16,24,40,0.12)' } }}>
+                {issue.quote && (
+                  <Typography variant="body1" sx={{ fontWeight: 700, color: theme.palette.primary.main, fontSize: '1.1rem', mb: 0.5, fontStyle: 'italic' }}>
+                    "{issue.quote}"
+                  </Typography>
+                )}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                  <Typography variant="subtitle2" fontWeight="bold" color="primary.main" sx={{ fontSize: '1.01rem' }}>
+                    {integrityTypeKoMap[issue.type] || issue.type || '유형 미상'}
+                  </Typography>
+                  {issue.reason && (
+                    <Typography variant="body2" sx={{ color: theme.palette.primary.main, fontWeight: 500, opacity: 0.85 }}>
+                      {issue.reason}
+                    </Typography>
                   )}
-                  <Typography variant="caption" display="block" sx={{ fontWeight:'bold', color: theme.palette.primary.main, mb:0.5, fontSize:'0.9rem' }}>
-                     AITA의 제안
-                  </Typography>
-                  <Typography variant="body1" sx={{ fontSize:'1rem', lineHeight:'1.5', color: theme.palette.text.primary }}>
-                    {issue.socratic_suggestion || issue.description}
-                  </Typography>
-                </AccordionDetails>
-              </Accordion>
+                </Box>
+                {(issue.socratic_suggestion || issue.description) && (
+                  <>
+                    <Typography variant="caption" display="block" sx={{ fontWeight: 'bold', color: theme.palette.primary.main, mb: 0.5, fontSize: '0.9rem' }}>
+                      AITA의 제안
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontSize: '1rem', lineHeight: '1.5', color: theme.palette.text.primary }}>
+                      {issue.socratic_suggestion || issue.description}
+                    </Typography>
+                  </>
+                )}
+              </Paper>
             ))}
           </Box>
         )}
@@ -584,6 +537,7 @@ const IntegrityPanel = ({ integrity, status }) => {
 const DiagramContainer = styled(Box)(({ theme }) => ({
   width: '100%',
   height: '100%',
+  minHeight: 520,
   display: 'flex',
   justifyContent: 'center',
   alignItems: 'center',
@@ -597,7 +551,7 @@ const StyledImage = styled('img')({
   maxWidth: '100%',
   height: 'auto',
   borderRadius: '4px',
-  boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+  boxShadow: '0 10px 30px rgba(16,24,40,0.12)'
 });
 
 function LogicFlowDiagram({ reportId }) {
@@ -653,9 +607,9 @@ const FlowCheckPanel = ({ flow, status }) => {
   const isLoading = (status === 'processing' || status === 'init') && flow == null;
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', bgcolor: 'background.paper', overflowY: 'auto' }}>
-      <Box sx={{ p: 2, borderBottom: `1px solid ${theme.palette.divider}`, bgcolor: alpha(theme.palette.secondary.main, 0.05), position:'sticky', top:0, zIndex:1 }}>
-        <Typography variant="subtitle1" sx={{fontWeight:800, color: theme.palette.secondary.main, display:'flex', alignItems:'center', gap:1}}>
-          <AccountTreeIcon fontSize="small"/> 논리 흐름 검사
+      <Box sx={{ p: 2, borderBottom: `1px solid ${theme.palette.divider}`, bgcolor: theme.palette.secondary.main, position:'sticky', top:0, zIndex:1, color: theme.palette.secondary.contrastText, boxShadow: '0 6px 18px rgba(0,0,0,0.06)' }}>
+        <Typography variant="subtitle1" sx={{fontWeight:900, color: theme.palette.secondary.contrastText, display:'flex', alignItems:'center', gap:1}}>
+          <AccountTreeIcon fontSize="small" sx={{ color: theme.palette.secondary.contrastText }} /> 논리 흐름 검사
         </Typography>
       </Box>
 
@@ -684,15 +638,15 @@ const FlowCheckPanel = ({ flow, status }) => {
                     secondary={
                       <Box sx={{display:'flex', flexDirection:'column', gap:1}}>
                         {/* 연결 정보 표시 */}
-                        <Box sx={{display:'flex', alignItems:'center', gap:0.5, bgcolor: alpha(theme.palette.grey[200], 0.5), p:1, borderRadius:1}}>
+                        <Box sx={{display:'flex', alignItems:'center', gap:0.5, bgcolor: alpha(theme.palette.secondary.contrastText, 0.06), p:1, borderRadius:1}}>
                           <Chip label={gap.parent_id || '?'} size="small" sx={{maxWidth:'40%', height:24}} />
                           <Typography variant="caption">➡</Typography>
                           <Chip label={gap.child_id || '?'} size="small" sx={{maxWidth:'40%', height:24}} />
                         </Box>
                         {/* quote 강조 */}
                         {gap.quote && (
-                          <Box sx={{ mt:1, mb:1, bgcolor: alpha(theme.palette.info.light, 0.15), p:1.5, borderRadius:2 }}>
-                            <Typography variant="body2" sx={{ fontStyle:'italic', color: 'info.main', lineHeight:1.6 }}>
+                          <Box sx={{ mt:1, mb:1, bgcolor: alpha(theme.palette.secondary.main, 0.12), p:1.5, borderRadius:2 }}>
+                            <Typography variant="body2" sx={{ fontStyle:'italic', color: theme.palette.secondary.contrastText, lineHeight:1.6, fontWeight:700 }}>
                               "{gap.quote}"
                             </Typography>
                           </Box>
@@ -766,6 +720,7 @@ const LogicNeuronContent = () => {
    const { reportId } = useParams();
    const { status, resultData } = useBackendAnalysis(reportId);
    const theme = useTheme();
+  const navigate = useNavigate();
 
    // handleEdgeClick을 먼저 선언
    const handleEdgeClick = useCallback((event, edgeData) => {
@@ -924,195 +879,163 @@ const LogicNeuronContent = () => {
 
 
     const [dialogState, setDialogState] = useState({ open: false, content: null });
-    const [snackState, setSnackState] = useState({ open: false, message: '' });
-    const [showDebug, setShowDebug] = useState(false);
-    // Drawer 상태 변수 재선언
-    const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+     const [snackState, setSnackState] = useState({ open: false, message: '' });
+     const [showDebug, setShowDebug] = useState(false);
 
 
     const isTotalLoading = (status === 'init' || status === 'processing') && !resultData?.neuron_map;
 
   return (
-    <Box sx={{ width: '100%', height: '100vh', bgcolor: 'background.default', overflow: 'hidden', display:'flex', flexDirection:'column', position: 'relative' }}>
-      {/* 좌측 이슈 사이드바 */}
-      {/* 노드 id→label 맵 생성 */}
-      <EdgeIssueSidebar 
-        edgeIssues={edgeIssues} 
-        onSelect={handleEdgeIssueSelect} 
-        selectedId={selectedEdgeId}
-        nodeMap={useMemo(() => {
-          const map = {};
-          nodes.forEach(n => { map[n.id] = n.data?.label || n.id; });
-          return map;
-        }, [nodes])}
-        isAnalyzing={status === 'init' || status === 'processing' || status === 'partial' || !resultData?.neuron_map}
-      />
+    <Box sx={{ width: '100%', minHeight: '100vh', bgcolor: 'background.default', overflow: 'auto', display: 'flex', flexDirection: 'column', position: 'relative' }}>
       <GlobalKeyframes />
-      
-      {/* 1. Header */}
-      <Box sx={{ p: 2, px:3, pl: '370px', display: 'flex', justifyContent: 'space-between', alignItems:'center', bgcolor: 'background.paper', borderBottom: `1px solid ${theme.palette.divider}`, zIndex: 10, height: 64, flexShrink: 0 }}>
+
+      {/* 1. Header (compact height) */}
+      <Box sx={{ p: 2, px: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: 'background.paper', borderBottom: `1px solid ${theme.palette.divider}`, zIndex: 10, height: 56, flexShrink: 0 }}>
         <Typography variant="h6" sx={{ fontWeight: 800, color: 'primary.main' }}>
-          개념 연결망 
+          개념 연결망
         </Typography>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-           {(status === 'processing' || status === 'partial') && (
-             <Fade in={true}><Chip label="AITA 실시간 분석 중..." color="primary" variant="outlined" /></Fade>
-           )}
-           {status === 'done' && <Chip label="분석 완료" color="success" />}
+          {(status === 'processing' || status === 'partial') && (
+            <Fade in={true}><Chip label="AITA 실시간 분석 중..." color="primary" variant="outlined" /></Fade>
+          )}
+          {status === 'done' && <Chip label="분석 완료" color="success" />}
         </Box>
       </Box>
 
       {status === 'partial' && <LinearProgress color="secondary" sx={{ height: 2, flexShrink: 0 }} />}
 
-      {/* 2. Main Content Area */}
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', pl: '340px' }}>
-         
-         {/* Top: Neuron Map (65%) */}
-         <Box sx={{ flex: 6.5, position: 'relative', borderBottom: `1px solid ${theme.palette.divider}`, width: '100%', height: '100%' }}>
+      {/* 2. Main Content Stack: Neuron Map -> Edge Issues -> Flow Check -> Integrity */}
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: 2 }}>
+        {/* Neuron Map */}
+        <Paper elevation={1} sx={{ width: '100%', minHeight: 360, borderRadius: 2, overflow: 'hidden' }}>
+          <Box sx={{ width: '100%', height: 360 }}>
             {isTotalLoading && (
-              <Box sx={{ position: 'absolute', inset:0, zIndex: 20, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', bgcolor: alpha(theme.palette.background.paper, 0.8) }}>
-                 <CircularProgress size={60} />
-                 <Typography sx={{ mt:2, fontWeight:'bold', color:'text.secondary' }}>개념 연결망을 생성하고 있습니다...</Typography>
+              <Box sx={{ position: 'absolute', inset: 0, zIndex: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', bgcolor: alpha(theme.palette.background.paper, 0.8) }}>
+                <CircularProgress size={60} />
+                <Typography sx={{ mt: 2, fontWeight: 'bold', color: 'text.secondary' }}>개념 연결망을 생성하고 있습니다...</Typography>
               </Box>
             )}
-            
-            <Box sx={{ width: '100%', height: '100%' }}>
-                <ReactFlow
-                  nodes={nodes}
-                  edges={edges.map(e => {
-                    if (e.type === 'ghost') {
-                      const isHovered = hoveredEdgeId === e.id;
-                      return {
-                        ...e,
-                        data: {
-                          ...e.data,
-                          selected: selectedEdgeId === e.id,
-                          hovered: isHovered
-                        }
-                      };
+            <ReactFlow
+              nodes={nodes}
+              edges={edges.map(e => {
+                if (e.type === 'ghost') {
+                  const isHovered = hoveredEdgeId === e.id;
+                  return {
+                    ...e,
+                    data: {
+                      ...e.data,
+                      selected: selectedEdgeId === e.id,
+                      hovered: isHovered
                     }
-                    if (selectedEdgeId && e.id === selectedEdgeId) {
-                      return {
-                        ...e,
-                        style: {
-                          ...(e.style || {}),
-                          stroke: '#ffd600',
-                          strokeWidth: (e.style?.strokeWidth || 6) + 6,
-                          opacity: 1,
-                          filter: 'drop-shadow(0 0 12px #ffd600)'
-                        },
-                        data: {
-                          ...e.data,
-                          selected: true
-                        }
-                      };
+                  };
+                }
+                if (selectedEdgeId && e.id === selectedEdgeId) {
+                  return {
+                    ...e,
+                    style: {
+                      ...(e.style || {}),
+                      stroke: '#ffd600',
+                      strokeWidth: (e.style?.strokeWidth || 6) + 6,
+                      opacity: 1,
+                      filter: 'drop-shadow(0 0 12px #ffd600)'
+                    },
+                    data: {
+                      ...e.data,
+                      selected: true
                     }
-                    return {
-                      ...e,
-                      style: {
-                        ...(e.style || {}),
-                        opacity: 0.7,
-                        filter: 'none'
-                      },
-                      data: {
-                        ...e.data,
-                        selected: false
-                      }
-                    };
-                  })}
-                  onNodesChange={onNodesChange}
-                  onEdgesChange={onEdgesChange}
-                  edgeTypes={edgeTypes}
-                  fitView minZoom={0.2} maxZoom={4}
-                >
-                  {/* 단순 배경 (격자 없음) */}
-                  <Background color="#e3f2fd" variant="lines" gap={10000} />
-                  <Controls showInteractive={false} />
-                  <Panel position="bottom-right" style={{ marginRight: 20, marginBottom: 20 }}>
-                     <Button variant="contained" color="inherit" size="small" onClick={() => setShowDebug(true)} sx={{ bgcolor: alpha(theme.palette.grey[800], 0.8), color: '#fff', fontSize: '0.75rem' }}>
-                         원본 데이터
-                     </Button>
-                  </Panel>
-                </ReactFlow>
-            </Box>
-         </Box>
-
-         {/* Bottom: Integrity Check (30%) */}
-         <Box sx={{ flex: 3.5, overflow: 'hidden', width: '100%' }}>
-            <IntegrityPanel integrity={resultData.integrity_issues} status={status} />
-         </Box>
-
-      </Box>
-
-      {/* [Fixed Sidebar Trigger Button] */}
-      <Box sx={{ position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', zIndex: 100, animation: 'nudge 3s infinite' }}>
-         <Tooltip title="논리 흐름 상세 분석" placement="left">
-            <Button 
-               variant="contained" 
-               color="primary"
-               onClick={() => setIsDrawerOpen(true)}
-               sx={{ 
-                   borderRadius: '8px 0 0 8px', 
-                   minWidth: '40px', 
-                   padding: '12px 4px',
-                   boxShadow: theme.shadows[6]
-               }}
+                  };
+                }
+                return {
+                  ...e,
+                  style: {
+                    ...(e.style || {}),
+                    opacity: 0.7,
+                    filter: 'none'
+                  },
+                  data: {
+                    ...e.data,
+                    selected: false
+                  }
+                };
+              })}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              edgeTypes={edgeTypes}
+              fitView minZoom={0.2} maxZoom={4}
             >
-               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                   <ArrowBackIosNewIcon fontSize="small" />
-                   <Typography variant="caption" sx={{ writingMode: 'vertical-rl', textOrientation: 'upright', letterSpacing: 2, fontWeight:'bold' }}>
-                       논리흐름
-                   </Typography>
-               </Box>
-            </Button>
-         </Tooltip>
-      </Box>
+              <Background color="#e3f2fd" variant="lines" gap={10000} />
+              <Controls showInteractive={false} />
+              <Panel position="bottom-right" style={{ marginRight: 20, marginBottom: 20 }}>
+                <Button variant="contained" color="inherit" size="small" onClick={() => setShowDebug(true)} sx={{ bgcolor: alpha(theme.palette.grey[800], 0.8), color: '#fff', fontSize: '0.75rem' }}>
+                  원본 데이터
+                </Button>
+              </Panel>
+            </ReactFlow>
+          </Box>
+        </Paper>
 
-      {/* 3. Right Sidebar Drawer */}
-      <Drawer
-        anchor="right"
-        open={isDrawerOpen}
-        onClose={() => setIsDrawerOpen(false)}
-      >
-        <Box sx={{ width: 500, height: '100%', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
-            {/* Header with Theme Color */}
-            <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: 'primary.main', color: 'primary.contrastText' }}>
-                <Typography variant="h6" fontWeight="bold">논리 흐름 상세 분석</Typography>
-                <IconButton onClick={() => setIsDrawerOpen(false)} sx={{ color: 'inherit' }}><CloseIcon /></IconButton>
-            </Box>
+        {/* Edge Issues (full width) */}
+        <EdgeIssueSidebar
+          edgeIssues={edgeIssues}
+          onSelect={handleEdgeIssueSelect}
+          selectedId={selectedEdgeId}
+          nodeMap={useMemo(() => {
+            const map = {};
+            nodes.forEach(n => { map[n.id] = n.data?.label || n.id; });
+            return map;
+          }, [nodes])}
+          isAnalyzing={status === 'init' || status === 'processing' || status === 'partial' || !resultData?.neuron_map}
+        />
 
-            {/* Top: Diagram (65% - Increased) */}
-            <Box sx={{ flex: 6.5, borderBottom: `1px solid ${theme.palette.divider}`, overflow: 'hidden' }}>
-                <LogicFlowDiagram reportId={reportId} />
-            </Box>
-
-            {/* Bottom: Flow Check (35% - Reduced) */}
-            <Box sx={{ flex: 3.5, overflow: 'hidden' }}>
-                <FlowCheckPanel flow={resultData.flow_disconnects} status={status} />
-            </Box>
+        {/* Flow Check + Logic Flow Diagram (responsive: column on xs, row on md+) */}
+        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, alignItems: 'stretch' }}>
+          <Box sx={{ flex: 1, minWidth: 0, height: { md: 520 }, overflow: 'auto' }}>
+            <FlowCheckPanel flow={resultData.flow_disconnects} status={status} />
+          </Box>
+          <Box sx={{ width: { xs: '100%', md: 520 }, flexShrink: 0, height: { md: 520 } }}>
+            <LogicFlowDiagram reportId={reportId} />
+          </Box>
         </Box>
-      </Drawer>
+
+        {/* Integrity */}
+        <Box>
+          <IntegrityPanel integrity={resultData.integrity_issues} status={status} />
+        </Box>
+
+        {/* 리포트분석(이전 페이지)로 돌아가는 버튼 */}
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 4 }}>
+          <Button
+            variant="outlined"
+            color="primary"
+            size="large"
+            onClick={() => navigate(-1)}
+            sx={{ fontWeight: 'bold', borderRadius: 2, px: 4 }}
+          >
+            리포트 분석 목록으로 돌아가기
+          </Button>
+        </Box>
+      </Box>
 
       {/* Dialogs */}
-      <InteractionDialog 
-        open={dialogState.open} 
-        onClose={() => setDialogState(prev => ({ ...prev, open: false }))} 
-        content={dialogState.content} 
-      />
-      
-      <DebugDataDialog 
-         open={showDebug} 
-         onClose={() => setShowDebug(false)} 
-         data={resultData} 
+      <InteractionDialog
+        open={dialogState.open}
+        onClose={() => setDialogState(prev => ({ ...prev, open: false }))}
+        content={dialogState.content}
       />
 
-      <Snackbar 
-        open={snackState.open} 
-        autoHideDuration={5000} 
-        onClose={() => setSnackState(prev => ({ ...prev, open: false }))} 
+      <DebugDataDialog
+        open={showDebug}
+        onClose={() => setShowDebug(false)}
+        data={resultData}
+      />
+
+      <Snackbar
+        open={snackState.open}
+        autoHideDuration={5000}
+        onClose={() => setSnackState(prev => ({ ...prev, open: false }))}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
-        <Alert severity="info" variant="filled" sx={{ width: '100%', boxShadow: 4, bgcolor: 'grey.900', color: '#fff', fontWeight:'bold' }}>
+        <Alert severity="info" variant="filled" sx={{ width: '100%', boxShadow: 4, bgcolor: 'grey.900', color: '#fff', fontWeight: 'bold' }}>
           {snackState.message}
         </Alert>
       </Snackbar>

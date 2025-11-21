@@ -53,6 +53,7 @@ import {
   getCourseStudents,  // 👈 추가: 학생 목록 구하기용
   getAssignmentsByCourse, // 👈 추가: 개발자용 과제 조회용
 } from '../services/api';
+import { loadDeepAnalysis } from '../services/deepAnalysisStore';
 
 import AdvancementActions from '../components/AdvancementActions';
 
@@ -162,6 +163,15 @@ const PageTitle = styled(Typography)(({ theme }) => ({
   marginBottom: theme.spacing(1),
 }));
 
+const integrityTypeKoMap = {
+  Ambiguity: '모호한 표현',
+  Overgeneralization: '성급한 일반화',
+  Logical_Leap: '논리적 비약',
+  'Logical Leap': '논리적 비약',
+  Lack_of_Evidence: '구체적 증거 부재',
+  'Lack of Evidence': '구체적 증거 부재'
+};
+
 // ==================== Main Component ====================
 
 function AdvancementPage() {
@@ -193,6 +203,11 @@ function AdvancementPage() {
   const [loadingStudentList, setLoadingStudentList] = useState(false);
 
   const pollingTimerRef = useRef(null);
+  const [deepAnalysis, setDeepAnalysis] = useState(null);
+  const [deepLoading, setDeepLoading] = useState(false);
+  const [deepError, setDeepError] = useState(null);
+  // 로컬 스토어에 심화분석이 있는지 여부
+  const [storeHasDeepAnalysis, setStoreHasDeepAnalysis] = useState(false);
 
   // 현재 사용자 이메일 확인
   const getCurrentUserEmail = () => {
@@ -268,6 +283,49 @@ function AdvancementPage() {
   }, [reportId]);
 
   // ... (폴링 및 아이디어 생성 로직은 기존과 동일)
+  // --- 심화 분석: 로컬 캐시(한 번만 읽기) ---
+  const fetchDeepAnalysis = async (isRetry = false) => {
+    if (!reportId) return;
+    try {
+      setDeepLoading(true);
+      setDeepError(null);
+
+      // 1) 우선 로컬스토리지 캐시 확인
+      const cached = loadDeepAnalysis(reportId);
+      if (cached) {
+        setDeepAnalysis(cached);
+        setStoreHasDeepAnalysis(true);
+        setDeepLoading(false);
+        return;
+      }
+
+      // 2) reportData 내부에 이미 포함된 경우 사용
+      const existing = reportData?.neuron_map || reportData?.deep_analysis || reportData?.deep_analysis_result || reportData?.logic_analysis || null;
+      if (existing) {
+        // reportData에 포함된 결과는 있더라도, 로컬 스토어에 값이 없으면
+        // 사용자의 요청에 따라 요약 전체를 숨기기 위해 store flag는 false로 둠
+        setDeepAnalysis(existing);
+        setStoreHasDeepAnalysis(false);
+        setDeepLoading(false);
+        return;
+      }
+
+      // 3) 캐시/리포트 모두 없으면 사용자에게 안내
+      setDeepAnalysis(null);
+      setStoreHasDeepAnalysis(false);
+      setDeepError('심화 분석 데이터가 로컬에 없습니다. LogicNeuron 페이지에서 분석을 실행한 후 다시 시도하세요.');
+      setDeepLoading(false);
+    } catch (err) {
+      setDeepError(err.message || '심화 분석 조회 중 오류가 발생했습니다.');
+      setDeepLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!reportId) return;
+    // 항상 로컬 스토어 우선 확인 (store 유무에 따라 요약 표시 여부 결정)
+    fetchDeepAnalysis();
+  }, [reportId, reportData]);
   const pollForIdeas = async () => {
     try {
       const response = await getReportStatus(reportId);
@@ -484,6 +542,89 @@ function AdvancementPage() {
     return String(evidence);
   };
 
+  // --- 심화 분석(Logic Neuron) 데이터 추출 헬퍼 ---
+  const getDeepAnalysis = () => {
+    // 다양한 키를 시도해 deep analysis 결과를 찾아 반환
+    // 우선 state에서 가져오고, 없으면 reportData 내부 키를 확인
+    if (deepAnalysis) return deepAnalysis;
+    return (
+      reportData?.neuron_map ||
+      reportData?.deep_analysis ||
+      reportData?.deep_analysis_result ||
+      reportData?.logic_analysis ||
+      null
+    );
+  };
+
+  const renderEdgeIssuesSummary = (deep) => {
+    const map = deep?.neuron_map || deep;
+    if (!map?.edges) return (<Typography variant="body2" color="text.secondary">연결 이슈/제안 데이터가 없습니다.</Typography>);
+
+    const nodeLabel = {};
+    (map.nodes || []).forEach(n => { nodeLabel[n.id] = n.label || n.id; });
+
+    const issues = [];
+    (map.edges || []).forEach(e => {
+      const isSpark = e.type === 'questionable';
+      const isCheck = e.type === 'check' || e.type === 'forced';
+      if (!isSpark && !isCheck) return;
+      const source = nodeLabel[e.source] || e.source;
+      const target = nodeLabel[e.target] || e.target;
+      issues.push({ id: `edge-${e.source}-${e.target}`, source, target, reason: e.reason || e.description || '', type: isSpark ? '창의적 사고/의심' : '비약 의심' });
+    });
+
+    if (issues.length === 0) return (<Typography variant="body2" color="text.secondary">특이 연결이 감지되지 않았습니다.</Typography>);
+
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+        {issues.map(it => (
+          <Paper key={it.id} elevation={0} sx={{ p:1.25, borderRadius:1.5, bgcolor: 'background.paper', borderLeft: `4px solid ${ (theme) => theme.palette.primary.main }` }}>
+            <Typography variant="subtitle2" sx={{ fontWeight:700 }}>{it.source} → {it.target}</Typography>
+            {it.reason && <Typography variant="caption" color="text.secondary">{it.reason}</Typography>}
+          </Paper>
+        ))}
+      </Box>
+    );
+  };
+
+  const renderIntegritySummary = (deep) => {
+    const issues = deep?.integrity_issues || deep?.integrity || null;
+    if (!issues) return (<Typography variant="body2" color="text.secondary">문장 정합성 검사 결과가 없습니다.</Typography>);
+    if (!Array.isArray(issues) || issues.length === 0) return (<Typography variant="body2" color="text.secondary">문장 정합성 문제는 발견되지 않았습니다.</Typography>);
+
+    return (
+        <Stack spacing={1}>
+          {issues.map((it, i) => {
+            const displayType = integrityTypeKoMap[it.type] || it.type || '';
+            return (
+              <Paper key={i} elevation={0} sx={{ p:1.25, borderRadius:1.5, bgcolor: (theme) => theme.palette.background.paper, borderLeft: `4px solid ${(theme) => theme.palette.primary.main}` }}>
+                {it.quote && <Typography variant="body2" sx={{ fontStyle:'italic', color: (theme) => theme.palette.primary.main, fontWeight:700 }}>&quot;{it.quote}&quot;</Typography>}
+                <Typography variant="caption" color="text.secondary">{(displayType || it.reason) ? `${displayType}${it.reason ? ' - ' + it.reason : ''}` : '세부 정보 없음'}</Typography>
+              </Paper>
+            );
+          })}
+        </Stack>
+    );
+  };
+
+  const renderFlowSummary = (deep) => {
+    const flows = deep?.flow_disconnects || deep?.flows || null;
+    if (!flows) return (<Typography variant="body2" color="text.secondary">논리 흐름 검사 결과가 없습니다.</Typography>);
+    if (!Array.isArray(flows) || flows.length === 0) return (<Typography variant="body2" color="text.secondary">논리 흐름에 문제는 없습니다.</Typography>);
+
+    return (
+      <Box sx={{ display:'flex', flexDirection:'column', gap:1 }}>
+        {flows.map((f, idx) => (
+          <Paper key={idx} elevation={0} sx={{ p:1.25, borderRadius:1.5, bgcolor: (theme) => theme.palette.background.paper, borderLeft: `4px solid ${ (theme) => theme.palette.secondary.main }` }}>
+            <Typography variant="subtitle2" sx={{ fontWeight:700 }}>{(f.parent_id || f.from || '?')} → {(f.child_id || f.to || '?')}</Typography>
+            {f.quote && <Typography variant="body2" color="text.secondary" sx={{ fontStyle:'italic' }}>"{f.quote}"</Typography>}
+            {f.reason && <Typography variant="caption" color="text.secondary">{f.reason}</Typography>}
+          </Paper>
+        ))}
+      </Box>
+    );
+  };
+
   if (loading) {
     return (
       <PageContainer>
@@ -584,6 +725,48 @@ function AdvancementPage() {
                     </Fade>
                   ))}
                 </Stack>
+              </Box>
+            )}
+            {/* --- 심화 분석 요약 (연결 이슈 / 문장 정합성 / 논리 흐름) --- */}
+            {ideas && !isGenerating && storeHasDeepAnalysis && (
+              <Box sx={{ mt: 4 }}>
+                <Typography variant="h6" sx={{ fontWeight: 800, mb: 2 }}>심화 분석 요약</Typography>
+
+                {/* 상태 표시 + 재조회 */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+                  {deepLoading ? (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <CircularProgress size={18} />
+                      <Typography variant="body2" color="text.secondary">심화 분석 불러오는 중...</Typography>
+                    </Box>
+                  ) : deepError ? (
+                    <Alert severity="warning" sx={{ py: 0.5 }}>{deepError}</Alert>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">심화 분석 결과를 표시합니다.</Typography>
+                  )}
+
+                  <Box sx={{ flex: 1 }} />
+                  <Button size="small" onClick={() => { setDeepError(null); fetchDeepAnalysis(true); }} disabled={deepLoading}>
+                    재조회
+                  </Button>
+                </Box>
+
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 2 }}>
+                  <Paper sx={{ p:2, borderRadius:2 }} elevation={0}>
+                    <Typography variant="subtitle1" sx={{ fontWeight:700, color: 'primary.main', mb: 1 }}>연결 이슈/제안</Typography>
+                    {renderEdgeIssuesSummary(getDeepAnalysis())}
+                  </Paper>
+
+                  <Paper sx={{ p:2, borderRadius:2 }} elevation={0}>
+                    <Typography variant="subtitle1" sx={{ fontWeight:700, color: 'primary.main', mb: 1 }}>문장 정합성 검사</Typography>
+                    {renderIntegritySummary(getDeepAnalysis())}
+                  </Paper>
+
+                  <Paper sx={{ p:2, borderRadius:2 }} elevation={0}>
+                    <Typography variant="subtitle1" sx={{ fontWeight:700, color: 'primary.main', mb: 1 }}>논리 흐름 검사</Typography>
+                    {renderFlowSummary(getDeepAnalysis())}
+                  </Paper>
+                </Box>
               </Box>
             )}
           </ContentPaper>
