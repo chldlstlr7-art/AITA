@@ -439,7 +439,7 @@ function ReportPage() {
               }}
             >
               <Typography variant="h6" color="text.secondary" gutterBottom>
-                AI가 분석한 문서의 논리적 흐름을 시각적으로 확인해보세요
+                AI가 분석한 개념 연결망, 문장 정합성, 논리 흐름 분석을 확인하세요
               </Typography>
               <NeuronButton 
                 variant="contained" 
@@ -447,7 +447,7 @@ function ReportPage() {
                 startIcon={<Psychology sx={{ fontSize: 28 }} />}
                 endIcon={<ArrowForward />}
               >
-                심층 논리 구조 (Logic Neuron Map) 확인하기
+                심층 분석하기
               </NeuronButton>
             </Box>
           </>
