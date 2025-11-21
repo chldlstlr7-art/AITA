@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useLocation, useNavigate } from 'react-router-dom'; // useNavigate 추가
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { getReportStatus } from '../services/api.js';
 import { 
   Box, 
   Typography, 
   CircularProgress,
   Alert, 
-  Backdrop,
   Paper,
   Fade,
   Button,
@@ -17,21 +16,19 @@ import {
   Tab,
   Chip,
   LinearProgress,
-  Fab,        // 추가
-  Tooltip,    // 추가
-  Zoom        // 추가
+  // Fab,       // 삭제 (더 이상 사용 안 함)
+  // Tooltip,   // 삭제 (더 이상 사용 안 함)
+  // Zoom       // 삭제 (더 이상 사용 안 함)
 } from '@mui/material';
 import { 
-  AutoAwesome, 
   Assessment, 
   ChatBubbleOutline,
-  TipsAndUpdates,
   Summarize,
   ContentCopy,
-  Description,
   Lock,
   CheckCircle,
-  Psychology // 추가 (뉴런 맵 아이콘)
+  Psychology, 
+  ArrowForward // 아이콘 추가
 } from '@mui/icons-material';
 import { styled, alpha } from '@mui/material/styles';
 import ReportDisplay from '../components/ReportDisplay.jsx';
@@ -119,14 +116,20 @@ const TabPanel = ({ children, value, index }) => (
   </Box>
 );
 
-// [추가] 뉴런 맵 버튼 스타일 정의 (보라색 그라데이션)
-const NeuronFab = styled(Fab)(({ theme }) => ({
+// [변경] 기존 Floating Button 대신 페이지 내부에 삽입할 스타일리시한 버튼
+const NeuronButton = styled(Button)(({ theme }) => ({
   background: 'linear-gradient(45deg, #9c27b0 30%, #d500f9 90%)',
   color: 'white',
   fontWeight: 'bold',
-  paddingRight: 20,
+  fontSize: '1.05rem',
+  padding: theme.spacing(1.5, 4),
+  borderRadius: theme.spacing(4),
+  boxShadow: '0 4px 15px rgba(156, 39, 176, 0.4)',
+  transition: 'all 0.3s ease',
   '&:hover': {
     background: 'linear-gradient(45deg, #7b1fa2 30%, #aa00ff 90%)',
+    transform: 'translateY(-2px)',
+    boxShadow: '0 6px 20px rgba(156, 39, 176, 0.6)',
   },
 }));
 
@@ -135,13 +138,12 @@ const NeuronFab = styled(Fab)(({ theme }) => ({
 function ReportPage() {
   const { reportId } = useParams();
   const location = useLocation();
-  const navigate = useNavigate(); // 페이지 이동 훅
+  const navigate = useNavigate();
   
   const [reportData, setReportData] = useState(null);
   const [status, setStatus] = useState('processing_analysis'); 
   const [error, setError] = useState('');
   const [loadingMessage, setLoadingMessage] = useState('AI가 리포트를 분석 중입니다...');
-  const [showAdvancement, setShowAdvancement] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
 
   // 각 단계별 완료 상태
@@ -157,15 +159,12 @@ function ReportPage() {
     let timerId = null;
 
     const pollReport = async () => {
-      // 🔒 완료 또는 에러 상태면 폴링 중지
       if (status === 'completed' || status === 'error') { 
         return; 
       }
 
       try {
-        console.log(`[Polling] 현재 상태: ${status}`);
         const response = await getReportStatus(reportId);
-        console.log('[Polling] 서버 응답:', response);
         
         // 🎯 상태 1: processing_analysis (분석 중)
         if (response.status === 'processing_analysis') {
@@ -176,7 +175,6 @@ function ReportPage() {
         
         // 🎯 상태 2: processing_comparison (유사도 비교 중)
         else if (response.status === 'processing_comparison') {
-          console.log('[Polling] ✅ 1단계 완료! summary 데이터 수신');
           setReportData(response.data); 
           setStep1Complete(true); // 🟢 분석 탭 활성화
           setLoadingMessage('유사 문서를 비교하고 있습니다... (2/3단계)');
@@ -191,8 +189,7 @@ function ReportPage() {
         
         // 🎯 상태 3: processing_questions (QA 생성 중)
         else if (response.status === 'processing_questions') {
-          console.log('[Polling] ✅ 2단계 완료! similarity_details 데이터 수신');
-          setReportData(response.data); // summary + similarity_details
+          setReportData(response.data); 
           setStep1Complete(true);
           setStep2Complete(true); // 🟢 유사도 탭 활성화
           setLoadingMessage('AITA가 질문을 생성하고 있습니다... (3/3단계)');
@@ -202,8 +199,7 @@ function ReportPage() {
         
         // 🎯 상태 4: completed (모든 작업 완료)
         else if (response.status === 'completed') {
-          console.log('[Polling] ✅ 3단계 완료! 모든 데이터 수신');
-          setReportData(response.data); // 모든 데이터 포함
+          setReportData(response.data); 
           setStep1Complete(true);
           setStep2Complete(true);
           setStep3Complete(true); // 🟢 QA 탭 활성화
@@ -213,13 +209,11 @@ function ReportPage() {
         
         // 🎯 상태 5: error
         else if (response.status === 'error') {
-          console.error('[Polling] ❌ 에러 발생:', response.data?.error);
           setError(response.data?.error || '분석 중 알 수 없는 오류가 발생했습니다.');
           setStatus('error');
         }
         
       } catch (err) {
-        console.error('[Polling] 네트워크 에러:', err);
         setError(err.message);
         setStatus('error');
       }
@@ -241,10 +235,7 @@ function ReportPage() {
     if (newValue === 2 && step3Complete) setActiveTab(newValue);
   };
 
-  // [추가] 로직 뉴런 맵 페이지로 이동하는 핸들러
   const handleNavigateToNeuronMap = () => {
-    // 라우트 경로를 프로젝트 설정에 맞게 수정하세요.
-    // 예: /reports/${reportId}/deep-analysis 또는 /reports/${reportId}/logic-map
     navigate(`/reports/${reportId}/logic-neuron`);
   };
 
@@ -260,7 +251,7 @@ function ReportPage() {
   }
 
   return (
-    <Container maxWidth="lg">
+    <Container maxWidth="lg" sx={{ pb: 10 }}>
       {/* 페이지 헤더 */}
       <PageHeader>
         <Stack direction="row" spacing={3} alignItems="center">
@@ -316,7 +307,7 @@ function ReportPage() {
                 fontWeight: 500
               }}
             >
-                AI가 생성한 종합 분석 리포트를 확인하세요
+              AI가 생성한 종합 분석 리포트를 확인하세요
             </Typography>
           </Box>
         </Stack>
@@ -429,11 +420,37 @@ function ReportPage() {
       {/* 🎯 탭 1: 분석 요약 */}
       <TabPanel value={activeTab} index={0}>
         {step1Complete && reportData?.summary ? (
-          <ReportDisplay 
-            data={reportData} 
-            userAssignmentType={userAssignmentType}
-            reportId={reportId}
-          />
+          <>
+            <ReportDisplay 
+              data={reportData} 
+              userAssignmentType={userAssignmentType}
+              reportId={reportId}
+            />
+            
+            {/* [추가] 논리 구조 시각화 버튼 (리포트 디스플레이 바로 하단에 위치) */}
+            <Box 
+              sx={{ 
+                mt: 6, 
+                mb: 4,
+                display: 'flex', 
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 2
+              }}
+            >
+              <Typography variant="h6" color="text.secondary" gutterBottom>
+                AI가 분석한 문서의 논리적 흐름을 시각적으로 확인해보세요
+              </Typography>
+              <NeuronButton 
+                variant="contained" 
+                onClick={handleNavigateToNeuronMap}
+                startIcon={<Psychology sx={{ fontSize: 28 }} />}
+                endIcon={<ArrowForward />}
+              >
+                심층 논리 구조 (Logic Neuron Map) 확인하기
+              </NeuronButton>
+            </Box>
+          </>
         ) : (
           <LoadingTabContent elevation={3}>
              <CircularProgress />
@@ -472,29 +489,11 @@ function ReportPage() {
         )}
       </TabPanel>
 
-      {/* ========== [추가] Floating Buttons Area ========== */}
-      {/* 리포트 ID가 있고, 상태가 completed일 때만 우측 하단에 버튼 표시 */}
+      {/* ========== Floating Buttons Area (수정됨) ========== */}
+      {/* FloatingAdvancementButton은 유지하되, NeuronMap 버튼은 삭제됨 */}
       {reportId && status === 'completed' && (
         <Box sx={{ position: 'fixed', bottom: 32, right: 32, zIndex: 1000 }}>
-          <Stack direction="column" spacing={2} alignItems="flex-end">
-            
-            {/* 1. 로직 뉴런 맵 이동 버튼 */}
-            <Zoom in={true} timeout={500}>
-              <Tooltip title="논리 구조 시각화 (Logic Neuron Map)" placement="left">
-                <NeuronFab 
-                  variant="extended" 
-                  onClick={handleNavigateToNeuronMap}
-                >
-                  <Psychology sx={{ mr: 1 }} />
-                  Logic Map
-                </NeuronFab>
-              </Tooltip>
-            </Zoom>
-
-            {/* 2. 기존 Floating Advancement Button */}
-            <FloatingAdvancementButton reportId={reportId} />
-            
-          </Stack>
+           <FloatingAdvancementButton reportId={reportId} />
         </Box>
       )}
     </Container>

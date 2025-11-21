@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import ReactFlow, {
   useNodesState,
   useEdgesState,
@@ -9,11 +9,12 @@ import ReactFlow, {
   EdgeLabelRenderer,
   useReactFlow,
   ReactFlowProvider,
-  MarkerType
+  MarkerType,
+  Panel
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 
-// Physics Engine
+// Physics Engine (D3)
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from 'd3-force';
 
 import { useParams } from 'react-router-dom';
@@ -25,7 +26,8 @@ import {
   DialogContent, DialogActions, Button, Chip, 
   CircularProgress, Alert, Snackbar,
   Fade, LinearProgress, GlobalStyles,
-  List, ListItem, ListItemText, ListItemIcon, Divider, Skeleton
+  List, ListItem, ListItemText, ListItemIcon, Divider, Skeleton,
+  Drawer, IconButton
 } from '@mui/material';
 
 // Icons
@@ -33,14 +35,16 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import PsychologyIcon from '@mui/icons-material/Psychology';
 import ConstructionIcon from '@mui/icons-material/Construction';
-import EmojiEventsIcon from '@mui/icons-material/EmojiEvents';
-import LightbulbIcon from '@mui/icons-material/Lightbulb';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import CloseIcon from '@mui/icons-material/Close';
+import ArticleIcon from '@mui/icons-material/Article';
+import HubIcon from '@mui/icons-material/Hub';
+import LightbulbIcon from '@mui/icons-material/Lightbulb';
 
 // -----------------------------------------------------------------------------
-// 1. Constants & Styles
+// 1. Styles & Constants
 // -----------------------------------------------------------------------------
 
 const GlobalKeyframes = () => (
@@ -65,7 +69,7 @@ const SparkEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, tar
   const handleSparkClick = (evt) => {
     evt.stopPropagation();
     if (document.activeElement) document.activeElement.blur();
-    data?.onEdgeClick?.(evt);
+    data?.onEdgeClick?.(evt, data);
   };
 
   const isCreative = data?.feedback?.judgment === 'Creative';
@@ -73,11 +77,11 @@ const SparkEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, tar
 
   return (
     <>
-      <BaseEdge path={edgePath} style={{ stroke: mainColor, strokeWidth: 12, opacity: 0.15, filter: 'blur(6px)' }} />
+      <BaseEdge path={edgePath} style={{ stroke: mainColor, strokeWidth: data.weight ? data.weight * 8 : 4, opacity: 0.3, filter: 'blur(4px)' }} />
       <path
         id={id}
         style={{
-          stroke: mainColor, strokeWidth: 3, strokeDasharray: '10, 5',
+          stroke: mainColor, strokeWidth: 2, strokeDasharray: '10, 5',
           animation: 'sparkFlow 40s linear infinite',
           filter: `drop-shadow(0 0 2px ${mainColor})`, fill: 'none'
         }}
@@ -90,10 +94,10 @@ const SparkEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, tar
           pointerEvents: 'all', zIndex: 10
         }}>
            <Chip 
-             icon={<AutoFixHighIcon style={{fontSize: 14, color: '#fff'}} />} 
+             icon={<AutoFixHighIcon style={{fontSize: 16, color: '#fff'}} />} 
              label={isCreative ? "Spark!" : "Check"} size="small" onClick={handleSparkClick}
              sx={{
-               fontSize: '0.7rem', height: 24, cursor: 'pointer', 
+               fontSize: '0.85rem', height: 28, cursor: 'pointer', fontWeight: 'bold',
                background: isCreative ? 'linear-gradient(45deg, #aa00ff, #d500f9)' : 'linear-gradient(45deg, #d32f2f, #ff5252)',
                color: 'white', border: '1px solid rgba(255,255,255,0.5)',
                boxShadow: `0 0 10px ${mainColor}`, animation: 'pulse 2s infinite'
@@ -105,19 +109,37 @@ const SparkEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, tar
   );
 };
 
-const GhostEdge = ({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd }) => {
+const GhostEdge = ({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, data }) => {
    const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
+   
+   const handleGhostClick = (evt) => {
+     evt.stopPropagation();
+     data?.onEdgeClick?.(evt, data);
+   };
+
    return (
      <>
-       <BaseEdge path={edgePath} markerEnd={markerEnd} style={{ stroke: '#ff9800', strokeWidth: 2, strokeDasharray: '5, 5', animation: 'dashdraw 1s linear infinite', opacity: 0.8 }} />
+       <BaseEdge 
+         path={edgePath} 
+         markerEnd={markerEnd} 
+         style={{ 
+            stroke: '#ff9800', 
+            strokeWidth: 2.5, 
+            strokeDasharray: '8, 8', 
+            opacity: 0.8,
+            animation: 'dashdraw 1s linear infinite' 
+         }} 
+       />
        <EdgeLabelRenderer>
-         <div style={{
-           position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-           pointerEvents: 'all', zIndex: 10, background: '#fff', padding: '2px 8px',
-           borderRadius: '12px', border: '1px solid #ff9800', boxShadow: '0 2px 4px rgba(255,152,0,0.2)'
+         <div 
+           onClick={handleGhostClick}
+           style={{
+            position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+            pointerEvents: 'all', zIndex: 10, background: '#fff', padding: '4px 12px', cursor: 'pointer',
+            borderRadius: '16px', border: '2px solid #ff9800', boxShadow: '0 4px 10px rgba(255,152,0,0.3)'
          }}>
-            <Typography variant="caption" sx={{fontWeight:'bold', color: '#e65100', display:'flex', alignItems:'center', gap:0.5}}>
-              <LinkOffIcon fontSize="inherit"/> Link?
+            <Typography variant="body2" sx={{fontWeight:'bold', fontSize: '0.8rem', color: '#e65100', display:'flex', alignItems:'center', gap:0.5}}>
+              <LinkOffIcon fontSize="small"/> Link?
             </Typography>
          </div>
        </EdgeLabelRenderer>
@@ -125,522 +147,495 @@ const GhostEdge = ({ sourceX, sourceY, targetX, targetY, sourcePosition, targetP
    );
 };
 
-// ✅ [Fix] edgeTypes를 컴포넌트 밖으로 이동하여 리렌더링 시 경고 방지
 const edgeTypes = { spark: SparkEdge, ghost: GhostEdge };
 
 // -----------------------------------------------------------------------------
-// 3. Logic Helpers (D3 & Data Transformation)
+// 3. Hooks (Data & Graph Logic)
 // -----------------------------------------------------------------------------
 
-const calculateForceLayout = (nodes, edges) => {
-  const simulationNodes = nodes.map((node) => ({ ...node }));
-  const simulationEdges = edges
-      .filter(e => !e.hidden)
-      .map((edge) => ({ ...edge, source: edge.source, target: edge.target }));
-
-  const simulation = forceSimulation(simulationNodes)
-      .force("link", forceLink(simulationEdges)
-          .id((d) => d.id)
-          .distance((d) => 200 - ((d.data?.weight || 0.5) * 100))
-      )
-      .force("charge", forceManyBody().strength(-2500)) 
-      .force("center", forceCenter(0, 0))
-      .force("collide", forceCollide(80));
-
-  simulation.tick(300); // Synchronous calculation
-
-  return nodes.map((node) => {
-      const simNode = simulationNodes.find((n) => n.id === node.id);
-      return { ...node, position: { x: simNode.x, y: simNode.y } };
-  });
-};
-
-// -----------------------------------------------------------------------------
-// 4. Custom Hooks
-// -----------------------------------------------------------------------------
-
-const useAnalysisPolling = (reportId) => {
-  // 상태 정의: init | processing | partial | done | failed (새로 추가)
+const useBackendAnalysis = (reportId) => {
   const [status, setStatus] = useState('init'); 
-  const [data, setData] = useState({}); 
+  const [resultData, setResultData] = useState({
+    neuron_map: null,
+    integrity_issues: null,
+    flow_disconnects: null,
+    status: 'processing'
+  });
   const pollingRef = useRef(null);
 
-  const stopPolling = useCallback(() => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-      console.log(`[Polling] 🛑 Report #${reportId}: 폴링 중지됨.`);
+  const pollData = useCallback(async () => {
+    try {
+      const response = await getDeepAnalysisResult(reportId);
+      const innerData = response?.data || response; 
+
+      if (innerData) {
+        setResultData(innerData);
+
+        if (innerData.status === 'error') {
+          setStatus('failed');
+          return true; 
+        }
+        
+        if (innerData.status === 'completed') {
+          setStatus('done');
+          return true; 
+        }
+
+        if (innerData.neuron_map || innerData.integrity_issues || innerData.flow_disconnects) {
+           setStatus('partial');
+        } else {
+           setStatus('processing');
+        }
+      }
+      return false; 
+    } catch (err) {
+      console.error("Polling Error:", err);
+      return false; 
     }
   }, [reportId]);
 
-  const pollData = useCallback(async () => {
-    const now = new Date().toLocaleTimeString();
-    console.log(`[Polling] 🔄 Report #${reportId}: 결과 조회 시도... (${now})`);
-    
-    try {
-      const res = await getDeepAnalysisResult(reportId);
-
-      // API 응답 구조를 기반으로 상태 확인
-      const apiStatus = res?.status || 'unknown';
-      console.log(`[Polling] ✅ Report #${reportId}: 응답 수신. Status=${apiStatus}`);
-
-      // ************ 🐛 디버깅 로그 ************
-      if (apiStatus === 'error' || apiStatus === 'unknown' || res?.data?.status === 'error') {
-          console.error(`[Polling DEBUG] 🚨 Status=${apiStatus} 이므로, 수신된 전체 Data 객체 확인:`, res?.data);
-      }
-      // *******************************************
-
-      if (res?.data) {
-        setData(res.data);
-        
-        // --- [수정된 부분]: 오류 상태 확인 및 폴링 중지 ---
-        if (res.data.status === 'error') {
-          setStatus('failed'); // 'failed' 상태로 변경
-          stopPolling();
-          console.error(`[Polling] ⛔ 백엔드 분석 오류 확인. 폴링 중지. 메시지: ${res.data.message}`);
-          return;
-        }
-        // ---------------------------------------------
-        
-        if (res.data.status === 'completed') {
-          setStatus('done');
-          stopPolling();
-          console.log(`[Polling] 🏆 최종 완료 상태 확인. 폴링 중지.`);
-          return; // 완료 시 이후 코드 실행 방지
-        }
-        
-        // 상태 결정 로직: 완료나 에러가 아닐 경우, 부분 데이터 수신 여부 확인
-        const hasAnyData = res.data.neuron_map || res.data.integrity_issues || res.data.flow_disconnects;
-        if (hasAnyData) {
-            // 'done' 상태가 아니라면 'partial'로 설정
-            setStatus((prev) => (prev === 'done' ? 'done' : 'partial')); 
-            console.log(`[Polling] 📈 부분 데이터 수신 완료. UI 업데이트.`);
-        }
-        
-      } else if (apiStatus === 'pending') {
-         console.log(`[Polling] ⏳ 분석 결과 미완료 (Pending 상태). 다음 폴링 대기.`);
-      }
-
-    } catch (error) {
-      // AxiosError가 발생했거나, getDeepAnalysisResult에서 throw된 경우
-      const errorStatus = error.response?.status || 'Network/Unknown';
-      console.error(`[Polling] ❌ Report #${reportId}: 폴링 에러 발생. Status: ${errorStatus}`, error);
-      // 에러가 나더라도 폴링은 계속 시도함 (네트워크 일시적 문제 가정)
-    }
-  }, [reportId, stopPolling]);
-
   useEffect(() => {
     if (!reportId) return;
-    
-    const start = async () => {
-      console.log(`[Polling] 🚀 Report #${reportId} 폴링 초기화 시작.`);
+    let isMounted = true;
+
+    const init = async () => {
       setStatus('processing');
-      stopPolling(); // 혹시 모를 이전 인터벌 정리
+      try { await requestDeepAnalysis(reportId); } catch(e) { console.warn('Analysis request skipped/failed'); }
 
-      try {
-        // 1. 초기 데이터 상태 체크 (분석이 이미 완료되었는지 확인)
-        let res = await getDeepAnalysisResult(reportId);
-        console.log(`[Polling] 💡 초기 상태 체크 결과: Status=${res?.status}`);
-        
-        if (res?.data?.status === 'completed' || res?.data?.status === 'error') {
-            setData(res.data);
-            setStatus(res.data.status === 'completed' ? 'done' : 'failed'); // 초기에도 에러 핸들링
-            console.log(`[Polling] 🎯 초기 체크에서 ${res.data.status} 상태 확인. 폴링 불필요.`);
-            return;
-        } 
-        
-        // 2. 결과가 없거나 (pending), 진행 중인 상태인 경우
-        if (res?.status === 'pending') {
-            // 결과가 없으면 분석 요청을 시도
-            try { 
-                console.log('[Polling] ➡️ 결과가 없어 분석 요청 시도...');
-                await requestDeepAnalysis(reportId); 
-            } catch (e) { 
-                console.warn('[Polling] 분석 요청 API 오류 발생 (이미 진행 중일 수 있음).');
-            }
+      const loop = async () => {
+        if (!isMounted) return;
+        const stop = await pollData();
+        if (!stop) {
+          pollingRef.current = setTimeout(loop, 3000);
         }
-        
-        // 3. 폴링 시작
-        pollingRef.current = setInterval(pollData, 3000);
-        console.log(`[Polling] ⏱️ 3초 간격으로 폴링 시작.`);
-
-      } catch (error) {
-        // 초기 체크 자체가 실패한 경우 (API 에러 등) -> 분석 요청 후 폴링 시작
-        console.error('[Polling] 초기 getDeepAnalysisResult 에러 발생. 분석 요청 후 폴링 시작.', error);
-        try { await requestDeepAnalysis(reportId); } catch(e) { console.warn('[Polling] 분석 요청 API도 실패했습니다.'); }
-        pollingRef.current = setInterval(pollData, 3000);
-      }
+      };
+      loop();
     };
 
-    start();
-    return stopPolling; // 컴포넌트 언마운트 시 폴링 중지
-  }, [reportId, pollData, stopPolling]);
+    init();
+    return () => { isMounted = false; if (pollingRef.current) clearTimeout(pollingRef.current); };
+  }, [reportId, pollData]);
 
-  return { status, data };
+  return { status, resultData };
 };
 
-const useGraphTransformation = (rawMap, onEdgeClickCallback) => {
+const useGraphLayout = (neuronMap, onEdgeClick) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const isGraphLoaded = useRef(false);
   const { fitView } = useReactFlow();
+  const processedRef = useRef(false);
 
   useEffect(() => {
-    if (isGraphLoaded.current || !rawMap?.nodes) return;
+    if (!neuronMap?.nodes || processedRef.current) return;
 
-    const newNodes = rawMap.nodes.map((n) => ({
+    const initialNodes = neuronMap.nodes.map((n) => ({
       id: n.id,
-      data: { label: n.label },
+      data: { 
+        label: n.label, 
+        type: n.type || 'concept', 
+        summary: n.summary || '', 
+        score: n.score || 0 
+      },
       position: { x: 0, y: 0 }, 
       style: { 
-        background: 'rgba(255, 255, 255, 0.95)', border: '1px solid #cfd8dc', borderRadius: '50px',
-        padding: '10px 24px', fontWeight: 700, fontSize: '14px', minWidth: '80px',
-        textAlign: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.08)', color: '#37474f',
-        cursor: 'pointer', transition: 'all 0.3s ease'
+        background: 'rgba(255, 255, 255, 0.98)', 
+        border: '2px solid #cfd8dc', 
+        borderRadius: '50px',
+        padding: '14px 28px', 
+        fontWeight: 800,      
+        fontSize: '16px',     
+        minWidth: '100px',
+        textAlign: 'center', 
+        boxShadow: '0 6px 15px rgba(0,0,0,0.12)', 
+        color: '#263238',
+        cursor: 'pointer',
+        zIndex: 100
       },
     }));
 
-    const newEdges = [];
-    rawMap.edges?.forEach((e) => {
-      const isQuestionable = e.type === 'questionable'; 
-      const feedback = isQuestionable && rawMap.creative_feedbacks 
-        ? rawMap.creative_feedbacks.find(cf => cf.concepts.includes(e.source) && cf.concepts.includes(e.target))
-        : null;
+    const initialEdges = [];
+    
+    neuronMap.edges?.forEach((e) => {
+      const isQuestionable = e.type === 'questionable';
       
-      newEdges.push({
+      // [수정] 피드백 데이터 매칭 로직 강화
+      // 1. creative_feedbacks 배열에서 찾기
+      let feedback = null;
+      if (isQuestionable && neuronMap.creative_feedbacks) {
+         feedback = neuronMap.creative_feedbacks.find(cf => 
+             cf.concepts && 
+             cf.concepts.includes(e.source) && 
+             cf.concepts.includes(e.target)
+         );
+      }
+
+      // 2. 만약 배열에 없다면, 엣지 객체 자체에 있는 reason/feedback 필드를 사용 (백엔드 호환성)
+      if (isQuestionable && !feedback) {
+         if (e.reason || e.feedback || e.description) {
+             feedback = {
+                 judgment: e.judgment || 'Check', // 기본값 Check
+                 feedback: e.reason || e.feedback || e.description
+             };
+         }
+      }
+      
+      initialEdges.push({
         id: `edge-${e.source}-${e.target}`,
         source: e.source, target: e.target,
         type: isQuestionable ? 'spark' : 'default', 
         zIndex: isQuestionable ? 10 : 1,
-        style: isQuestionable ? {} : { stroke: '#546e7a', strokeWidth: Math.max(2, (e.weight || 0.5) * 8), opacity: 0.8 },
+        style: isQuestionable ? {} : { stroke: '#546e7a', strokeWidth: Math.max(2, (e.weight || 0.5) * 6), opacity: 0.7 },
         markerEnd: { type: MarkerType.ArrowClosed, color: isQuestionable ? (feedback?.judgment === 'Creative' ? '#d500f9' : '#ff1744') : '#546e7a' },
-        data: { zone: isQuestionable ? 'C' : 'A', weight: e.weight, feedback, onEdgeClick: onEdgeClickCallback }
+        data: { zone: isQuestionable ? 'C' : 'A', weight: e.weight, feedback, onEdgeClick }
       });
     });
 
-    rawMap.suggestions?.forEach((s, idx) => {
-      newEdges.push({
+    neuronMap.suggestions?.forEach((s, idx) => {
+      initialEdges.push({
         id: `suggestion-${idx}`,
         source: s.target_node, target: s.partner_node,
-        type: 'ghost', animated: true, hidden: true, zIndex: 5,
-        data: { zone: 'B', suggestion: s.suggestion, onEdgeClick: onEdgeClickCallback }
+        type: 'ghost', 
+        animated: true, 
+        hidden: false, 
+        zIndex: 5,
+        data: { zone: 'B', suggestion: s.suggestion, onEdgeClick }
       });
     });
 
-    const layoutedNodes = calculateForceLayout(newNodes, newEdges);
-    setNodes(layoutedNodes);
-    setEdges(newEdges);
-    
-    isGraphLoaded.current = true;
-    setTimeout(() => fitView({ duration: 1500, padding: 0.2 }), 100);
-  }, [rawMap, setNodes, setEdges, fitView, onEdgeClickCallback]);
+    const simNodes = initialNodes.map(d => ({ ...d }));
+    const simEdges = initialEdges.filter(e => !e.hidden).map(d => ({ ...d, source: d.source, target: d.target }));
 
-  const revealConnectedEdges = useCallback((nodeId) => {
-    let revealed = 0;
-    setEdges(eds => eds.map(e => {
-        if (e.data?.zone === 'B' && e.hidden && (e.source === nodeId || e.target === nodeId)) {
-            revealed++;
-            return { ...e, hidden: false };
-        }
-        return e;
+    // [수정] D3 물리 엔진 파라미터 조정 (간격 넓힘)
+    const simulation = forceSimulation(simNodes)
+      .force("link", forceLink(simEdges).id(d => d.id).distance(250)) // 120 -> 250 (거리 대폭 증가)
+      .force("charge", forceManyBody().strength(-2500)) // -1200 -> -2500 (반발력 2배 증가)
+      .force("center", forceCenter(0, 0))
+      .force("collide", forceCollide(100)); // 60 -> 100 (노드 간 충돌 반경 증가)
+
+    simulation.tick(300);
+
+    const layoutedNodes = initialNodes.map((n, i) => ({
+       ...n, position: { x: simNodes[i].x, y: simNodes[i].y } 
     }));
-    return revealed;
-  }, [setEdges]);
 
-  return { nodes, edges, onNodesChange, onEdgesChange, revealConnectedEdges, isGraphLoaded: isGraphLoaded.current };
+    setNodes(layoutedNodes);
+    setEdges(initialEdges);
+    processedRef.current = true;
+
+    setTimeout(() => fitView({ duration: 1000, padding: 0.2 }), 100);
+
+  }, [neuronMap, setNodes, setEdges, fitView, onEdgeClick]);
+
+  return { nodes, edges, onNodesChange, onEdgesChange, isReady: processedRef.current };
 };
 
 // -----------------------------------------------------------------------------
-// 5. Sub-Components for UI
+// 4. UI Sub-Components
 // -----------------------------------------------------------------------------
 
-const AnalysisHeader = ({ status }) => (
-  <Box sx={{ p: 2, px:3, display: 'flex', justifyContent: 'space-between', alignItems:'center', background: '#fff', borderBottom: '1px solid #e0e0e0', zIndex: 10 }}>
-    <Typography variant="h6" sx={{ fontWeight: 800, display: 'flex', alignItems: 'center', gap: 1.5, color: '#1a237e' }}>
-      <PsychologyIcon fontSize="large" color="primary" /> Logic Neuron Map
+// Node Detail Drawer
+const NodeDetailDrawer = ({ open, onClose, node }) => (
+  <Drawer anchor="right" open={open} onClose={onClose} PaperProps={{ sx: { width: 380, p: 3, borderLeft: '5px solid #3f51b5' } }}>
+    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+      <Chip 
+        icon={<HubIcon sx={{ fontSize: 18 }} />} 
+        label={node?.data?.type || "Concept"} 
+        color="primary" size="medium" variant="outlined" sx={{ fontWeight:'bold' }}
+      />
+      <IconButton onClick={onClose}><CloseIcon /></IconButton>
+    </Box>
+
+    <Typography variant="h4" sx={{ fontWeight: 900, color: '#1a237e', mb: 3, wordBreak:'keep-all' }}>
+      {node?.data?.label}
     </Typography>
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-      {status === 'partial' && (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <CircularProgress size={16} color="inherit" />
-          <Typography variant="caption" color="text.secondary">실시간 분석 중...</Typography>
+
+    {node?.data?.summary && (
+      <Box sx={{ bgcolor: '#f8f9fa', p: 2.5, borderRadius: 3, mb: 4, boxShadow:'0 2px 8px rgba(0,0,0,0.05)' }}>
+        <Typography variant="subtitle1" sx={{ display: 'flex', alignItems: 'center', gap: 1, color: '#455a64', mb: 1.5, fontWeight:'bold' }}>
+          <ArticleIcon /> AI 요약
+        </Typography>
+        <Typography variant="body1" sx={{ lineHeight: 1.7, color: '#37474f', fontSize:'1rem' }}>
+          {node.data.summary}
+        </Typography>
+      </Box>
+    )}
+
+    {node?.data?.score > 0 && (
+      <Box>
+        <Typography variant="subtitle2" color="text.secondary" fontWeight="bold" gutterBottom>논리적 중요도</Typography>
+        <Box sx={{ display:'flex', alignItems:'center', gap: 2 }}>
+           <LinearProgress variant="determinate" value={node.data.score * 10} sx={{ flex: 1, height: 10, borderRadius: 5 }} />
+           <Typography variant="h6" fontWeight="bold" color="primary">{node.data.score}</Typography>
         </Box>
-      )}
-      {(status === 'partial' || status === 'done') && (
-         <Box sx={{display:'flex', gap:1.5}}>
-            <Box sx={{display:'flex', alignItems:'center', gap:0.5, px:1, border:'1px solid #eee', borderRadius:2}}>
-              <Box sx={{width:20, height:4, bgcolor:'#546e7a'}} />
-              <Typography variant="caption" color="text.secondary">튼튼한 논리</Typography>
-            </Box>
-            <Box sx={{display:'flex', alignItems:'center', gap:0.5, px:1, border:'1px solid #eee', borderRadius:2}}>
-               <AutoFixHighIcon sx={{fontSize:16, color:'#d500f9'}} />
-               <Typography variant="caption" color="text.secondary">Creative Spark</Typography>
-            </Box>
-         </Box>
-      )}
-    </Box>
-  </Box>
+      </Box>
+    )}
+  </Drawer>
 );
 
-// ✅ [Fix] 중괄호 닫기 오류 수정됨
-const AnalysisSidePanel = ({ integrity, flow }) => {
-  return (
-    <Paper elevation={3} sx={{ 
-        width: 320, borderLeft: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', 
-        bgcolor: '#fcfcfc', height: '100%', overflowY: 'auto', zIndex: 5 
-    }}>
+// Analysis Sidebar (Integrity & Flow)
+const AnalysisSidePanel = ({ integrity, flow, status }) => (
+  <Paper elevation={3} sx={{ 
+      width: 340, borderLeft: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', 
+      bgcolor: '#fcfcfc', height: '100%', overflowY: 'auto', zIndex: 5 
+  }}>
+    {/* [수정] 문장 정합성 (한글화 완료) */}
+    <Box sx={{ p: 3 }}>
+      <Typography variant="subtitle1" sx={{fontWeight:800, mb:2, display:'flex', alignItems:'center', gap:1, color: '#37474f'}}>
+        <WarningAmberIcon color="warning"/> 문장 정합성 검사
+      </Typography>
       
-      {/* 2. Integrity Section */}
-      <Box sx={{ p: 2.5 }}>
-        <Typography variant="subtitle2" sx={{fontWeight:800, mb:2, display:'flex', alignItems:'center', gap:1, color: '#37474f'}}>
-          <WarningAmberIcon fontSize="small" color="warning"/> 문장 정합성 (Integrity)
-        </Typography>
-        
-        {integrity ? (
-           integrity.length === 0 ? (
-              <Box sx={{ p: 2, bgcolor: '#e8f5e9', borderRadius: 2, color: '#2e7d32', display:'flex', alignItems:'center', gap:1 }}>
-                 <CheckCircleOutlineIcon fontSize="small"/> <Typography variant="body2" fontWeight="bold">완벽합니다!</Typography>
-              </Box>
-           ) : (
-              <List dense disablePadding sx={{ bgcolor:'#fff', borderRadius:2, border:'1px solid #eee' }}>
-                {integrity.map((issue, idx) => (
-                   <React.Fragment key={idx}>
-                      <ListItem alignItems="flex-start">
-                         <ListItemIcon sx={{minWidth: 30, mt:0.5}}><ErrorOutlineIcon fontSize="small" color="error"/></ListItemIcon>
-                         <ListItemText 
-                            primary={<Typography variant="body2" fontWeight="bold" color="text.primary">{issue.type}</Typography>}
-                            secondary={<Typography variant="caption" color="text.secondary">{issue.description}</Typography>} 
-                         />
-                      </ListItem>
-                      {idx < integrity.length - 1 && <Divider component="li" />}
-                   </React.Fragment>
-                ))}
-              </List>
-           )
-        ) : (
-           // Loading State
-           <Box sx={{ display:'flex', alignItems:'center', gap: 2, p:1 }}>
-             <CircularProgress size={20} />
-             <Typography variant="body2" color="text.secondary">정합성 검사 중...</Typography>
-           </Box>
-        )}
-      </Box>
-
-      <Divider />
-
-      {/* 3. Flow Disconnects Section */}
-      <Box sx={{ p: 2.5 }}>
-        <Typography variant="subtitle2" sx={{fontWeight:800, mb:2, display:'flex', alignItems:'center', gap:1, color: '#37474f'}}>
-          <LinkOffIcon fontSize="small" color="action"/> 논리 흐름 (Flow Check)
-        </Typography>
-
-        {flow ? (
-           flow.length === 0 ? (
-              <Box sx={{ p: 2, bgcolor: '#e8f5e9', borderRadius: 2, color: '#2e7d32', display:'flex', alignItems:'center', gap:1 }}>
-                 <CheckCircleOutlineIcon fontSize="small"/> <Typography variant="body2" fontWeight="bold">흐름이 매끄럽습니다.</Typography>
-              </Box>
-           ) : (
-              <List dense disablePadding sx={{ bgcolor:'#fff', borderRadius:2, border:'1px solid #eee' }}>
-                {flow.map((gap, idx) => (
-                   <React.Fragment key={idx}>
-                      <ListItem alignItems="flex-start">
-                         <ListItemText 
-                            primary={<Typography variant="body2" fontWeight="bold" color="text.primary">단절 구간 {idx+1}</Typography>}
-                            secondary={
-                              <Box component="span" sx={{display:'flex', flexDirection:'column', mt:0.5, gap:0.5}}>
-                                <Chip label={gap.from} size="small" variant="outlined" sx={{maxWidth:'100%'}} />
-                                <Typography variant="caption" align="center">⬇️</Typography>
-                                <Chip label={gap.to} size="small" variant="outlined" sx={{maxWidth:'100%'}} />
-                                <Typography variant="caption" color="error" sx={{mt:0.5}}>{gap.reason}</Typography>
-                              </Box>
-                            }
-                         />
-                      </ListItem>
-                      {idx < flow.length - 1 && <Divider component="li" />}
-                   </React.Fragment>
-                ))}
-              </List>
-           )
-        ) : (
-           // Loading State (Skeleton)
-           <Box sx={{ display:'flex', flexDirection:'column', gap: 1 }}>
-             <Box sx={{ display:'flex', alignItems:'center', gap: 2, mb: 1 }}>
-                <CircularProgress size={20} color="secondary"/>
-                <Typography variant="body2" color="text.secondary">흐름 끊김 확인 중...</Typography>
-             </Box>
-             <Skeleton variant="rectangular" height={60} sx={{borderRadius:2}} />
-             <Skeleton variant="text" width="60%" />
-           </Box>
-        )}
-      </Box>
-    </Paper>
-  );
-};
-
-const MapGuidePanel = () => (
-  <Box sx={{ position: 'absolute', bottom: 30, left: 30, bgcolor: 'rgba(255,255,255,0.95)', p: 2.5, borderRadius: 4, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', maxWidth: 320, backdropFilter:'blur(10px)' }}>
-    <Typography variant="subtitle2" sx={{fontWeight: 800, mb:1.5, color: '#1a237e', display:'flex', alignItems:'center', gap:1}}>
-      🧠 탐험 가이드
-    </Typography>
-    <Box sx={{ display:'flex', flexDirection:'column', gap: 1 }}>
-      <Typography variant="body2" sx={{ fontSize:'0.85rem' }}>
-        🏝️ <b>외딴 섬(Node)</b>을 눌러보세요.<br/>
-        <span style={{color:'#ef6c00', fontSize:'0.8rem', marginLeft:'24px'}}>👉 숨겨진 연결 고리(Missing Link)가 나타납니다.</span>
-      </Typography>
-      <Typography variant="body2" sx={{ fontSize:'0.85rem' }}>
-        ⚡ <b>반짝이는 선</b>을 눌러보세요.<br/>
-        <span style={{color:'#9c27b0', fontSize:'0.8rem', marginLeft:'24px'}}>👉 창의적인 연결인지, 억지인지 AI가 판단해줍니다.</span>
-      </Typography>
+      {!integrity ? (
+         (status === 'processing' || status === 'init') ? (
+            <Box sx={{ display:'flex', alignItems:'center', gap: 2, p:1 }}>
+              <CircularProgress size={20} />
+              <Typography variant="body2" color="text.secondary">분석 중...</Typography>
+            </Box>
+         ) : <Typography variant="body2" color="text.secondary">데이터 없음</Typography>
+      ) : integrity.length === 0 ? (
+         <Box sx={{ p: 2, bgcolor: '#e8f5e9', borderRadius: 2, color: '#2e7d32', display:'flex', alignItems:'center', gap:1 }}>
+            <CheckCircleOutlineIcon fontSize="small"/> <Typography variant="body2" fontWeight="bold">완벽합니다!</Typography>
+         </Box>
+      ) : (
+         <List dense disablePadding sx={{ bgcolor:'#fff', borderRadius:2, border:'1px solid #eee' }}>
+           {integrity.map((issue, idx) => (
+              <React.Fragment key={idx}>
+                 <ListItem alignItems="flex-start">
+                    <ListItemIcon sx={{minWidth: 30, mt:0.5}}><ErrorOutlineIcon fontSize="small" color="error"/></ListItemIcon>
+                    <ListItemText 
+                       primary={<Typography variant="body2" fontWeight="bold" color="text.primary">{issue.type}</Typography>}
+                       secondary={<Typography variant="caption" color="text.secondary">{issue.description}</Typography>} 
+                    />
+                 </ListItem>
+                 {idx < integrity.length - 1 && <Divider component="li" />}
+              </React.Fragment>
+           ))}
+         </List>
+      )}
     </Box>
-  </Box>
+
+    <Divider />
+
+    {/* [수정] 논리 흐름 (한글화 완료) */}
+    <Box sx={{ p: 3 }}>
+      <Typography variant="subtitle1" sx={{fontWeight:800, mb:2, display:'flex', alignItems:'center', gap:1, color: '#37474f'}}>
+        <LinkOffIcon color="action"/> 논리 흐름 검사
+      </Typography>
+
+      {!flow ? (
+         (status === 'processing' || status === 'init') ? (
+            <Box sx={{ display:'flex', flexDirection:'column', gap: 1 }}>
+               <Skeleton variant="rectangular" height={60} sx={{borderRadius:2}} />
+               <Skeleton variant="text" width="60%" />
+            </Box>
+         ) : <Typography variant="body2" color="text.secondary">데이터 없음</Typography>
+      ) : flow.length === 0 ? (
+         <Box sx={{ p: 2, bgcolor: '#e8f5e9', borderRadius: 2, color: '#2e7d32', display:'flex', alignItems:'center', gap:1 }}>
+            <CheckCircleOutlineIcon fontSize="small"/> <Typography variant="body2" fontWeight="bold">흐름이 매끄럽습니다.</Typography>
+         </Box>
+      ) : (
+         <List dense disablePadding sx={{ bgcolor:'#fff', borderRadius:2, border:'1px solid #eee' }}>
+           {flow.map((gap, idx) => (
+              <React.Fragment key={idx}>
+                 <ListItem alignItems="flex-start">
+                    <ListItemText 
+                       secondaryTypographyProps={{ component: 'div' }} 
+                       primary={<Typography variant="body2" fontWeight="bold" color="text.primary">단절 구간 {idx+1}</Typography>}
+                       secondary={
+                          <Box sx={{display:'flex', flexDirection:'column', mt:0.5, gap:0.5}}>
+                             <Box sx={{display:'flex', alignItems:'center', gap:0.5}}>
+                                <Chip label={gap.from} size="small" variant="outlined" sx={{maxWidth:'45%'}} />
+                                <Typography variant="caption">➡</Typography>
+                                <Chip label={gap.to} size="small" variant="outlined" sx={{maxWidth:'45%'}} />
+                             </Box>
+                             <Typography variant="caption" color="error" sx={{mt:0.5}}>{gap.reason}</Typography>
+                          </Box>
+                       }
+                    />
+                 </ListItem>
+                 {idx < flow.length - 1 && <Divider component="li" />}
+              </React.Fragment>
+           ))}
+         </List>
+      )}
+    </Box>
+  </Paper>
 );
 
+// Interaction Dialog
 const InteractionDialog = ({ open, onClose, content }) => (
-  <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 3, p: 1 } }}>
+  <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 4, p: 1 } }}>
     <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1.5, borderBottom: '1px solid #eee', pb:2 }}>
-      {content.type === 'creative' && <AutoFixHighIcon sx={{color:'#d500f9'}} />}
-      {content.type === 'forced' && <ConstructionIcon sx={{color:'#d32f2f'}} />}
-      {content.type === 'bridge' && <LinkOffIcon sx={{color:'#ff9800'}} />}
-      <Typography variant="h6" component="span" sx={{ fontWeight: 800 }}>{content.title}</Typography>
+      {content?.type === 'creative' && <AutoFixHighIcon sx={{color:'#d500f9'}} />}
+      {content?.type === 'forced' && <ConstructionIcon sx={{color:'#d32f2f'}} />}
+      {content?.type === 'bridge' && <LinkOffIcon sx={{color:'#ff9800'}} />}
+      <Typography variant="h6" component="span" sx={{ fontWeight: 800 }}>{content?.title}</Typography>
     </DialogTitle>
-    <DialogContent sx={{ py: 3 }}>{content.body}</DialogContent>
+    <DialogContent sx={{ py: 3 }}>{content?.body}</DialogContent>
     <DialogActions>
-      <Button onClick={onClose} variant="contained" sx={{ borderRadius: 2, px: 4, bgcolor:'#37474f' }}>확인</Button>
+      <Button onClick={onClose} variant="contained" size="large" sx={{ borderRadius: 2, px: 4, bgcolor:'#37474f' }}>확인</Button>
     </DialogActions>
   </Dialog>
 );
 
-const LoadingOverlay = ({ label }) => (
-  <Fade in={true}>
-    <Box sx={{ position: 'absolute', inset:0, display: 'flex', flexDirection:'column', alignItems: 'center', justifyContent: 'center', zIndex: 20, bgcolor: 'rgba(255,255,255,0.85)', backdropFilter:'blur(4px)' }}>
-      <CircularProgress size={60} thickness={4} sx={{color:'#1a237e', mb: 3}} />
-      <Typography variant="h6" color="text.primary" fontWeight="bold">신경망을 스캔하고 있습니다...</Typography>
-      <Typography variant="body2" color="text.secondary">{label || "논리적 연결 강도와 창의적 스파크를 분석 중입니다."}</Typography>
-    </Box>
-  </Fade>
-);
-
 // -----------------------------------------------------------------------------
-// 6. Main Component
+// 5. Main Content Component
 // -----------------------------------------------------------------------------
 
 const LogicNeuronContent = () => {
   const { reportId } = useParams();
+  const { status, resultData } = useBackendAnalysis(reportId);
   
-  // State
-  const [dialogState, setDialogState] = useState({ open: false, content: { title: '', body: null, type: '' } });
+  const [dialogState, setDialogState] = useState({ open: false, content: null });
   const [snackState, setSnackState] = useState({ open: false, message: '' });
-  
-  // 1. Get Data (Polling)
-  const { status, data } = useAnalysisPolling(reportId);
+  const [selectedNode, setSelectedNode] = useState(null);
 
-  // 2. Interaction Handlers
+  // 1. Edge Click Handler (데이터 방어 로직 추가됨)
   const handleEdgeClick = useCallback((event, edgeData) => {
     if (event?.stopPropagation) event.stopPropagation();
-    if (document.activeElement) document.activeElement.blur();
-
     const { zone, feedback, suggestion } = edgeData;
-    let content = {};
+    let content = null;
 
-    if (zone === 'C') {
+    if (zone === 'C') { // Spark Edge
         const isCreative = feedback?.judgment === 'Creative';
+        
+        // [수정] feedback이 없을 경우 대체 텍스트 표시 로직 강화
+        const feedbackText = feedback?.feedback || feedback?.reason || feedback?.description || feedback?.text || "AI가 이 연결에 대한 구체적인 코멘트를 생성하지 못했습니다. (데이터 없음)";
+
         content = {
-          title: isCreative ? '✨ Creative Spark!' : '🔧 연결 정비 필요',
+          title: isCreative ? '✨ Creative Spark!' : '🔧 연결 재검토 필요',
           type: isCreative ? 'creative' : 'forced',
           body: (
             <Box>
-              <Typography variant="h6" sx={{ color: isCreative ? '#7b1fa2' : '#d32f2f', fontWeight: 'bold', mb: 2 }}>
-                {isCreative ? "탁월한 통찰력입니다!" : "논리적 연결이 조금 어색해요."}
+              <Typography variant="subtitle1" sx={{fontWeight:'bold', color: isCreative ? '#7b1fa2' : '#c62828', mb:1}}>
+                 {isCreative ? "탁월한 통찰입니다!" : "논리적 비약이 감지되었습니다."}
               </Typography>
-              <Paper elevation={0} sx={{ p: 2, bgcolor: isCreative ? '#f3e5f5' : '#ffebee', borderRadius: 2, display: 'flex', gap: 2 }}>
-                 <Box sx={{ mt: 0.5 }}>{isCreative ? <EmojiEventsIcon sx={{ fontSize: 40, color: '#aa00ff' }} /> : <ConstructionIcon sx={{ fontSize: 40, color: '#d32f2f' }} />}</Box>
-                 <Box>
-                    <Typography variant="subtitle1" sx={{fontWeight:'bold', mb:0.5}}>AI 분석 코멘트</Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.6 }}>{feedback?.feedback || "분석 데이터가 없습니다."}</Typography>
-                 </Box>
+              <Paper sx={{ p: 2, bgcolor: '#f5f5f5', borderRadius: 2 }}>
+                 <Typography variant="body1" sx={{ lineHeight:1.6 }}>
+                    {feedbackText}
+                 </Typography>
               </Paper>
             </Box>
           )
         };
-    } else if (zone === 'B') {
+    } else if (zone === 'B') { // Ghost Edge (Suggestion)
+        let guideText = "";
+        if (typeof suggestion === 'string') {
+            guideText = suggestion;
+        } else if (typeof suggestion === 'object' && suggestion !== null) {
+            guideText = suggestion.socratic_guide || suggestion.question || suggestion.description || suggestion.text || "질문 내용을 찾을 수 없습니다.";
+        } else {
+            guideText = "가이드 데이터가 없습니다.";
+        }
+
         content = {
           title: '🌉 Missing Link 발견',
           type: 'bridge',
           body: (
-            <Paper elevation={0} sx={{ p: 2, bgcolor: '#fff3e0', borderRadius: 2, display:'flex', gap: 2, alignItems:'flex-start' }}>
-               <LightbulbIcon sx={{ fontSize: 30, color: '#ff9800', mt:0.5 }} />
-               <Box>
-                 <Typography variant="body1" sx={{ fontSize: '1.05rem', fontWeight: 600, color:'#e65100', mb: 1 }}>"{suggestion?.socratic_guide}"</Typography>
-                 <Typography variant="body2" sx={{ color:'#ef6c00' }}>이 두 개념 사이에는 숨겨진 맥락이 있습니다. 위 질문에 답하며 글을 확장해보세요.</Typography>
-               </Box>
-            </Paper>
+             <Box sx={{ display:'flex', gap: 2 }}>
+                <LightbulbIcon sx={{ color:'#ff9800', fontSize:40 }} />
+                <Box>
+                   <Typography variant="subtitle2" gutterBottom sx={{color:'#757575'}}>AI 소크라테스 가이드</Typography>
+                   <Typography variant="h6" fontWeight="bold" sx={{ color:'#e65100', lineHeight:1.4, mb: 1 }}>
+                      "{guideText}"
+                   </Typography>
+                   <Typography variant="body2" display="block" sx={{ color:'#546e7a' }}>
+                      이 질문에 답하며 두 개념 사이의 맥락을 연결해보세요.
+                   </Typography>
+                </Box>
+             </Box>
           )
         };
     }
-    setDialogState({ open: true, content });
+
+    if (content) setDialogState({ open: true, content });
   }, []);
 
-  // 3. Transform Data & Layout
-  const onEdgeClickAdapter = useCallback((evt, edge) => handleEdgeClick(evt, edge.data), [handleEdgeClick]);
-  const { nodes, edges, onNodesChange, onEdgesChange, revealConnectedEdges, isGraphLoaded } = useGraphTransformation(data?.neuron_map, onEdgeClickAdapter);
+  // 2. Graph Logic
+  const { nodes, edges, onNodesChange, onEdgesChange, isReady } = useGraphLayout(resultData.neuron_map, handleEdgeClick);
 
-  // 4. Node Click Handler
+  // 3. Node Click Handler
   const onNodeClick = useCallback((event, node) => {
-     if (document.activeElement) document.activeElement.blur();
-     const count = revealConnectedEdges(node.id);
-     if (count > 0) setSnackState({ open: true, message: `🔍 ${count}개의 잠재적 연결 고리를 발견했습니다! 주황색 선을 확인하세요.` });
-  }, [revealConnectedEdges]);
+      setSelectedNode(node);
+  }, []);
 
-  useEffect(() => {
-    if (status === 'partial' && isGraphLoaded) setSnackState({ open: true, message: "🧠 신경망 데이터가 수신되었습니다. 추가 분석을 기다립니다..." });
-    if (status === 'done') setSnackState({ open: true, message: "✅ 모든 AI 심층 분석이 완료되었습니다." });
-  }, [status, isGraphLoaded]);
-
-  // 로딩 로직: 초기 진입 시 아예 데이터가 없으면 전체 로딩, 하나라도 있으면 화면 표시
-  const isTotallyEmpty = (status === 'init' || status === 'processing') && !isGraphLoaded && !data?.integrity_issues && !data?.flow_disconnects;
+  const isTotalLoading = (status === 'init' || status === 'processing') && !resultData.neuron_map;
 
   return (
     <Paper elevation={0} sx={{ height: '100vh', width: '100%', display: 'flex', flexDirection: 'column', bgcolor: '#f0f2f5' }}>
       <GlobalKeyframes />
       
-      <AnalysisHeader status={status} />
+      {/* Header */}
+      <Box sx={{ p: 2, px:3, display: 'flex', justifyContent: 'space-between', alignItems:'center', background: '#fff', borderBottom: '1px solid #e0e0e0', zIndex: 10 }}>
+        <Typography variant="h6" sx={{ fontWeight: 800, display: 'flex', alignItems: 'center', gap: 1.5, color: '#1a237e' }}>
+          <PsychologyIcon fontSize="large" color="primary" /> Logic Neuron Map
+        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+           {(status === 'processing' || status === 'partial') && (
+             <Fade in={true}><Chip icon={<CircularProgress size={16}/>} label="AI 실시간 분석 중..." color="primary" variant="outlined" /></Fade>
+           )}
+           {status === 'done' && <Chip icon={<CheckCircleOutlineIcon/>} label="분석 완료" color="success" />}
+        </Box>
+      </Box>
+
       {status === 'partial' && <LinearProgress color="secondary" sx={{ height: 2 }} />}
 
       <Box sx={{ flex: 1, position: 'relative', display: 'flex', overflow: 'hidden' }}>
         
-        {/* 1. Neuron Map Area */}
+        {/* 1. Map Canvas */}
         <Box sx={{ flex: 1, position: 'relative', height: '100%' }}>
-            {/* 데이터는 없지만 아직 로딩 중일 때만 오버레이 표시 (부분 로딩 시에는 지도만 먼저 보여줌) */}
-            {isTotallyEmpty && <LoadingOverlay label="논리 지도를 그리는 중..." />}
-            
-            {/* 그래프 데이터가 있으면 렌더링, 없으면 빈 화면(또는 로딩오버레이 뒤) */}
-            <ReactFlow
-              nodes={nodes} edges={edges}
-              onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
-              onNodeClick={onNodeClick} onEdgeClick={onEdgeClickAdapter}
-              edgeTypes={edgeTypes} // ✅ 바깥에서 선언된 객체 사용
-              fitView minZoom={0.3} maxZoom={4} attributionPosition="bottom-right"
-            >
-              <Background color="#b0bec5" gap={30} size={1} />
-              <Controls showInteractive={false} />
-              {isGraphLoaded && <MapGuidePanel />}
-            </ReactFlow>
+           {isTotalLoading && (
+             <Box sx={{ position: 'absolute', inset:0, zIndex: 20, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', bgcolor:'rgba(255,255,255,0.8)' }}>
+                <CircularProgress size={60} />
+                <Typography sx={{ mt:2, fontWeight:'bold', color:'#546e7a' }}>논리 지도를 생성하고 있습니다...</Typography>
+             </Box>
+           )}
+           
+           <ReactFlow
+             nodes={nodes} edges={edges}
+             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
+             onNodeClick={onNodeClick}
+             edgeTypes={edgeTypes}
+             fitView minZoom={0.2} maxZoom={4}
+           >
+             <Background color="#b0bec5" gap={30} size={1} />
+             <Controls showInteractive={false} />
+             
+             {/* Map Guide Panel */}
+             {isReady && (
+                <Panel position="bottom-left" style={{ marginLeft: 20, marginBottom: 20 }}>
+                   <Paper sx={{ p: 2, bgcolor: 'rgba(255,255,255,0.95)', backdropFilter:'blur(4px)', borderRadius: 3, boxShadow:'0 4px 20px rgba(0,0,0,0.1)' }}>
+                      <Typography variant="subtitle2" fontWeight="bold" display="block" gutterBottom color="primary">🧭 탐험 가이드</Typography>
+                      <Typography variant="caption" display="block" sx={{mb:0.5}}>🖱️ 노드 클릭: 상세 내용 확인</Typography>
+                      <Typography variant="caption" display="block" sx={{mb:0.5}}>⚡ 스파크 선: 창의성/비약 판단</Typography>
+                      <Typography variant="caption" display="block">🔗 점선(Missing Link): 클릭하여 연결 힌트 보기</Typography>
+                   </Paper>
+                </Panel>
+             )}
+           </ReactFlow>
         </Box>
 
-        {/* 2 & 3. Side Panel for Partial Loading (Integrity & Flow) */}
+        {/* 2. Sidebar (Integrity & Flow) */}
         <AnalysisSidePanel 
-            integrity={data?.integrity_issues} 
-            flow={data?.flow_disconnects} 
+           integrity={resultData.integrity_issues} 
+           flow={resultData.flow_disconnects} 
+           status={status}
         />
-        
       </Box>
 
+      {/* Dialogs & Drawers */}
       <InteractionDialog 
         open={dialogState.open} 
         onClose={() => setDialogState(prev => ({ ...prev, open: false }))} 
         content={dialogState.content} 
       />
+      
+      <NodeDetailDrawer 
+        open={!!selectedNode} 
+        onClose={() => setSelectedNode(null)} 
+        node={selectedNode} 
+      />
 
+      {/* Snackbar */}
       <Snackbar 
         open={snackState.open} 
         autoHideDuration={5000} 
