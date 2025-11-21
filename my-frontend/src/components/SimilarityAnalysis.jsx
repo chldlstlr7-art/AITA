@@ -3,19 +3,19 @@ import {
   Paper, 
   Typography, 
   Box, 
-  Grid,
-  Accordion,
+  Accordion, 
   AccordionSummary, 
   AccordionDetails,
   Chip,
   Stack,
   IconButton,
   Tooltip,
-  Divider,
   Avatar,
   Button,
   Collapse,
-  Fade
+  Fade,
+  Divider,
+  Grid
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -23,10 +23,12 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningIcon from '@mui/icons-material/Warning';
 import ErrorIcon from '@mui/icons-material/Error';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
+import DescriptionIcon from '@mui/icons-material/Description';
+import AssessmentIcon from '@mui/icons-material/Assessment';
+import CodeIcon from '@mui/icons-material/Code'; // 아이콘 추가
 import { styled, alpha } from '@mui/material/styles';
 
 // ==================== Styled Components ====================
-// (스타일 코드는 변경 없음)
 const GlassCard = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
   borderRadius: theme.spacing(2),
@@ -39,68 +41,52 @@ const GlassCard = styled(Paper)(({ theme }) => ({
 const StyledAccordion = styled(Accordion)(({ theme }) => ({
   borderRadius: `${theme.spacing(2)} !important`,
   overflow: 'hidden',
-  border: `1px solid ${alpha(theme.palette.primary.main, 0.12)}`,
+  border: `1px solid ${alpha(theme.palette.divider, 0.6)}`,
   background: theme.palette.background.paper,
-  boxShadow: `0 4px 16px ${alpha(theme.palette.primary.main, 0.06)}`,
+  boxShadow: 'none',
   '&:before': { display: 'none' },
   '&.Mui-expanded': {
     margin: '8px 0',
-    boxShadow: `0 8px 24px ${alpha(theme.palette.primary.main, 0.12)}`,
+    border: `1px solid ${alpha(theme.palette.primary.main, 0.3)}`,
+    boxShadow: `0 4px 20px ${alpha(theme.palette.primary.main, 0.08)}`,
   },
 }));
 
-// ==================== [신규] 백엔드 로직 (JS) ====================
+const ReportContainer = styled(Box)(({ theme }) => ({
+  backgroundColor: theme.palette.grey[50],
+  borderRadius: theme.spacing(2),
+  padding: theme.spacing(3),
+  border: `1px solid ${theme.palette.grey[200]}`,
+}));
 
-// 🔥 백엔드 _parse_comparison_scores 로직 (점수 계산을 위해 내부적으로 필요)
-const parseComparisonScores = (reportText) => {
-  if (!reportText) return { final_score: 0, converted_scores: {} };
+// ==================== Constants ====================
+const HIGH_RISK_THRESHOLD = 60;
+const WARNING_THRESHOLD = 30; 
 
-  const scores = {
-    "Core Thesis": 0, "Problem Framing": 0, "Claim": 0,
-    "Reasoning": 0, "Flow Pattern": 0, "Conclusion Framing": 0,
-  };
-  
-  const keyMapping = [
-    { key: "Core Thesis", re: /Core Thesis.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]/i },
-    { key: "Problem Framing", re: /Problem Framing.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]/i },
-    { key: "Claim", re: /Claim.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]/i },
-    { key: "Reasoning", re: /Reasoning.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]/i },
-    { key: "Flow Pattern", re: /Flow Pattern.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]/i },
-    { key: "Conclusion Framing", re: /Conclusion Framing.*?(?:Similarity):\s*(?:\*\*)?\s*(\d)(?:\*\*)?\s*[–-]/i },
-  ];
-
-  try {
-    keyMapping.forEach(({ key, re }) => {
-      const match = reportText.match(re);
-      if (match && match[1]) {
-        scores[key] = parseInt(match[1], 10);
-      }
-    });
-
-    const converted_scores = {};
-    converted_scores["Core Thesis"] = Math.pow(Math.max(0, scores["Core Thesis"] - 8), 2) * 2;
-    converted_scores["Claim"] = Math.pow(Math.max(0, scores["Claim"] - 8), 2) * 2;
-    converted_scores["Reasoning"] = Math.floor(Math.pow(Math.max(0, scores["Reasoning"] - 5), 1.5) * 2);
-    converted_scores["Flow Pattern"] = Math.pow(Math.max(0, scores["Flow Pattern"] - 6), 2) * 2;
-    converted_scores["Problem Framing"] = Math.max(0, scores["Problem Framing"] - 5) * 2;
-    converted_scores["Conclusion Framing"] = Math.max(0, scores["Conclusion Framing"] - 5) * 2;
-
-    const final_score = Object.values(converted_scores).reduce((a, b) => a + b, 0);
-
-    return { final_score, converted_scores };
-    
-  } catch (e) {
-    console.error("점수 파싱 중 에러:", e);
-    return { final_score: 0, converted_scores: {} };
-  }
+// 평가 항목 한글 매핑 (점수 대시보드용)
+const SCORE_LABEL_MAP = {
+  'Problem Framing': '문제 제기',
+  'Claim': '핵심 주장',
+  'Flow Pattern': '논리 전개',
+  'Reasoning': '구체적 근거',
+  'Conclusion Framing': '결론 정리',
+  'Core Thesis': '주요 키워드'
 };
 
-const HIGH_RISK_THRESHOLD = 60;
-const WARNING_THRESHOLD = 30; // <-- 점수 계산에는 필요
+// 리포트 본문 텍스트 한글 변환 맵
+const REPORT_TEXT_REPLACEMENTS = {
+  'Overall Comment': '종합 의견',
+  'Detailed Scoring': '상세 평가 항목',
+  'Core Thesis Similarity': '주요 키워드 유사도',
+  'Problem Framing Similarity': '문제 제기 유사도',
+  'Claim Similarity': '핵심 주장 유사도',
+  'Reasoning Similarity': '구체적 근거 유사도',
+  'Flow Pattern Similarity': '논리 전개 유사도',
+  'Conclusion Framing Similarity': '결론 정리 유사도'
+};
 
 // ==================== Helper Components ====================
 
-// [수정] RiskChip (점수 숨기기)
 const RiskChip = ({ score }) => {
   const numeric = Number(score) || 0;
   
@@ -108,23 +94,23 @@ const RiskChip = ({ score }) => {
     if (numeric >= HIGH_RISK_THRESHOLD) return { 
       color: 'error', 
       icon: <ErrorIcon fontSize="small" />,
-      label: '고위험',
-      bgcolor: (t) => alpha(t.palette.error.main, 0.12),
-      textColor: 'error.main'
+      label: `고위험 (${numeric})`,
+      bgcolor: (t) => alpha(t.palette.error.main, 0.08),
+      textColor: 'error.dark'
     };
     if (numeric >= WARNING_THRESHOLD) return { 
       color: 'warning', 
       icon: <WarningIcon fontSize="small" />,
-      label: '주의',
-      bgcolor: (t) => alpha(t.palette.warning.main, 0.12),
-      textColor: 'warning.main'
+      label: `주의 (${numeric})`,
+      bgcolor: (t) => alpha(t.palette.warning.main, 0.08),
+      textColor: 'warning.dark'
     };
     return { 
       color: 'success', 
       icon: <CheckCircleIcon fontSize="small" />,
-      label: '안전',
-      bgcolor: (t) => alpha(t.palette.success.main, 0.12),
-      textColor: 'success.main'
+      label: `안전 (${numeric})`,
+      bgcolor: (t) => alpha(t.palette.success.main, 0.08),
+      textColor: 'success.dark'
     };
   };
 
@@ -139,14 +125,14 @@ const RiskChip = ({ score }) => {
         bgcolor: config.bgcolor,
         color: config.textColor,
         border: 'none',
-        px: 1,
+        borderRadius: '8px',
+        px: 0.5,
       }}
       size="medium"
     />
   );
 };
 
-// ... (copyToClipboard, formatReportText 헬퍼 함수는 변경 없음) ...
 const copyToClipboard = (text) => {
   try {
     navigator.clipboard.writeText(text);
@@ -160,41 +146,75 @@ const copyToClipboard = (text) => {
   }
 };
 
+// 텍스트 포맷팅 로직 (한글 변환 및 스타일링)
 const formatReportText = (text) => {
   if (!text) return null;
   return text.split('\n').map((line, index) => {
-    const trimmed = line.trim();
-    if (/^-\s\*\*/.test(line) || /^\*\*/.test(trimmed)) {
+    let processedLine = line;
+
+    // 영문 키워드를 한글로 치환
+    Object.entries(REPORT_TEXT_REPLACEMENTS).forEach(([eng, kor]) => {
+      if (processedLine.includes(eng)) {
+        processedLine = processedLine.replace(eng, kor);
+      }
+    });
+
+    const trimmed = processedLine.trim();
+    
+    // 헤더 (Bold 처리된 항목)
+    if (/^-\s\*\*/.test(processedLine) || /^\*\*/.test(trimmed)) {
       return (
-        <Typography key={index} variant="body2" sx={{ mb: 1.5, fontWeight: 700, color: 'primary.main' }}>
-          {trimmed.replace(/\*\*/g, '')}
+        <Typography 
+          key={index} 
+          variant="subtitle2" 
+          sx={{ 
+            mt: 2, 
+            mb: 0.5, 
+            fontWeight: 800, 
+            color: 'text.primary',
+            letterSpacing: '-0.01em'
+          }}
+        >
+          {trimmed.replace(/\*\*/g, '').replace(/^-\s/, '')}
         </Typography>
       );
     }
-    if (/^-\s/.test(line) || /^>\s/.test(line)) {
+    
+    // 인용구 또는 리스트 상세
+    if (/^-\s/.test(processedLine) || /^>\s/.test(processedLine)) {
       return (
         <Typography 
           key={index} 
           variant="body2" 
           sx={{ 
-            mb: 1.2, 
-            pl: 2,
-            borderLeft: (t) => `3px solid ${alpha(t.palette.primary.main, 0.2)}`,
+            mb: 0.5, 
+            pl: 1.5,
+            borderLeft: (t) => `2px solid ${t.palette.grey[300]}`,
             color: 'text.secondary',
             whiteSpace: 'pre-wrap',
+            fontSize: '0.9rem'
           }}
         >
-          {trimmed}
+          {trimmed.replace(/^>\s/, '')}
         </Typography>
       );
     }
+
+    // 일반 텍스트
+    if (trimmed === "") return <Box key={index} sx={{ height: 8 }} />; 
+
     return (
       <Typography 
         key={index} 
         variant="body2" 
-        sx={{ mb: 1, whiteSpace: 'pre-wrap', lineHeight: 1.7 }}
+        sx={{ 
+          mb: 0.5, 
+          whiteSpace: 'pre-wrap', 
+          lineHeight: 1.7,
+          color: 'text.secondary'
+        }}
       >
-        {line}
+        {processedLine}
       </Typography>
     );
   });
@@ -215,187 +235,211 @@ function SimilarityAnalysis({ data }) {
     );
   }
 
-  const { 
-    similarity_details = [],
-  } = data;
-
-  // 🔥 프론트에서 점수 계산 및 필터링 (로직은 동일하게 유지)
-  const displayCandidates = similarity_details
-    .map(item => {
-      const { final_score, converted_scores } = parseComparisonScores(item.llm_comparison_report);
-      return {
-        ...item,
-        total_score: final_score,
-        itemized_scores: converted_scores,
-      };
-    })
-    .filter(item => item.total_score >= WARNING_THRESHOLD) // 30점 이상 (계산에는 필요)
-    .sort((a, b) => b.total_score - a.total_score);
-
-  console.log('[SimilarityAnalysis] 📊 원본 데이터:', similarity_details.length, '건');
-  console.log(`[SimilarityAnalysis] 🔍 ${WARNING_THRESHOLD}점 이상 필터링:`, displayCandidates.length, '건');
+  const { similarity_details = [] } = data;
+  const displayCandidates = [...similarity_details].sort((a, b) => (b.plagiarism_score || 0) - (a.plagiarism_score || 0));
 
   return (
     <Box>
-      {/* 헤더 */}
+      {/* Header Section */}
       <Fade in timeout={600}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
           <Avatar 
+            variant="rounded"
             sx={{ 
-              bgcolor: (t) => t.palette.warning.main,
-              width: 56, 
-              height: 56,
-              boxShadow: (t) => `0 4px 12px ${alpha(t.palette.warning.main, 0.3)}`
+              bgcolor: (t) => alpha(t.palette.warning.main, 0.1),
+              color: 'warning.main',
+              width: 48, 
+              height: 48,
             }}
           >
-            <CompareArrowsIcon sx={{ fontSize: 32 }} />
+            <CompareArrowsIcon />
           </Avatar>
           <Box>
-            <Typography variant="h4" sx={{ fontWeight: 800 }}>표절 의심 문서</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 800, letterSpacing: '-0.02em' }}>
+              표절 의심 문서
+            </Typography>
             <Typography variant="body2" color="text.secondary">
-              LLM 정밀 비교 결과
+              LLM 정밀 비교 분석 리포트
             </Typography>
           </Box>
         </Box>
       </Fade>
 
-      {/* 유사도 분석 결과 */}
+      {/* Comparison List */}
       <Fade in timeout={800}>
-        <Box>
+        <Stack spacing={2}>
           {displayCandidates && displayCandidates.length > 0 ? (
-            <Stack spacing={2}>
-              {displayCandidates.map((item, index) => {
-                const score = item.total_score || 0; 
+            displayCandidates.map((item, index) => {
+              const score = item.plagiarism_score || 0; 
 
-                return (
-                  <StyledAccordion key={item.candidate_id || index}>
-                    <AccordionSummary 
-                      expandIcon={<ExpandMoreIcon />}
-                      sx={{ 
-                        px: 3,
-                        '&:hover': {
-                          bgcolor: (t) => alpha(t.palette.primary.main, 0.02)
-                        }
-                      }}
-                    >
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%', justifyContent: 'space-between' }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                          <RiskChip score={score} />
-                          <Box>
-                            <Typography sx={{ fontWeight: 700, fontSize: '1.05rem' }}>
-                              {item.candidate_filename || `비교 문서 #${index + 1}`}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              ID: {item.candidate_id}
-                            </Typography>
-                          </Box>
+              return (
+                <StyledAccordion key={item.candidate_id || index}>
+                  {/* Accordion Header */}
+                  <AccordionSummary 
+                    expandIcon={<ExpandMoreIcon sx={{ color: 'text.secondary' }} />}
+                    sx={{ 
+                      px: 2.5, 
+                      py: 0.5,
+                      '& .MuiAccordionSummary-content': { margin: '12px 0' }
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', pr: 2 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                        <RiskChip score={score} />
+                        <Box>
+                          <Typography sx={{ fontWeight: 600, fontSize: '0.95rem' }}>
+                            {item.candidate_filename || `문서 #${index + 1}`}
+                          </Typography>
+                          <Typography variant="caption" color="text.tertiary" sx={{ fontFamily: 'monospace' }}>
+                            ID: {item.candidate_id?.substring(0, 8)}...
+                          </Typography>
                         </Box>
                       </Box>
-                    </AccordionSummary>
+                    </Box>
+                  </AccordionSummary>
 
-                    <AccordionDetails sx={{ bgcolor: (t) => alpha(t.palette.secondary.main, 0.03), px: 3, py: 2.5 }}>
-                      
-                      {/* LLM 비교 리포트 (유지) */}
-                      {item.llm_comparison_report && (
-                        <>
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main' }}>
-                              🔍 LLM 정밀 비교 리포트
-                            </Typography>
-                            <Tooltip title="리포트 복사" arrow>
+                  {/* Accordion Content */}
+                  <AccordionDetails sx={{ p: 3, pt: 0 }}>
+                    {item.llm_comparison_report && (
+                      <ReportContainer>
+                        {/* 1. Report Header & Stats */}
+                        <Box sx={{ mb: 3 }}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <AssessmentIcon fontSize="small" color="action" />
+                              <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                                세부 유사도 분석
+                              </Typography>
+                            </Box>
+                            <Tooltip title="전체 리포트 복사" arrow>
                               <IconButton 
                                 size="small" 
                                 onClick={() => copyToClipboard(item.llm_comparison_report)}
-                                sx={{ 
-                                  bgcolor: (t) => alpha(t.palette.primary.main, 0.08),
-                                  '&:hover': { bgcolor: (t) => alpha(t.palette.primary.main, 0.15) }
-                                }}
+                                sx={{ color: 'text.secondary' }}
                               >
                                 <ContentCopyIcon fontSize="small" />
                               </IconButton>
                             </Tooltip>
                           </Box>
-                          <Box sx={{ 
-                            p: 2, 
-                            borderRadius: 2, 
-                            bgcolor: 'background.paper',
-                            border: (t) => `1px solid ${t.palette.divider}`
-                          }}>
-                            {formatReportText(item.llm_comparison_report)}
-                          </Box>
-                        </>
-                      )}
-                    </AccordionDetails>
-                  </StyledAccordion>
-                );
-              })}
-            </Stack>
+
+                          {/* Score Grid Dashboard (Korean Labels) */}
+                          {item.scores_detail && (
+                            <Grid container spacing={2} sx={{ mb: 1 }}>
+                              {Object.entries(item.scores_detail).map(([key, val]) => {
+                                const rawLabel = key.replace('Similarity', '').trim();
+                                // 매핑된 한글 라벨 사용
+                                const label = SCORE_LABEL_MAP[rawLabel] || rawLabel;
+                                
+                                return (
+                                  <Grid item xs={6} sm={4} md={2} key={key}>
+                                    <Box sx={{ 
+                                      p: 1.5, 
+                                      borderRadius: 2, 
+                                      bgcolor: 'white',
+                                      border: (t) => `1px solid ${t.palette.divider}`,
+                                      textAlign: 'center',
+                                      height: '100%',
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      justifyContent: 'center'
+                                    }}>
+                                      <Typography variant="caption" display="block" color="text.secondary" sx={{ mb: 0.5, fontSize: '0.75rem', fontWeight: 500 }}>
+                                        {label}
+                                      </Typography>
+                                      <Typography variant="h6" sx={{ fontWeight: 700, color: val > 5 ? 'warning.main' : 'text.primary' }}>
+                                        {val}<Typography component="span" variant="caption" color="text.secondary">/10</Typography>
+                                      </Typography>
+                                    </Box>
+                                  </Grid>
+                                );
+                              })}
+                            </Grid>
+                          )}
+                        </Box>
+
+                        <Divider sx={{ mb: 3, borderStyle: 'dashed' }} />
+
+                        {/* 2. Text Content */}
+                        <Box>
+                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                              <DescriptionIcon fontSize="small" color="action" />
+                              <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                                LLM 정밀 코멘트
+                              </Typography>
+                           </Box>
+                           <Box sx={{ pl: 0.5 }}>
+                             {formatReportText(item.llm_comparison_report)}
+                           </Box>
+                        </Box>
+                      </ReportContainer>
+                    )}
+                  </AccordionDetails>
+                </StyledAccordion>
+              );
+            })
           ) : (
-            // [수정] 표절 의심 없음 메시지
-            <GlassCard elevation={0}>
-              <Stack spacing={2} alignItems="center" sx={{ py: 3 }}>
-                <Avatar
-                  sx={{
-                    width: 80,
-                    height: 80,
-                    bgcolor: (t) => alpha(t.palette.success.main, 0.12),
-                    color: 'success.main'
-                  }}
-                >
-                  <CheckCircleIcon sx={{ fontSize: 48 }} />
-                </Avatar>
-                <Typography variant="h6" color="text.primary" fontWeight={700}>
-                  표절 의심 문서가 발견되지 않았습니다
-                </Typography>
-                {/* 🔥 수정: 점수 기준 문구 삭제 */}
-              </Stack>
+            <GlassCard elevation={0} sx={{ textAlign: 'center', py: 4 }}>
+              <Avatar
+                sx={{
+                  width: 64, height: 64,
+                  bgcolor: (t) => alpha(t.palette.success.main, 0.1),
+                  color: 'success.main',
+                  margin: '0 auto',
+                  mb: 2
+                }}
+              >
+                <CheckCircleIcon sx={{ fontSize: 32 }} />
+              </Avatar>
+              <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+                발견된 유사 문서가 없습니다
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                제출된 문서는 비교군과 유사성이 낮은 것으로 판단됩니다.
+              </Typography>
             </GlassCard>
           )}
-        </Box>
+        </Stack>
       </Fade>
 
-      {/* 디버깅용 JSON */}
+      {/* Debug Section - 복구 및 스타일 개선 */}
       <Box sx={{ mt: 4 }}>
         <Button 
           variant="outlined" 
           size="small"
+          startIcon={<CodeIcon />}
           onClick={() => setDebugOpen(!debugOpen)}
           sx={{ 
-            borderColor: (t) => alpha(t.palette.grey[500], 0.3),
             color: 'text.secondary',
-            textTransform: 'none'
+            borderColor: (t) => alpha(t.palette.grey[400], 0.5),
+            fontSize: '0.8rem',
+            textTransform: 'none',
+            '&:hover': {
+               borderColor: 'primary.main',
+               color: 'primary.main',
+               backgroundColor: (t) => alpha(t.palette.primary.main, 0.05)
+            }
           }}
         >
-          {debugOpen ? '원본 JSON 숨기기' : '(개발자용) 원본 JSON 보기'}
+          {debugOpen ? '원본 데이터(JSON) 닫기' : '개발자용 데이터(JSON) 보기'}
         </Button>
+        
         <Collapse in={debugOpen}>
           <Paper 
+            elevation={0}
             sx={{ 
-              mt: 2, 
-              p: 2, 
-              bgcolor: (t) => alpha(t.palette.grey[500], 0.05),
+              mt: 2, p: 2, 
+              bgcolor: (t) => alpha(t.palette.common.black, 0.03),
+              borderRadius: 2,
               border: (t) => `1px solid ${t.palette.divider}`,
-              borderRadius: 2
+              textAlign: 'left'
             }}
           >
-            <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-              {/* 🔥 수정: 점수 기준 문구 삭제 */}
-              📌 전체 비교 결과 (similarity_details): {similarity_details.length}건 | 주의 기준 이상: {displayCandidates.length}건
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontWeight: 600 }}>
+               RAW JSON DATA
             </Typography>
-            <Box 
-              component="pre" 
-              sx={{ 
-                whiteSpace: 'pre-wrap', 
-                wordWrap: 'break-word',
-                fontFamily: 'monospace',
-                fontSize: '11px',
-                maxHeight: 360,
-                overflow: 'auto',
-                margin: 0
-              }}
-            >
+            <pre style={{ margin: 0, fontSize: '11px', fontFamily: 'Consolas, monospace', overflow: 'auto', maxHeight: 300 }}>
               {JSON.stringify(data, null, 2)}
-            </Box>
+            </pre>
           </Paper>
         </Collapse>
       </Box>

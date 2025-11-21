@@ -38,13 +38,6 @@ const summaryFieldsConfig = [
     color: '#667eea'
   },
   {
-    key: 'Core_Thesis',
-    label: '핵심 주장',
-    icon: FlagIcon,
-    description: '글의 가장 중요한 주장',
-    color: '#f5576c'
-  },
-  {
     key: 'Problem_Framing',
     label: '문제 제기',
     icon: HelpOutlineIcon,
@@ -52,18 +45,32 @@ const summaryFieldsConfig = [
     color: '#fa8231'
   },
   {
-    key: 'Claim',
-    label: '세부 주장',
+    key: 'Core_Thesis',
+    label: '핵심 주장',
+    icon: FlagIcon,
+    description: '글의 가장 중요한 주장',
+    color: '#f5576c'
+  },
+  {
+    key: 'Reasoning_Logic',
+    label: '논리 전개',
+    icon: SearchIcon,
+    description: '주장을 뒷받침하는 논리적 전개',
+    color: '#2196f3'
+  },
+  {
+    key: 'Specific_Evidence',
+    label: '구체적 근거',
     icon: LightbulbIcon,
-    description: '핵심 주장을 뒷받침하는 세부 논점',
+    description: '주장을 뒷받침하는 구체적 근거',
     color: '#4caf50'
   },
   {
-    key: 'Reasoning',
-    label: '논거',
-    icon: SearchIcon,
-    description: '주장을 뒷받침하는 근거와 논리',
-    color: '#2196f3'
+    key: 'Conclusion_Framing',
+    label: '결론 정리',
+    icon: FlagIcon,
+    description: '글의 결론 및 마무리',
+    color: '#fbc02d'
   },
   {
     key: 'key_concepts',
