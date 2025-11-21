@@ -383,7 +383,7 @@ def scan_logical_integrity(text):
 
 def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
     """[기능 3] 흐름 단절 검사 (최적화 + 가독성 향상 적용)"""
-    start_time = time.time()
+    start_time = time()
     print("🌊 [Disconnect] (Naver) 시작.")
     
     if not flow_pattern_json or 'nodes' not in flow_pattern_json or 'edges' not in flow_pattern_json:
@@ -393,9 +393,9 @@ def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
     edges = flow_pattern_json['edges']
     
     # 1. 문장 분리
-    split_start = time.time()
+    split_start = time()
     raw_sentences = [s.strip() for s in re.split(r'[.?!]\s+', raw_text) if len(s.strip()) > 10]
-    print(f"   [Debug] 문장 분리 완료 ({len(raw_sentences)}문장). 소요: {time.time() - split_start:.3f}초")
+    print(f"   [Debug] 문장 분리 완료 ({len(raw_sentences)}문장). 소요: {time() - split_start:.3f}초")
     
     edges_context = []
     snippets_context = {}
@@ -403,16 +403,16 @@ def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
     # ------------------------------------------------------------------
     # [최적화] 본문 임베딩 Pre-calculation
     # ------------------------------------------------------------------
-    embed_start = time.time()
+    embed_start = time()
     if embedding_model and raw_sentences:
         doc_embeddings = embedding_model.encode(raw_sentences)
-        print(f"   [Debug] 본문 전체 임베딩 완료. 소요: {time.time() - embed_start:.3f}초")
+        print(f"   [Debug] 본문 전체 임베딩 완료. 소요: {time() - embed_start:.3f}초")
     else:
         doc_embeddings = None
         print("   [Debug] 임베딩 모델 없음. 스킵.")
 
     # 2. 증거 문장 추출 (Retrieval)
-    retrieval_start = time.time()
+    retrieval_start = time()
     
     for idx, edge in enumerate(edges):
         parent_id, child_id = edge
@@ -464,7 +464,7 @@ def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
             "child_snippet": c_rep
         }
 
-    print(f"   [Debug] 스니펫 추출 완료. 엣지 {len(edges)}개 처리 소요: {time.time() - retrieval_start:.3f}초")
+    print(f"   [Debug] 스니펫 추출 완료. 엣지 {len(edges)}개 처리 소요: {time() - retrieval_start:.3f}초")
 
     if not edges_context: return []
 
@@ -475,13 +475,13 @@ def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
     [Text Snippets] {json.dumps(snippets_context, ensure_ascii=False)}
     """
 
-    llm_start = time.time()
+    llm_start = time()
     print(f"   [Debug] LLM 호출 시작... (데이터 크기: {len(prompt_content)} chars)")
     
     # 네이버 API 호출
     weak_links_result = _call_llm_json(prompt_content)
     
-    print(f"   [Debug] LLM 응답 수신 완료. 소요: {time.time() - llm_start:.3f}초")
+    print(f"   [Debug] LLM 응답 수신 완료. 소요: {time() - llm_start:.3f}초")
 
     # 필터링 (Strong 제외)
     filtered_result = []
@@ -491,7 +491,7 @@ def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
             if item.get('issue_type') in ['Weak', 'Bridge Needed'] 
         ]
 
-    print(f"✅ [Disconnect] (Naver) 최종 완료. 총 소요 시간: {time.time() - start_time:.3f}초")
+    print(f"✅ [Disconnect] (Naver) 최종 완료. 총 소요 시간: {time() - start_time:.3f}초")
     return filtered_result
 # --------------------------------------------------------------------------------------
 # --- 4. 메인 진입 ---
