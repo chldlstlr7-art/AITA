@@ -305,8 +305,8 @@ if __name__ == "__main__":
     else: print("❌ FAIL")
 
     # (2) 데이터 존재 확인
-    print(f"2. Neuron Map: {'✅ 있음' if final_data.get('neuron_map') else '❌ 없음'}")
-    print(f"3. Integrity:  {'✅ 있음' if final_data.get('integrity_issues') is not None else '❌ 없음'}")
-    print(f"4. Disconnect: {'✅ 있음' if final_data.get('flow_disconnects') is not None else '❌ 없음'}")
+    print(f"2. Neuron Map: { final_data.get('neuron_map')} ")
+    print(f"3. Integrity:  {final_data.get('integrity_issues')}")
+    print(f"4. Disconnect: {final_data.get('flow_disconnects')}")
     
     print(f"\n⏱️ 총 소요 시간: {end_time - start_time:.2f}초")

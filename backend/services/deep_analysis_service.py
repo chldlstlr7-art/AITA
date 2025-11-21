@@ -119,7 +119,7 @@ def _call_llm_json(prompt_text):
         except:
             pass
             
-        print(f"[JSON Parsing Failed] Content: {content_text[:200]}...")
+        print(f"[JSON Parsing Failed] Content: {content_text[:]}...")
         return None
 
     except Exception as e:
@@ -211,7 +211,7 @@ def analyze_logic_neuron_map(text, key_concepts_str, core_thesis):
             # --- Zone 판별 및 엣지 생성 ---
             
             # Case 1: Zone C (창의적/억지 연결 의심) -> 배치 리스트에 추가
-            if semantic_score < 0.2 and physical_score >= 0.5:
+            if semantic_score < 0.4 and physical_score >= 0.5:
                 edges.append({
                     "source": c1, "target": c2, 
                     "weight": round(semantic_score, 2),
@@ -399,6 +399,7 @@ def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
     
     edges_context = []
     snippets_context = {}
+    node_label_map = {}
 
     # ------------------------------------------------------------------
     # [최적화] 본문 임베딩 Pre-calculation
@@ -421,13 +422,17 @@ def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
         parent_full_text = nodes.get(parent_id, "")
         child_full_text = nodes.get(child_id, "")
         
-        # [수정] 대괄호 [] 안의 카테고리 명 추출 (예: "문제 제기", "핵심 주장")
-        # 정규식: 문자열 시작 부분의 [ ... ] 패턴을 찾음
+        # 정규식으로 대괄호 [...] 내용 추출
         p_match = re.search(r'\[(.*?)\]', parent_full_text)
         c_match = re.search(r'\[(.*?)\]', child_full_text)
         
-        p_label = p_match.group(1) if p_match else parent_id
-        c_label = c_match.group(1) if c_match else child_id
+        # 매칭되면 '[이름]' 포맷, 없으면 ID 그대로 사용
+        p_label_text = f"[{p_match.group(1)}]" if p_match else parent_id
+        c_label_text = f"[{c_match.group(1)}]" if c_match else child_id
+        
+        # 딕셔너리에 저장 (나중에 치환용)
+        node_label_map[parent_id] = p_label_text
+        node_label_map[child_id] = c_label_text
         
         # 요약 내용 추출 (마지막 줄)
         parent_summary = parent_full_text.split('\n')[-1].strip()
@@ -454,7 +459,7 @@ def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
         
         # [핵심 수정] Edge Key를 가독성 있게 변경
         # 예: "[문제 제기] P1 -> [핵심 주장] T1"
-        edge_key = f"[{p_label}] {parent_id} -> [{c_label}] {child_id}"
+        edge_key = f"{p_label_text} ({parent_id}) -> {c_label_text} ({child_id})"
         
         edges_context.append(edge_key)
         snippets_context[edge_key] = {
@@ -484,15 +489,26 @@ def check_flow_disconnects_with_llm(flow_pattern_json, raw_text):
     print(f"   [Debug] LLM 응답 수신 완료. 소요: {time() - llm_start:.3f}초")
 
     # 필터링 (Strong 제외)
-    filtered_result = []
+    final_result = []
     if weak_links_result:
-        filtered_result = [
-            item for item in weak_links_result 
-            if item.get('issue_type') in ['Weak', 'Bridge Needed'] 
-        ]
+        for item in weak_links_result:
+            # Weak나 Bridge Needed만 필터링
+            if item.get('issue_type') not in ['Weak', 'Bridge Needed']:
+                continue
+
+            # 여기서 ID를 라벨로 교체합니다.
+            pid = item.get('parent_id')
+            cid = item.get('child_id')
+            
+            # 기존 'parent_id' 값을 '[문제 제기]' 같은 이름으로 덮어쓰기
+            # (안전장치: 맵에 없으면 원래 ID 사용)
+            item['parent_id'] = node_label_map.get(pid, pid)
+            item['child_id'] = node_label_map.get(cid, cid)
+            
+            final_result.append(item)
 
     print(f"✅ [Disconnect] (Naver) 최종 완료. 총 소요 시간: {time() - start_time:.3f}초")
-    return filtered_result
+    return final_result
 # --------------------------------------------------------------------------------------
 # --- 4. 메인 진입 ---
 # --------------------------------------------------------------------------------------
