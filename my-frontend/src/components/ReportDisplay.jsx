@@ -35,49 +35,49 @@ const summaryFieldsConfig = [
     label: '과제 유형',
     icon: AssignmentIcon,
     description: '제출된 문서의 분류',
-    color: '#667eea'
+    color: 'primary.main'
   },
   {
     key: 'Problem_Framing',
     label: '문제 제기',
     icon: HelpOutlineIcon,
     description: '해결하려는 문제 정의',
-    color: '#fa8231'
+    color: 'primary.main'
   },
   {
     key: 'Core_Thesis',
     label: '핵심 주장',
     icon: FlagIcon,
     description: '글의 가장 중요한 주장',
-    color: '#f5576c'
+    color: 'primary.main'
   },
   {
     key: 'Reasoning_Logic',
     label: '논리 전개',
     icon: SearchIcon,
     description: '주장을 뒷받침하는 논리적 전개',
-    color: '#2196f3'
+    color: 'primary.main'
   },
   {
     key: 'Specific_Evidence',
     label: '구체적 근거',
     icon: LightbulbIcon,
     description: '주장을 뒷받침하는 구체적 근거',
-    color: '#4caf50'
+    color: 'primary.main'
   },
   {
     key: 'Conclusion_Framing',
     label: '결론 정리',
     icon: FlagIcon,
     description: '글의 결론 및 마무리',
-    color: '#fbc02d'
+    color: 'primary.main'
   },
   {
     key: 'key_concepts',
     label: '주요 키워드',
     icon: LocalOfferIcon,
     description: '문서의 핵심 개념',
-    color: '#9c27b0'
+    color: 'primary.main'
   }
 ];
 
@@ -91,28 +91,31 @@ const RootCard = styled(Card)(({ theme }) => ({
   border: `1px solid ${alpha(theme.palette.primary.main, 0.08)}`,
 }));
 
-const SectionCard = styled(Paper)(({ theme, fieldcolor }) => ({
-  padding: theme.spacing(3),
-  borderRadius: theme.spacing(2),
-  background: theme.palette.background.paper,
-  border: `2px solid ${alpha(fieldcolor || theme.palette.primary.main, 0.15)}`,
-  transition: 'all 0.3s ease',
-  position: 'relative',
-  overflow: 'hidden',
-  '&:before': {
-    content: '""',
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '4px',
-    background: `linear-gradient(90deg, ${fieldcolor || theme.palette.primary.main}, ${alpha(fieldcolor || theme.palette.primary.main, 0.5)})`,
-  },
-  '&:hover': {
-    boxShadow: `0 8px 24px ${alpha(fieldcolor || theme.palette.primary.main, 0.2)}`,
-    transform: 'translateY(-2px)',
-  },
-}));
+const SectionCard = styled(Paper)(({ theme }) => {
+  const color = theme.palette.primary.main;
+  return {
+    padding: theme.spacing(3),
+    borderRadius: theme.spacing(2),
+    background: theme.palette.background.paper,
+    border: `2px solid ${alpha(color, 0.15)}`,
+    transition: 'all 0.3s ease',
+    position: 'relative',
+    overflow: 'hidden',
+    '&:before': {
+      content: '""',
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: '4px',
+      background: color,
+    },
+    '&:hover': {
+      boxShadow: `0 8px 24px ${alpha(color, 0.13)}`,
+      transform: 'translateY(-2px)',
+    },
+  };
+});
 
 const GlassCard = styled(Paper)(({ theme }) => ({
   padding: theme.spacing(3),
@@ -201,23 +204,23 @@ function ReportDisplay({ data, userAssignmentType, reportId }) {
                   <SectionCard key={field.key} elevation={0} fieldcolor={field.color}>
                     <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, mb: 2 }}>
                       <Avatar 
-                        sx={{ 
-                          bgcolor: alpha(field.color, 0.1),
-                          color: field.color,
+                        sx={(theme) => ({
+                          bgcolor: alpha(theme.palette.primary.main, 0.08),
+                          color: theme.palette.primary.main,
                           width: 40,
                           height: 40
-                        }}
+                        })}
                       >
                         <IconComponent fontSize="small" />
                       </Avatar>
                       <Box sx={{ flex: 1 }}>
                         <Typography 
                           variant="h6" 
-                          sx={{ 
+                          sx={(theme) => ({
                             fontWeight: 700,
-                            color: field.color,
+                            color: theme.palette.primary.main,
                             mb: 0.5
-                          }}
+                          })}
                         >
                           {field.label}
                         </Typography>

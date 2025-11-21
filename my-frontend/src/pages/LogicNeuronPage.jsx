@@ -1,4 +1,74 @@
-import React, { useCallback, useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
+// Edge Issue Sidebar (좌측)
+const EdgeIssueSidebar = ({ edgeIssues, onSelect, selectedId, nodeMap, isAnalyzing }) => (
+  <Box sx={{
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    height: '100vh',
+    width: 340,
+    bgcolor: 'background.paper',
+    borderRight: '1px solid',
+    borderColor: 'divider',
+    zIndex: 120,
+    p: 2,
+    overflowY: 'auto',
+    boxShadow: 3,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2
+  }}>
+    <Typography variant="h6" sx={{ fontWeight: 800, mb: 1, color: 'primary.main' }}>
+      연결 이슈/제안 목록
+    </Typography>
+    {isAnalyzing ? (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 1 }}>
+        <CircularProgress size={20} />
+        <Typography variant="body2" color="text.secondary">분석 중...</Typography>
+      </Box>
+    ) : edgeIssues == null ? (
+      <Typography variant="body2" color="text.secondary">이슈가 감지된 연결이 없습니다.</Typography>
+    ) : edgeIssues.length === 0 ? (
+      <Typography variant="body2" color="text.secondary">이슈가 감지된 연결이 없습니다.</Typography>
+    ) : (
+      edgeIssues.map((e, idx) => {
+        const sourceLabel = nodeMap?.[e.source] || e.source;
+        const targetLabel = nodeMap?.[e.target] || e.target;
+        return (
+        <Paper
+          key={e.id}
+          elevation={selectedId === e.id ? 6 : 1}
+          sx={{
+            p: 2,
+            borderRadius: 2,
+            border: selectedId === e.id ? '2px solid' : '1px solid',
+            borderColor: selectedId === e.id ? 'primary.main' : 'divider',
+            bgcolor: selectedId === e.id ? 'primary.lighter' : 'background.paper',
+            cursor: 'pointer',
+            mb: 1,
+            transition: 'all 0.2s',
+          }}
+          onClick={() => onSelect(e)}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+            {e.type === 'spark' && <Chip label="창의적 사고" size="small" color="secondary" />}
+            {e.type === 'check' && <Chip label="비약 의심" size="small" color="error" />}
+            {e.type === 'suggestion' && <Chip label="개념 연결 제안" size="small" color="primary" variant="outlined" />}
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'text.primary' }}>
+              {sourceLabel} → {targetLabel}
+            </Typography>
+          </Box>
+          {e.reason && (
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>{e.reason}</Typography>
+          )}
+          {e.suggestion && (
+            <Typography variant="body2" color="primary.main">💡 {e.suggestion}</Typography>
+          )}
+        </Paper>
+      )})
+    )}
+  </Box>
+);
 import ReactFlow, {
   useNodesState,
   useEdgesState,
@@ -9,7 +79,6 @@ import ReactFlow, {
   EdgeLabelRenderer,
   useReactFlow,
   ReactFlowProvider,
-  MarkerType,
   Panel
 } from 'reactflow';
 import 'reactflow/dist/style.css';
@@ -26,21 +95,15 @@ import {
   DialogContent, DialogActions, Button, Chip, 
   CircularProgress, Alert, Snackbar,
   Fade, LinearProgress, GlobalStyles,
-  List, ListItem, ListItemText, ListItemIcon, Divider, Skeleton,
-  Drawer, IconButton, Tooltip, useTheme
+  List, ListItem, ListItemText, Divider,
+  Drawer, IconButton, Tooltip, useTheme,
+  Accordion, AccordionSummary, AccordionDetails
 } from '@mui/material';
 import { styled, alpha } from '@mui/material/styles';
 
 // Icons
 import EmojiObjectsIcon from '@mui/icons-material/EmojiObjects'; 
 import CloseIcon from '@mui/icons-material/Close'; 
-import MenuOpenIcon from '@mui/icons-material/MenuOpen'; 
-import WarningAmberIcon from '@mui/icons-material/WarningAmber'; 
-import LinkOffIcon from '@mui/icons-material/LinkOff'; 
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
-import PsychologyIcon from '@mui/icons-material/Psychology';
-import DataObjectIcon from '@mui/icons-material/DataObject';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew';
 
@@ -128,7 +191,8 @@ const SparkEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, tar
 
 const GhostEdge = ({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, data }) => {
    const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
-   const [isHovered, setIsHovered] = useState(false);
+   // 외부에서 hovered prop을 받아 강조 효과를 제어
+   const isHovered = !!data?.hovered;
    
    const handleGhostClick = (evt) => {
      evt.stopPropagation();
@@ -137,8 +201,6 @@ const GhostEdge = ({ sourceX, sourceY, targetX, targetY, sourcePosition, targetP
 
    return (
      <g 
-        onMouseEnter={() => setIsHovered(true)} 
-        onMouseLeave={() => setIsHovered(false)}
         onClick={handleGhostClick}
         style={{ cursor: 'pointer' }}
      >
@@ -368,11 +430,12 @@ const useGraphLayout = (neuronMap, onEdgeClick) => {
     const simNodes = initialNodes.map(d => ({ ...d }));
     const simEdges = initialEdges.filter(e => !e.hidden).map(d => ({ ...d, source: d.source, target: d.target }));
 
+    // 노드 간 최소 거리 더 크게 (예: 160)
     const simulation = forceSimulation(simNodes)
-      .force("link", forceLink(simEdges).id(d => d.id).distance(300)) 
-      .force("charge", forceManyBody().strength(-3000)) 
+      .force("link", forceLink(simEdges).id(d => d.id).distance(d => Math.max(160, d.distance || 160))) // 더 멀리
+      .force("charge", forceManyBody().strength(-200)) // 반발력 거의 없음
       .force("center", forceCenter(0, 0))
-      .force("collide", forceCollide(100)); 
+      .force("collide", forceCollide(70));
 
     simulation.tick(300);
 
@@ -396,59 +459,119 @@ const useGraphLayout = (neuronMap, onEdgeClick) => {
 // -----------------------------------------------------------------------------
 
 // [화면 중앙 하단] Integrity Panel (문장 정합성 검사)
+const integrityTypeKoMap = {
+  Ambiguity: '모호한 표현',
+  Overgeneralization: '성급한 일반화',
+  Logical_Leap: '논리적 비약',
+  'Logical Leap': '논리적 비약',
+  Lack_of_Evidence: '구체적 증거 부재',
+  'Lack of Evidence': '구체적 증거 부재'
+};
+
 const IntegrityPanel = ({ integrity, status }) => {
   const theme = useTheme();
+  const safeIntegrity = Array.isArray(integrity) ? integrity : [];
+  const isLoading = (status === 'processing' || status === 'init') && integrity == null;
+  // 아코디언 확장 상태 관리
+  const [expanded, setExpanded] = React.useState(false);
+  const handleAccordionChange = (panel) => (event, isExpanded) => {
+    setExpanded(isExpanded ? panel : false);
+  };
 
-  // null이면 빈 배열로 처리
-  const safeIntegrity = integrity ?? [];
   return (
     <Paper elevation={0} sx={{ 
-        width: '100%', height: '100%', display: 'flex', flexDirection: 'column', 
-        bgcolor: '#fff', borderTop: '1px solid #eee', overflowY: 'auto'
+      width: '100%', height: '100%', display: 'flex', flexDirection: 'column', 
+      bgcolor: theme.palette.background.paper, borderTop: `2px solid ${theme.palette.primary.main}`, overflowY: 'auto'
     }}>
-      <Box sx={{ p: 2, borderBottom: '1px solid #f0f0f0', bgcolor:'#fafafa', display:'flex', alignItems:'center', gap:1, position: 'sticky', top: 0, zIndex: 5 }}>
-        <Typography variant="h6" sx={{fontWeight:800, color: '#37474f'}}>
+      <Box sx={{ p: 2, borderBottom: `2px solid ${theme.palette.primary.main}`, bgcolor: theme.palette.primary.main, display:'flex', alignItems:'center', gap:1, position: 'sticky', top: 0, zIndex: 5 }}>
+        <Typography variant="h6" sx={{fontWeight:800, color: theme.palette.primary.contrastText}}>
           문장 정합성 검사
         </Typography>
         {safeIntegrity.length > 0 && (
-          <Chip label={`${safeIntegrity.length}건 발견`} size="small" color="warning" sx={{fontWeight:'bold'}} />
+          <Chip label={`${safeIntegrity.length}건 발견`} size="small" sx={{fontWeight:'bold', bgcolor: theme.palette.primary.contrastText, color: theme.palette.primary.main}} />
         )}
       </Box>
-      <Box sx={{ p: 3 }}>
-        {(status === 'processing' || status === 'init') && integrity == null ? (
+      <Box sx={{ p: 2, pt: 3 }}>
+        {isLoading ? (
           <Box sx={{ display:'flex', alignItems:'center', gap: 2, p:1 }}>
-            <CircularProgress size={20} />
-            <Typography variant="body2" color="text.secondary">검사 중...</Typography>
+            <CircularProgress size={20} color="primary" />
+            <Typography variant="body2" color="primary.main">분석 중...</Typography>
+          </Box>
+        ) : integrity == null ? (
+          <Box sx={{ p: 2, bgcolor: alpha(theme.palette.primary.main, 0.07), borderRadius: 2, color: theme.palette.primary.main }}>
+            <Typography variant="body2" fontWeight="bold">분석 중...</Typography>
           </Box>
         ) : safeIntegrity.length === 0 ? (
-          <Box sx={{ p: 2, bgcolor: '#e8f5e9', borderRadius: 2, color: '#2e7d32' }}>
+          <Box sx={{ p: 2, bgcolor: alpha(theme.palette.primary.main, 0.07), borderRadius: 2, color: theme.palette.primary.main }}>
             <Typography variant="body2" fontWeight="bold">모든 문장이 논리적으로 완벽합니다!</Typography>
           </Box>
         ) : (
-          <Box sx={{ display:'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: 2 }}>
+          <Box>
+            {/* 아코디언 리스트로 이슈 정리 */}
             {safeIntegrity.map((issue, idx) => (
-              <Paper key={idx} elevation={0} sx={{ border:'1px solid #e0e0e0', borderRadius:3, overflow:'hidden', display:'flex', flexDirection:'column' }}>
-                <Box sx={{ bgcolor: alpha(theme.palette.warning.light, 0.1), p:1.5, px:2, borderBottom:`1px solid ${alpha(theme.palette.warning.main, 0.2)}` }}>
-                  <Typography variant="subtitle1" fontWeight="bold" color="warning.main">
-                    {issue.type}
-                  </Typography>
-                </Box>
-                <Box sx={{ p: 2.5, flex:1 }}>
+              <Accordion
+                key={idx}
+                expanded={expanded === idx}
+                onChange={handleAccordionChange(idx)}
+                disableGutters
+                sx={{
+                  mb: 1.5,
+                  borderRadius: 3,
+                  boxShadow: theme.shadows[expanded === idx ? 4 : 1],
+                  bgcolor: theme.palette.background.paper,
+                  '&:before': { display: 'none' },
+                  overflow: 'hidden',
+                  border: `1.5px solid ${expanded === idx ? theme.palette.primary.main : alpha(theme.palette.primary.main, 0.15)}`
+                }}
+              >
+                <AccordionSummary
+                  expandIcon={<ArrowBackIosNewIcon sx={{ transform: expanded === idx ? 'rotate(-90deg)' : 'rotate(90deg)', color: theme.palette.primary.main, fontSize: 20 }} />}
+                  aria-controls={`panel${idx}-content`}
+                  id={`panel${idx}-header`}
+                  sx={{
+                    bgcolor: expanded === idx ? alpha(theme.palette.primary.main, 0.08) : alpha(theme.palette.primary.main, 0.04),
+                    px: 2, py: 1.5, minHeight: 0,
+                    borderBottom: expanded === idx ? `2px solid ${theme.palette.primary.main}` : 'none',
+                    transition: 'background 0.2s',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                    {/* 문제 문장(quote) 메인 강조 */}
+                    {issue.quote && (
+                      <Typography variant="body1" sx={{ fontWeight: 700, color: theme.palette.primary.main, fontSize: '1.13rem', mb: 0.5, lineHeight: 1.6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontStyle: 'italic' }}>
+                        "{issue.quote}"
+                      </Typography>
+                    )}
+                    {/* 유형 및 이유 */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography variant="subtitle2" fontWeight="bold" color="primary.main" sx={{ fontSize: '1.01rem' }}>
+                        {integrityTypeKoMap[issue.type] || issue.type || '유형 미상'}
+                      </Typography>
+                      {issue.reason && (
+                        <Typography variant="body2" sx={{ color: theme.palette.primary.main, fontWeight: 500, opacity: 0.85 }}>
+                          {issue.reason}
+                        </Typography>
+                      )}
+                    </Box>
+                  </Box>
+                </AccordionSummary>
+                <AccordionDetails sx={{ px: 3, py: 2.5, bgcolor: alpha(theme.palette.primary.main, 0.03) }}>
                   {issue.quote && (
-                    <Box sx={{ mb:2, opacity:0.9, bgcolor: alpha(theme.palette.grey[100], 0.5), p:1.5, borderRadius:2 }}>
-                      <Typography variant="body1" sx={{ fontStyle:'italic', color: 'text.secondary', lineHeight:1.6 }}>
+                    <Box sx={{ mb:2, opacity:0.95, bgcolor: alpha(theme.palette.primary.main, 0.06), p:1.5, borderRadius:2 }}>
+                      <Typography variant="body1" sx={{ fontStyle:'italic', color: theme.palette.primary.main, lineHeight:1.6 }}>
                         "{issue.quote}"
                       </Typography>
                     </Box>
                   )}
-                  <Typography variant="caption" display="block" sx={{ fontWeight:'bold', color: 'primary.main', mb:0.5, fontSize:'0.9rem' }}>
-                    💡 AI 제안
+                  <Typography variant="caption" display="block" sx={{ fontWeight:'bold', color: theme.palette.primary.main, mb:0.5, fontSize:'0.9rem' }}>
+                     AITA의 제안
                   </Typography>
-                  <Typography variant="body1" sx={{ fontSize:'1rem', lineHeight:'1.5', color: 'text.primary' }}>
+                  <Typography variant="body1" sx={{ fontSize:'1rem', lineHeight:'1.5', color: theme.palette.text.primary }}>
                     {issue.socratic_suggestion || issue.description}
                   </Typography>
-                </Box>
-              </Paper>
+                </AccordionDetails>
+              </Accordion>
             ))}
           </Box>
         )}
@@ -526,9 +649,8 @@ function LogicFlowDiagram({ reportId }) {
 // [사이드바] Flow Check Panel - [수정] Theme 적용 및 Chip 제거
 const FlowCheckPanel = ({ flow, status }) => {
   const theme = useTheme();
-
-  // null이면 빈 배열로 처리
-  const safeFlow = flow ?? [];
+  const safeFlow = Array.isArray(flow) ? flow : [];
+  const isLoading = (status === 'processing' || status === 'init') && flow == null;
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', bgcolor: 'background.paper', overflowY: 'auto' }}>
       <Box sx={{ p: 2, borderBottom: `1px solid ${theme.palette.divider}`, bgcolor: alpha(theme.palette.secondary.main, 0.05), position:'sticky', top:0, zIndex:1 }}>
@@ -538,10 +660,14 @@ const FlowCheckPanel = ({ flow, status }) => {
       </Box>
 
       <Box sx={{ p: 2 }}>
-        {(status === 'processing' || status === 'init') && flow == null ? (
-          <Box sx={{ display:'flex', flexDirection:'column', gap: 1 }}>
-            <Skeleton variant="rectangular" height={60} sx={{borderRadius:2}} />
-            <Skeleton variant="text" width="60%" />
+        {isLoading ? (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, p:1 }}>
+            <CircularProgress size={20} />
+            <Typography variant="body2" color="text.secondary">분석 중...</Typography>
+          </Box>
+        ) : flow == null ? (
+          <Box sx={{ p: 2, bgcolor: '#fffde7', borderRadius: 2, color: '#fbc02d' }}>
+            <Typography variant="body2" fontWeight="bold">분석 중...</Typography>
           </Box>
         ) : safeFlow.length === 0 ? (
           <Box sx={{ p: 2, bgcolor: alpha(theme.palette.success.main, 0.1), borderRadius: 2, color: theme.palette.success.main }}>
@@ -551,7 +677,7 @@ const FlowCheckPanel = ({ flow, status }) => {
           <List dense disablePadding sx={{ bgcolor: 'background.paper' }}>
             {safeFlow.map((gap, idx) => (
               <React.Fragment key={idx}>
-                <ListItem alignItems="flex-start" sx={{ px: 0 }}>
+                <ListItem alignItems="flex-start" sx={{ px: 0, alignItems: 'flex-start' }}>
                   <ListItemText 
                     secondaryTypographyProps={{ component: 'div' }} 
                     primary={null}
@@ -559,17 +685,30 @@ const FlowCheckPanel = ({ flow, status }) => {
                       <Box sx={{display:'flex', flexDirection:'column', gap:1}}>
                         {/* 연결 정보 표시 */}
                         <Box sx={{display:'flex', alignItems:'center', gap:0.5, bgcolor: alpha(theme.palette.grey[200], 0.5), p:1, borderRadius:1}}>
-                          <Chip label={gap.parent_id || gap.from || "?"} size="small" sx={{maxWidth:'40%', height:24}} />
+                          <Chip label={gap.parent_id || '?'} size="small" sx={{maxWidth:'40%', height:24}} />
                           <Typography variant="caption">➡</Typography>
-                          <Chip label={gap.child_id || gap.to || "?"} size="small" sx={{maxWidth:'40%', height:24}} />
+                          <Chip label={gap.child_id || '?'} size="small" sx={{maxWidth:'40%', height:24}} />
                         </Box>
+                        {/* quote 강조 */}
+                        {gap.quote && (
+                          <Box sx={{ mt:1, mb:1, bgcolor: alpha(theme.palette.info.light, 0.15), p:1.5, borderRadius:2 }}>
+                            <Typography variant="body2" sx={{ fontStyle:'italic', color: 'info.main', lineHeight:1.6 }}>
+                              "{gap.quote}"
+                            </Typography>
+                          </Box>
+                        )}
+                        {/* 이유/질문 */}
                         <Box>
-                          <Typography variant="body2" color="text.primary" sx={{fontWeight:'bold', fontSize:'0.85rem'}}>
-                            {gap.reason}
-                          </Typography>
-                          <Typography variant="caption" color="primary.main" sx={{mt:0.5, display:'block'}}>
-                            💡 {gap.suggestion}
-                          </Typography>
+                          {gap.reason && (
+                            <Typography variant="body2" color="text.primary" sx={{fontWeight:'bold', fontSize:'0.95rem', mb:0.5}}>
+                              {gap.reason}
+                            </Typography>
+                          )}
+                          {gap.suggestion && (
+                            <Typography variant="caption" color="primary.main" sx={{mt:0.5, display:'block'}}>
+                              💡 {gap.suggestion}
+                            </Typography>
+                          )}
                         </Box>
                       </Box>
                     }
@@ -622,95 +761,196 @@ const DebugDataDialog = ({ open, onClose, data }) => (
 // 5. Main Content Component
 // -----------------------------------------------------------------------------
 
-const LogicNeuronContent = () => {
-  const { reportId } = useParams();
-  const { status, resultData } = useBackendAnalysis(reportId);
-  const theme = useTheme(); // 테마 사용
-  
-  const [dialogState, setDialogState] = useState({ open: false, content: null });
-  const [snackState, setSnackState] = useState({ open: false, message: '' });
-  const [showDebug, setShowDebug] = useState(false);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false); 
 
-  const handleEdgeClick = useCallback((event, edgeData) => {
+const LogicNeuronContent = () => {
+   const { reportId } = useParams();
+   const { status, resultData } = useBackendAnalysis(reportId);
+   const theme = useTheme();
+
+   // handleEdgeClick을 먼저 선언
+   const handleEdgeClick = useCallback((event, edgeData) => {
     if (event?.stopPropagation) event.stopPropagation();
     const { zone, feedback, suggestion } = edgeData;
     let content = null;
 
     if (zone === 'C') { 
-        const isCreative = feedback?.judgment === 'Creative';
-        
-        const feedbackText = feedback?.feedback || feedback?.reason || feedback?.description || feedback?.text || "AI가 이 연결에 대한 구체적인 코멘트를 생성하지 못했습니다. (데이터 없음)";
-        const reasonText = feedback?.reason || "";
+       const isCreative = feedback?.judgment === 'Creative';
+          
+       const feedbackText = feedback?.feedback || feedback?.reason || feedback?.description || feedback?.text || "AI가 이 연결에 대한 구체적인 코멘트를 생성하지 못했습니다. (데이터 없음)";
+       const reasonText = feedback?.reason || "";
 
-        content = {
-          title: isCreative ? '창의적 사고' : '비약 의심', 
-          type: isCreative ? 'creative' : 'forced',
-          body: (
-            <Box>
-              <Typography variant="subtitle1" sx={{fontWeight:'bold', color: isCreative ? theme.palette.secondary.main : theme.palette.error.main, mb:1}}>
-                 {isCreative ? "탁월한 통찰입니다!" : "논리적 비약이 감지되었습니다."}
-              </Typography>
-              <Paper sx={{ p: 2, bgcolor: alpha(theme.palette.background.default, 0.5), borderRadius: 2, mb: 2 }}>
-                 <Typography variant="subtitle2" color="textSecondary" gutterBottom>분석 결과</Typography>
-                 <Typography variant="body1" sx={{ lineHeight:1.6, fontWeight: 500 }}>
-                    {feedbackText}
-                 </Typography>
+       content = {
+        title: isCreative ? '창의적 사고' : '비약 의심', 
+        type: isCreative ? 'creative' : 'forced',
+        body: (
+          <Box>
+           <Typography variant="subtitle1" sx={{fontWeight:'bold', color: isCreative ? theme.palette.secondary.main : theme.palette.error.main, mb:1}}>
+             {isCreative ? "탁월한 통찰입니다!" : "논리적 비약이 감지되었습니다."}
+           </Typography>
+           <Paper sx={{ p: 2, bgcolor: alpha(theme.palette.background.default, 0.5), borderRadius: 2, mb: 2 }}>
+             <Typography variant="subtitle2" color="textSecondary" gutterBottom>분석 결과</Typography>
+             <Typography variant="body1" sx={{ lineHeight:1.6, fontWeight: 500 }}>
+               {feedbackText}
+             </Typography>
+           </Paper>
+                
+           {reasonText && (
+              <Paper sx={{ p: 2, bgcolor: alpha(theme.palette.warning.light, 0.1), borderRadius: 2, border: `1px solid ${alpha(theme.palette.warning.main, 0.3)}` }}>
+                <Typography variant="subtitle2" color="warning.main" gutterBottom>판단 근거</Typography>
+                <Typography variant="body2" sx={{ lineHeight:1.5, color: 'text.primary' }}>
+                  {reasonText}
+                </Typography>
               </Paper>
-              
-              {reasonText && (
-                  <Paper sx={{ p: 2, bgcolor: alpha(theme.palette.warning.light, 0.1), borderRadius: 2, border: `1px solid ${alpha(theme.palette.warning.main, 0.3)}` }}>
-                     <Typography variant="subtitle2" color="warning.main" gutterBottom>판단 근거</Typography>
-                     <Typography variant="body2" sx={{ lineHeight:1.5, color: 'text.primary' }}>
-                        {reasonText}
-                     </Typography>
-                  </Paper>
-              )}
-            </Box>
-          )
-        };
+           )}
+          </Box>
+        )
+       };
     } else if (zone === 'B') { 
-        let guideText = "";
-        if (typeof suggestion === 'string') {
-            guideText = suggestion;
-        } else if (typeof suggestion === 'object' && suggestion !== null) {
-            guideText = suggestion.socratic_guide || suggestion.question || suggestion.description || suggestion.text || "질문 내용을 찾을 수 없습니다.";
-        } else {
-            guideText = "가이드 데이터가 없습니다.";
-        }
+       let guideText = "";
+       if (typeof suggestion === 'string') {
+          guideText = suggestion;
+       } else if (typeof suggestion === 'object' && suggestion !== null) {
+          guideText = suggestion.socratic_guide || suggestion.question || suggestion.description || suggestion.text || "질문 내용을 찾을 수 없습니다.";
+       } else {
+          guideText = "가이드 데이터가 없습니다.";
+       }
 
-        content = {
-          title: '연결 고리 발견', 
-          type: 'bridge',
-          body: (
-             <Box sx={{ display:'flex', gap: 2 }}>
-                <Box>
-                   <Typography variant="subtitle2" gutterBottom sx={{color:'text.secondary'}}>AITA의 제안</Typography>
-                   <Typography variant="h6" fontWeight="bold" sx={{ color:'warning.main', lineHeight:1.4, mb: 1 }}>
-                      "{guideText}"
-                   </Typography>
-                   <Typography variant="body2" display="block" sx={{ color:'text.secondary' }}>
-                      이 질문에 답하며 두 개념 사이의 맥락을 연결해보세요.
-                   </Typography>
-                </Box>
-             </Box>
-          )
-        };
+       content = {
+        title: '연결 고리 발견', 
+        type: 'bridge',
+        body: (
+          <Box sx={{ display:'flex', gap: 2 }}>
+            <Box>
+              <Typography variant="subtitle2" gutterBottom sx={{color:'text.secondary'}}>AITA의 제안</Typography>
+              <Typography variant="h6" fontWeight="bold" sx={{ color:'warning.main', lineHeight:1.4, mb: 1 }}>
+                "{guideText}"
+              </Typography>
+              <Typography variant="body2" display="block" sx={{ color:'text.secondary' }}>
+                이 질문에 답하며 두 개념 사이의 맥락을 연결해보세요.
+              </Typography>
+            </Box>
+          </Box>
+        )
+       };
     }
 
     if (content) setDialogState({ open: true, content });
-  }, [theme]);
+   }, [theme]);
 
-  const { nodes, edges, onNodesChange, onEdgesChange, isReady } = useGraphLayout(resultData.neuron_map, handleEdgeClick);
+   // 반드시 훅 선언 순서 준수: nodes, edges 등 먼저 선언
+   const { nodes, edges, onNodesChange, onEdgesChange, isReady } = useGraphLayout(resultData?.neuron_map, handleEdgeClick);
 
-  const isTotalLoading = (status === 'init' || status === 'processing') && !resultData.neuron_map;
+   // 1. 이슈 edge 추출 (spark, check, suggestion)
+   const edgeIssues = useMemo(() => {
+      const map = resultData?.neuron_map;
+      if (!map?.edges) return [];
+      const issues = [];
+      // spark, check(빨간선)
+      map.edges.forEach((e) => {
+        const isSpark = e.type === 'questionable';
+        const isCheck = e.type === 'check' || (!isSpark && e.type === 'forced');
+        if (!isSpark && !isCheck) return;
+        let feedback = null;
+        if (isSpark && map.creative_feedbacks) {
+          feedback = map.creative_feedbacks.find(cf =>
+            cf.concepts &&
+            cf.concepts.length === 2 &&
+            cf.concepts.includes(e.source) &&
+            cf.concepts.includes(e.target)
+          );
+        }
+        if (!feedback && (e.reason || e.feedback || e.description)) {
+          feedback = {
+            judgment: e.judgment || 'Check',
+            feedback: e.reason || e.feedback || e.description,
+            reason: e.reason
+          };
+        }
+        issues.push({
+          id: `edge-${e.source}-${e.target}`,
+          source: e.source,
+          target: e.target,
+          isCreative: feedback?.judgment === 'Creative',
+          label: feedback?.judgment === 'Creative' ? '창의적 사고' : '비약 의심',
+          reason: feedback?.reason || '',
+          suggestion: feedback?.feedback || '',
+          edgeRaw: e,
+          type: isSpark ? 'spark' : 'check',
+        });
+      });
+      // suggestion(점선) edge
+      if (Array.isArray(map.suggestions)) {
+        map.suggestions.forEach((s, idx) => {
+          issues.push({
+            id: `suggestion-${idx}`,
+            source: s.target_node,
+            target: s.partner_node,
+            isCreative: false,
+            label: '개념 연결 제안',
+            reason: '',
+            suggestion: typeof s.suggestion === 'string' ? s.suggestion : (s.suggestion?.socratic_guide || s.suggestion?.question || s.suggestion?.description || s.suggestion?.text || ''),
+            edgeRaw: s,
+            type: 'suggestion',
+          });
+        });
+      }
+      return issues;
+    }, [resultData]);
+
+    // 2. 선택된 이슈 edge 상태 + hoveredEdgeId(ghost edge 강조용)
+    const [selectedEdgeId, setSelectedEdgeId] = useState(null);
+    const [hoveredEdgeId, setHoveredEdgeId] = useState(null); // ghost edge hover 효과용
+    const reactFlowInstance = useReactFlow();
+
+    // 3. 사이드바 edge 클릭 핸들러 (reactflow 이동/강조/hover)
+    const handleEdgeIssueSelect = useCallback((edge) => {
+      setSelectedEdgeId(edge.id);
+      // suggestion(ghost) edge 클릭 시 hover 효과도 트리거
+      if (edge.type === 'suggestion') {
+        setHoveredEdgeId(edge.id);
+      }
+      // 해당 edge의 source/target 노드 위치로 이동 (center)
+      const edgeObj = edges.find(e => e.id === edge.id);
+      if (!edgeObj) return;
+      const sourceNode = nodes.find(n => n.id === edgeObj.source);
+      const targetNode = nodes.find(n => n.id === edgeObj.target);
+      if (sourceNode && targetNode) {
+        // 두 노드의 중간 위치 계산
+        const centerX = (sourceNode.position.x + targetNode.position.x) / 2;
+        const centerY = (sourceNode.position.y + targetNode.position.y) / 2;
+        reactFlowInstance.setCenter(centerX, centerY, { zoom: 1.3, duration: 600 });
+      }
+    }, [edges, nodes, reactFlowInstance]);
+
+
+    const [dialogState, setDialogState] = useState({ open: false, content: null });
+    const [snackState, setSnackState] = useState({ open: false, message: '' });
+    const [showDebug, setShowDebug] = useState(false);
+    // Drawer 상태 변수 재선언
+    const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+
+
+    const isTotalLoading = (status === 'init' || status === 'processing') && !resultData?.neuron_map;
 
   return (
     <Box sx={{ width: '100%', height: '100vh', bgcolor: 'background.default', overflow: 'hidden', display:'flex', flexDirection:'column', position: 'relative' }}>
+      {/* 좌측 이슈 사이드바 */}
+      {/* 노드 id→label 맵 생성 */}
+      <EdgeIssueSidebar 
+        edgeIssues={edgeIssues} 
+        onSelect={handleEdgeIssueSelect} 
+        selectedId={selectedEdgeId}
+        nodeMap={useMemo(() => {
+          const map = {};
+          nodes.forEach(n => { map[n.id] = n.data?.label || n.id; });
+          return map;
+        }, [nodes])}
+        isAnalyzing={status === 'init' || status === 'processing' || status === 'partial' || !resultData?.neuron_map}
+      />
       <GlobalKeyframes />
       
       {/* 1. Header */}
-      <Box sx={{ p: 2, px:3, display: 'flex', justifyContent: 'space-between', alignItems:'center', bgcolor: 'background.paper', borderBottom: `1px solid ${theme.palette.divider}`, zIndex: 10, height: 64, flexShrink: 0 }}>
+      <Box sx={{ p: 2, px:3, pl: '370px', display: 'flex', justifyContent: 'space-between', alignItems:'center', bgcolor: 'background.paper', borderBottom: `1px solid ${theme.palette.divider}`, zIndex: 10, height: 64, flexShrink: 0 }}>
         <Typography variant="h6" sx={{ fontWeight: 800, color: 'primary.main' }}>
           개념 연결망 
         </Typography>
@@ -725,7 +965,7 @@ const LogicNeuronContent = () => {
       {status === 'partial' && <LinearProgress color="secondary" sx={{ height: 2, flexShrink: 0 }} />}
 
       {/* 2. Main Content Area */}
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', pl: '340px' }}>
          
          {/* Top: Neuron Map (65%) */}
          <Box sx={{ flex: 6.5, position: 'relative', borderBottom: `1px solid ${theme.palette.divider}`, width: '100%', height: '100%' }}>
@@ -738,8 +978,50 @@ const LogicNeuronContent = () => {
             
             <Box sx={{ width: '100%', height: '100%' }}>
                 <ReactFlow
-                  nodes={nodes} edges={edges}
-                  onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
+                  nodes={nodes}
+                  edges={edges.map(e => {
+                    if (e.type === 'ghost') {
+                      const isHovered = hoveredEdgeId === e.id;
+                      return {
+                        ...e,
+                        data: {
+                          ...e.data,
+                          selected: selectedEdgeId === e.id,
+                          hovered: isHovered
+                        }
+                      };
+                    }
+                    if (selectedEdgeId && e.id === selectedEdgeId) {
+                      return {
+                        ...e,
+                        style: {
+                          ...(e.style || {}),
+                          stroke: '#ffd600',
+                          strokeWidth: (e.style?.strokeWidth || 6) + 6,
+                          opacity: 1,
+                          filter: 'drop-shadow(0 0 12px #ffd600)'
+                        },
+                        data: {
+                          ...e.data,
+                          selected: true
+                        }
+                      };
+                    }
+                    return {
+                      ...e,
+                      style: {
+                        ...(e.style || {}),
+                        opacity: 0.7,
+                        filter: 'none'
+                      },
+                      data: {
+                        ...e.data,
+                        selected: false
+                      }
+                    };
+                  })}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
                   edgeTypes={edgeTypes}
                   fitView minZoom={0.2} maxZoom={4}
                 >
