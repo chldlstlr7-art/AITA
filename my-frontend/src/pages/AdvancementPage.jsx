@@ -558,29 +558,133 @@ function AdvancementPage() {
 
   const renderEdgeIssuesSummary = (deep) => {
     const map = deep?.neuron_map || deep;
-    if (!map?.edges) return (<Typography variant="body2" color="text.secondary">연결 이슈/제안 데이터가 없습니다.</Typography>);
+    if (!map) {
+      return (<Typography variant="body2" color="text.secondary">연결 이슈/제안 데이터가 없습니다.</Typography>);
+    }
 
     const nodeLabel = {};
     (map.nodes || []).forEach(n => { nodeLabel[n.id] = n.label || n.id; });
 
     const issues = [];
-    (map.edges || []).forEach(e => {
-      const isSpark = e.type === 'questionable';
-      const isCheck = e.type === 'check' || e.type === 'forced';
-      if (!isSpark && !isCheck) return;
-      const source = nodeLabel[e.source] || e.source;
-      const target = nodeLabel[e.target] || e.target;
-      issues.push({ id: `edge-${e.source}-${e.target}`, source, target, reason: e.reason || e.description || '', type: isSpark ? '창의적 사고/의심' : '비약 의심' });
-    });
+    
+    // 1) edges 배열 처리 (questionable, check, forced 타입)
+    if (Array.isArray(map.edges)) {
+      map.edges.forEach(e => {
+        const isSpark = e.type === 'questionable';
+        const isCheck = e.type === 'check' || e.type === 'forced';
+        if (!isSpark && !isCheck) return;
+        
+        const source = nodeLabel[e.source] || e.source;
+        const target = nodeLabel[e.target] || e.target;
+        
+        // creative_feedbacks에서 해당 edge의 피드백 찾기
+        let feedback = null;
+        if (isSpark && Array.isArray(map.creative_feedbacks)) {
+          feedback = map.creative_feedbacks.find(cf => 
+            cf.concepts && 
+            cf.concepts.length === 2 &&
+            cf.concepts.includes(e.source) && 
+            cf.concepts.includes(e.target)
+          );
+        }
+        
+        const isCreative = feedback?.judgment === 'Creative';
+        const reason = feedback?.reason || e.reason || e.description || '';
+        const feedbackText = feedback?.feedback || '';
+        
+        issues.push({ 
+          id: `edge-${e.source}-${e.target}`, 
+          source, 
+          target, 
+          reason,
+          feedback: feedbackText,
+          type: isSpark ? (isCreative ? '창의적 사고' : '비약 의심') : '비약 의심',
+          edgeType: e.type,
+          isCreative,
+          details: e.details || e.content || ''
+        });
+      });
+    }
+    
+    // 2) suggestions 배열 처리 (개념 연결 제안)
+    if (Array.isArray(map.suggestions)) {
+      map.suggestions.forEach((s, idx) => {
+        const source = nodeLabel[s.target_node] || s.target_node || '?';
+        const target = nodeLabel[s.partner_node] || s.partner_node || '?';
+        const suggestionText = typeof s.suggestion === 'string' 
+          ? s.suggestion 
+          : (s.suggestion?.socratic_guide || s.suggestion?.question || s.suggestion?.description || '');
+        
+        issues.push({
+          id: `suggestion-${idx}`,
+          source,
+          target,
+          reason: '',
+          feedback: suggestionText,
+          type: '개념 연결 제안',
+          edgeType: 'suggestion',
+          isCreative: false,
+          details: ''
+        });
+      });
+    }
 
-    if (issues.length === 0) return (<Typography variant="body2" color="text.secondary">특이 연결이 감지되지 않았습니다.</Typography>);
+    if (issues.length === 0) {
+      return (<Typography variant="body2" color="text.secondary">특이 연결이 감지되지 않았습니다.</Typography>);
+    }
 
     return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
         {issues.map(it => (
-          <Paper key={it.id} elevation={0} sx={{ p:1.25, borderRadius:1.5, bgcolor: 'background.paper', borderLeft: `4px solid ${ (theme) => theme.palette.primary.main }` }}>
-            <Typography variant="subtitle2" sx={{ fontWeight:700 }}>{it.source} → {it.target}</Typography>
-            {it.reason && <Typography variant="caption" color="text.secondary">{it.reason}</Typography>}
+          <Paper 
+            key={it.id} 
+            elevation={0} 
+            sx={{ 
+              p: 2, 
+              borderRadius: 1.5, 
+              bgcolor: 'background.paper', 
+              borderLeft: `4px solid ${
+                it.isCreative ? '#9c27b0' : 
+                it.edgeType === 'suggestion' ? '#2196f3' : 
+                '#ff9800'
+              }` 
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+              <Chip 
+                label={it.type} 
+                size="small" 
+                sx={{ 
+                  height: 20, 
+                  fontSize: '0.7rem',
+                  fontWeight: 600,
+                  bgcolor: it.isCreative ? alpha('#9c27b0', 0.1) : 
+                           it.edgeType === 'suggestion' ? alpha('#2196f3', 0.1) :
+                           alpha('#ff9800', 0.1),
+                  color: it.isCreative ? '#9c27b0' : 
+                         it.edgeType === 'suggestion' ? '#2196f3' :
+                         '#ff9800'
+                }} 
+              />
+            </Box>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
+              {it.source} → {it.target}
+            </Typography>
+            {it.reason && (
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                <strong>이유:</strong> {it.reason}
+              </Typography>
+            )}
+            {it.feedback && (
+              <Typography variant="body2" color="text.primary" sx={{ mb: 0.5, fontWeight: 500 }}>
+                💡 {it.feedback}
+              </Typography>
+            )}
+            {it.details && (
+              <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                {it.details}
+              </Typography>
+            )}
           </Paper>
         ))}
       </Box>
