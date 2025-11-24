@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext } from 'react';
+import React, { createContext, useState, useContext, useEffect } from 'react';
 import { login as apiLogin } from '../services/api.js'; 
 import { useNavigate } from 'react-router-dom';
 
@@ -49,6 +49,7 @@ export function AuthProvider({ children }) {
     });
     
     const navigate = useNavigate();
+    const [isAutoLoginAttempted, setIsAutoLoginAttempted] = useState(false);
 
     // 인증 데이터를 저장하고 이동하는 "공통" 함수
     const setAuthenticated = (userObject, tokenString) => {
@@ -110,6 +111,31 @@ export function AuthProvider({ children }) {
         localStorage.removeItem('user');
         navigate('/login');
     };
+
+    // 🔥 개발자 자동 로그인 (프로덕션 포함)
+    useEffect(() => {
+        // 개발자 계정 정보 (직접 하드코딩)
+        const DEV_EMAIL = 'dabok2@snu.ac.kr';
+        const DEV_PASSWORD = 'dev_password_123!';
+        const AUTO_LOGIN_ENABLED = true; // false로 변경하면 자동 로그인 비활성화
+
+        // 이미 로그인되어 있거나, 자동 로그인이 비활성화되어 있거나, 이미 시도했으면 패스
+        if (token || !AUTO_LOGIN_ENABLED || isAutoLoginAttempted) {
+            return;
+        }
+
+        // 자동 로그인 시도
+        console.log('🔧 개발자 자동 로그인 시도 중...');
+        setIsAutoLoginAttempted(true);
+        
+        login(DEV_EMAIL, DEV_PASSWORD)
+            .then(() => {
+                console.log('✅ 개발자 자동 로그인 성공!');
+            })
+            .catch((err) => {
+                console.warn('⚠️ 개발자 자동 로그인 실패:', err.message);
+            });
+    }, [token, isAutoLoginAttempted, login]);
 
     const value = {
         user,
