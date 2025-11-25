@@ -66,12 +66,23 @@ function UnsubmittedReports({ reports, onClose }) {
 
   // 🎬 [DEMO] 특정 reportId에 대한 제목 오버라이드
   const getReportTitle = (report) => {
-    const DEMO_REPORT_ID = 'b982b03c-e4ac-4212-bbac-dc3b607eab8b';
+    const DEMO_REPORT_ID = '8d3adadf-9af0-4d19-a43e-0a50ae7b1c09';
     if (report.report_id === DEMO_REPORT_ID) {
-      return '디지털 대전환 시대, 노인은 왜 키오스크 앞에서 작아지는가?';
+      return '조기 전공 확정 시스템, 청년 세대의 진로 불안을 키우는 근본 원인';
     }
     return report.report_title || '제목 없음';
   };
+
+  // 🎬 [DEMO] 데모 리포트를 가장 위로 정렬
+  const sortedReports = React.useMemo(() => {
+    if (!reports || reports.length === 0) return [];
+    
+    const DEMO_REPORT_ID = '8d3adadf-9af0-4d19-a43e-0a50ae7b1c09';
+    const demoReport = reports.find(r => r.report_id === DEMO_REPORT_ID);
+    const otherReports = reports.filter(r => r.report_id !== DEMO_REPORT_ID);
+    
+    return demoReport ? [demoReport, ...otherReports] : reports;
+  }, [reports]);
 
   return (
     <Box>
@@ -89,7 +100,7 @@ function UnsubmittedReports({ reports, onClose }) {
         분석은 완료했지만 아직 과제에 제출하지 않은 리포트 목록입니다
       </Typography>
 
-      {!reports || reports.length === 0 ? (
+      {!sortedReports || sortedReports.length === 0 ? (
         <EmptyState>
           <DescriptionIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
           <Typography variant="body1" color="text.secondary" gutterBottom>
@@ -101,7 +112,7 @@ function UnsubmittedReports({ reports, onClose }) {
         </EmptyState>
       ) : (
         <List disablePadding>
-          {reports.map((report) => (
+          {sortedReports.map((report) => (
             <React.Fragment key={report.report_id}>
               <ReportListItem onClick={() => handleViewReport(report.report_id)}>
                 <ListItemText

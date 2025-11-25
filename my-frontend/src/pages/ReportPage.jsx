@@ -157,9 +157,9 @@ function ReportPage() {
 
   // 🎬 [DEMO] 특정 reportId에 대한 제목 오버라이드
   const getReportTitle = () => {
-    const DEMO_REPORT_ID = 'b982b03c-e4ac-4212-bbac-dc3b607eab8b';
+    const DEMO_REPORT_ID = '8d3adadf-9af0-4d19-a43e-0a50ae7b1c09';
     if (reportId === DEMO_REPORT_ID) {
-      return '디지털 대전환 시대, 노인은 왜 키오스크 앞에서 작아지는가?';
+      return '조기 전공 확정 시스템, 청년 세대의 진로 불안을 키우는 근본 원인';
     }
     return submissionTitle;
   };

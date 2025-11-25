@@ -295,105 +295,63 @@ const useBackendAnalysis = (reportId) => {
   const pollingRef = useRef(null);
 
   // 🎬 데모용 하드코딩 데이터
-  const DEMO_REPORT_ID = 'b982b03c-e4ac-4212-bbac-dc3b607eab8b';
+  const DEMO_REPORT_ID = '8d3adadf-9af0-4d19-a43e-0a50ae7b1c09';
   const DEMO_DATA = {
     flow_disconnects: [
       {
-        child_id: "[원인 분석 1]",
+        child_id: "[첫 번째 논거]",
         issue_type: "Bridge Needed",
-        parent_id: "[핵심 주장]",
-        quote: "디지털 네이티브와 디지털 이주민의 간극",
-        reason: "핵심 주장에서 원인 분석 1로 넘어갈 때, '국가 차원의 맞춤형 교육 필요성'과 '세대 간 차이 인식' 사이에 보다 명확한 연결고리나 설명이 필요합니다.",
+        parent_id: "[주요 주장]",
+        quote: "고등학교 졸업 직후 또는 대학 신입생이 불완전한 정보만으로 4년 후의 산업 동향과 자신의 적성을 정확히 예측하여 최적의 전공을 선택하는 것은 현실적으로 불가능합니다",
+        reason: "정보 부족 상태가 어떻게 구체적으로 정신건강 악화로 이어지는지에 대한 직접적 연결고리 설명이 부족하다.",
         score: 0.5,
-        suggestion: "핵심 주장과 원인 분석 1 사이에서 왜 세대 간 차이가 중요한지 구체적으로 설명해 보면 좋을 것 같아요."
-      },
-      {
-        child_id: "[사례 1]",
-        issue_type: "Bridge Needed",
-        parent_id: "[원인 분석 1]",
-        quote: "디지털 네이티브와 디지털 이주민의 간극",
-        reason: "원인 분석 1('기술 학습에 대한 심리적 장애')이 사례(E1)와 어떻게 연결되는지에 대한 추가 설명이 필요합니다. 현재는 단순히 디지털화된 일상생활 예시만 제시되었어요.",
-        score: 0.7,
-        suggestion: "디지털 이주민이 왜 이러한 서비스 변화에 심리적으로 어려움을 느끼는지 더 자세히 설명해 주는 게 좋겠어요."
+        suggestion: "정보 부족 상황이 학생들에게 어떤 심리적 부담을 주는지 구체적 메커니즘을 추가해 보면 좋을 것 같아요"
       }
     ],
     integrity_issues: [
       {
-        quote: "'최근 연구에 따르면'",
-        reason: "연구 출처나 구체적인 데이터를 제시하지 않아 신뢰성이 낮음.",
-        socratic_suggestion: "'최근 연구'라면 어느 기관/학자의 연구인가요? 특정 자료를 인용하면 더 설득력이 높아질 것 같아요.",
+        quote: "경험적 증거: \"다시 대학에 간다면 전공을 바꾸고 싶다\"는 대규모 설문조사 결과는 현행 조기 확정 시스템의 실패를 명확하게 보여주는 지표입니다.",
+        reason: "설문조사의 출처와 규모, 시기 등이 명시되지 않아 정보의 신뢰성이 낮음.",
+        socratic_suggestion: "설문조사가 어느 기관에서 언제 실시되었는지, 응답자 규모와 표본 추출 방식 등을 구체적으로 밝히면 독자의 신뢰를 높일 수 있지 않을까요?",
         type: "Ambiguity"
       },
       {
-        quote: "'모든 노인들이 유튜브의 가짜 정치 뉴스를 맹신하고 있다'",
-        reason: "노인 전체를 동일시하는 과도한 일반화 표현.",
-        socratic_suggestion: "'일부 노인들이...' 정도로 수정한다면 통계적 맥락을 반영하면서도 부정적 이미지를 완화할 수 있지 않을까요?",
-        type: "Overgeneralization"
-      },
-      {
-        quote: "스마트폰 뱅킹을 할 줄 모르는 노인들은... 모바일 전용 금리 우대 혜택이나 온라인 최저가 쇼핑의 혜택도 누리지 못한다",
-        reason: "디지털 미숙지가 경제적 손실로 이어진다는 주장에 대한 구체적 사례나 통계 자료가 없음.",
-        socratic_suggestion: "금융감독원 발표 자료 등에서 실제로 발생한 피해 금액이나 사례를 추가하면 주장의 타당성이 높아지지 않을까요?",
+        quote: "대학의 폐쇄적인 전공 변경 및 융합 교육 환경은 학생들의 자기 효능감 발달을 저해하고 진로를 수동적으로 인식하게 만듭니다.",
+        reason: "시스템의 경직성이 자기효능감 저하로 이어지는 메커니즘에 대한 근거나 설명이 생략됨.",
+        socratic_suggestion: "폐쇄적 제도가 실제로 학습 동기나 역량 계발에 부정적 영향을 미친다는 심리학적 이론이나 비교 연구 결과를 함께 제시한다면 주장이 더욱 탄탄해질 것 같아요.",
         type: "Logical Leap"
       }
     ],
     neuron_map: {
       creative_feedbacks: [
         {
-          concepts: ["디지털 빈곤", "고령자 모드"],
+          concepts: ["진로 불안", "정보 비대칭성"],
+          feedback: "전공 선택 과정에서의 정보 부족이 개인에게 미치는 영향을 사회경제적 문제로 확장한 점이 인상적이에요!",
           judgment: "Creative",
-          feedback: "디지털 빈곤 문제를 기술적 접근(고령자 모드)으로 해결하려는 시도는 매우 창의적입니다. 단순히 교육만으로는 해결할 수 없는 인터페이스 설계의 문제를 지적하고 있어요.",
-          reason: "경제적 불평등과 기술적 해결책을 연결하여, 다층적인 문제 해결 방안을 제시하는 통찰력 있는 연결입니다."
-        },
-        {
-          concepts: ["디지털 리터러시", "사회적 배제"],
-          judgment: "Check",
-          feedback: "디지털 리터러시 부족이 사회적 배제로 직접 연결된다는 주장은 다소 비약이 있을 수 있습니다. 중간 단계(예: 정보 접근성 제한, 경제활동 제약 등)에 대한 설명이 필요합니다.",
-          reason: "원인과 결과 사이에 여러 매개 변수가 존재하는데, 이를 생략하고 직접 연결하고 있습니다."
+          reason: "교육 시스템의 문제를 경제적 개념인 '정보 비대칭성'으로 해석해 새로운 관점을 제시했어요."
         }
       ],
       edges: [
-        { source: "디지털 네이티브/이주민", target: "찾아가는 교육", type: "normal", weight: 0.31 },
-        { source: "디지털 네이티브/이주민", target: "사회적 배제", type: "normal", weight: 0.3 },
-        { source: "디지털 리터러시", target: "고령자 모드", type: "normal", weight: 0.33 },
-        { source: "디지털 빈곤", target: "사회적 배제", type: "normal", weight: 0.32 },
-        { source: "찾아가는 교육", target: "사회적 배제", type: "normal", weight: 0.31 },
-        { source: "고령자 모드", target: "사회적 배제", type: "normal", weight: 0.33 },
-        { source: "디지털 빈곤", target: "고령자 모드", type: "questionable", weight: 0.28, 
-          reason: "디지털 빈곤과 고령자 모드 사이의 창의적 연결",
-          judgment: "Creative" },
-        { source: "디지털 리터러시", target: "사회적 배제", type: "questionable", weight: 0.25,
-          reason: "디지털 리터러시에서 사회적 배제로의 직접 연결",
-          judgment: "Check" }
+        { source: "진로 불안", target: "정보 비대칭성", type: "questionable", weight: 0.33 },
+        { source: "진로 불안", target: "전공 유연화", type: "normal", weight: 0.36 }
       ],
       nodes: [
-        { id: "디지털 네이티브/이주민", label: "디지털 네이티브/이주민" },
-        { id: "디지털 리터러시", label: "디지털 리터러시" },
-        { id: "디지털 빈곤", label: "디지털 빈곤" },
-        { id: "찾아가는 교육", label: "찾아가는 교육" },
-        { id: "고령자 모드", label: "고령자 모드" },
-        { id: "사회적 배제", label: "사회적 배제" }
+        { id: "진로 불안", label: "진로 불안" },
+        { id: "정보 비대칭성", label: "정보 비대칭성" },
+        { id: "자기 효능감 저하", label: "자기 효능감 저하" },
+        { id: "무전공 입학제", label: "무전공 입학제" },
+        { id: "전공 유연화", label: "전공 유연화" }
       ],
       suggestions: [
         {
-          target_node: "고령자 모드",
-          partner_node: "디지털 네이티브/이주민",
-          suggestion: {
-            socratic_guide: "고령자 모드라는 기술적 해결책이 세대 간 격차를 어떻게 좁힐 수 있을까요?",
-            question: "디지털 네이티브들이 설계한 '고령자 모드'가 정말 디지털 이주민의 니즈를 제대로 반영할 수 있을까요? 사용자 참여형 설계의 필요성은 없을까요?",
-            description: "기술 제공자와 수혜자의 관점 차이를 논의하면 더욱 깊이 있는 분석이 될 것입니다."
-          },
-          score: 0.82
+          target_node: "자기 효능감 저하",
+          partner_node: "무전공 입학제",
+          suggestion: "무전공 입학제가 학생들에게 전공 선택의 자유를 준다고 홍보하지만, 오히려 자기 효능감 저하로 이어질 수 있다고 보나요? 만약 그렇다면, 그 이유는 무엇일까요?"
         },
         {
-          target_node: "찾아가는 교육",
-          partner_node: "디지털 빈곤",
-          suggestion: {
-            socratic_guide: "교육만으로 경제적 디지털 빈곤 문제를 해결할 수 있을까요?",
-            question: "찾아가는 교육이 디지털 기기 구매 능력이 없는 계층에게는 어떤 의미가 있을까요? 교육과 함께 기기 지원 정책도 필요하지 않을까요?",
-            description: "교육 접근성과 경제적 접근성을 함께 고려하면 보다 포괄적인 해결책을 제시할 수 있습니다."
-          },
-          score: 0.79
+          target_node: "무전공 입학제",
+          partner_node: "자기 효능감 저하",
+          suggestion: "자기 효능감이 낮은 학생들은 무전공 입학제의 유연성 속에서 더 큰 혼란을 겪을 것이라 생각하나요? 이러한 상황이 진로 불안과 어떻게 연결될까요?"
         }
       ]
     },
@@ -467,11 +425,57 @@ const useBackendAnalysis = (reportId) => {
   return { status, resultData };
 };
 
-const useGraphLayout = (neuronMap, onEdgeClick, onMouseEnter, onMouseLeave) => {
+const useGraphLayout = (neuronMap, onEdgeClick, onMouseEnter, onMouseLeave, reportId) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const { fitView } = useReactFlow();
   const processedRef = useRef(false);
+
+  // localStorage 키 생성
+  const getStorageKey = () => `reactflow-positions-${reportId}`;
+
+  // 위치 저장
+  const savePositions = useCallback((nodes) => {
+    try {
+      const positions = nodes.map(n => ({
+        id: n.id,
+        position: n.position
+      }));
+      localStorage.setItem(getStorageKey(), JSON.stringify(positions));
+    } catch (err) {
+      console.warn('Failed to save node positions:', err);
+    }
+  }, [reportId]);
+
+  // 위치 불러오기
+  const loadPositions = useCallback(() => {
+    try {
+      const saved = localStorage.getItem(getStorageKey());
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (err) {
+      console.warn('Failed to load node positions:', err);
+    }
+    return null;
+  }, [reportId]);
+
+  // 노드 변경 시 위치 저장
+  const handleNodesChange = useCallback((changes) => {
+    onNodesChange(changes);
+    
+    // position 변경이 있을 때만 저장
+    const hasPositionChange = changes.some(c => c.type === 'position' && !c.dragging);
+    if (hasPositionChange) {
+      // 약간의 지연을 두고 저장 (성능 최적화)
+      setTimeout(() => {
+        setNodes((currentNodes) => {
+          savePositions(currentNodes);
+          return currentNodes;
+        });
+      }, 300);
+    }
+  }, [onNodesChange, savePositions, setNodes]);
 
   useEffect(() => {
     if (!neuronMap?.nodes || processedRef.current) return;
@@ -563,8 +567,16 @@ const useGraphLayout = (neuronMap, onEdgeClick, onMouseEnter, onMouseLeave) => {
 
     simulation.tick(300);
 
+    // 저장된 위치가 있으면 사용, 없으면 시뮬레이션 결과 사용
+    const savedPositions = loadPositions();
+    const positionMap = savedPositions?.reduce((acc, p) => {
+      acc[p.id] = p.position;
+      return acc;
+    }, {});
+
     const layoutedNodes = initialNodes.map((n, i) => ({
-       ...n, position: { x: simNodes[i].x, y: simNodes[i].y } 
+       ...n, 
+       position: positionMap?.[n.id] || { x: simNodes[i].x, y: simNodes[i].y } 
     }));
 
     setNodes(layoutedNodes);
@@ -573,9 +585,9 @@ const useGraphLayout = (neuronMap, onEdgeClick, onMouseEnter, onMouseLeave) => {
 
     setTimeout(() => fitView({ duration: 1000, padding: 0.2 }), 100);
 
-  }, [neuronMap, setNodes, setEdges, fitView, onEdgeClick, onMouseEnter, onMouseLeave]);
+  }, [neuronMap, setNodes, setEdges, fitView, onEdgeClick, onMouseEnter, onMouseLeave, loadPositions]);
 
-  return { nodes, edges, onNodesChange, onEdgesChange, isReady: processedRef.current };
+  return { nodes, edges, onNodesChange: handleNodesChange, onEdgesChange, isReady: processedRef.current };
 };
 
 // -----------------------------------------------------------------------------
@@ -928,7 +940,7 @@ const LogicNeuronContent = () => {
    }, [theme]);
 
    // 반드시 훅 선언 순서 준수: nodes, edges 등 먼저 선언
-   const { nodes, edges, onNodesChange, onEdgesChange, isReady } = useGraphLayout(resultData?.neuron_map, handleEdgeClick, handleEdgeMouseEnter, handleEdgeMouseLeave);
+   const { nodes, edges, onNodesChange, onEdgesChange, isReady } = useGraphLayout(resultData?.neuron_map, handleEdgeClick, handleEdgeMouseEnter, handleEdgeMouseLeave, reportId);
 
    // 1. 이슈 edge 추출 (spark, check, suggestion)
    const edgeIssues = useMemo(() => {
