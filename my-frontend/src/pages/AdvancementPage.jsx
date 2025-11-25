@@ -70,6 +70,42 @@ const DEV_EMAILS = [
 const POLLING_INTERVAL = 3000;
 const MAX_POLLING_ATTEMPTS = 60;
 
+// 🎬 [DEMO] 데모용 리포트 ID 및 발전 아이디어
+const DEMO_REPORT_ID = '8d3adadf-9af0-4d19-a43e-0a50ae7b1c09';
+const DEMO_ADVANCEMENT_IDEAS = [
+  {
+    "idea": "단순 입시 홍보를 넘어, 고교생이 미리 전공 적성을 확인하고 정보를 얻을 수 있는 '오픈 캠퍼스(전공 체험)'를 운영해보는 건 어떨까요?",
+    "evidence": [
+      {
+        "q": "대학의 진로 프로그램으로 정보 격차 해소가 가능하다면 왜 리포트에선 이를 배제했나요?",
+        "a": "현 시스템상 고등학생이 대학 프로그램에 사전 접근하기 어려운 구조적 한계가 있음"
+      }
+    ]
+  },
+  {
+    "idea": "경직된 전공 체계를 보완하기 위해 복수전공·융합전공 확대와 현장 연계 학습 프로그램 활성화를 통한 다각적 진로 탐색 경로를 설계해보는 건 어떨까요?",
+    "evidence": [
+      {
+        "q": "전공 변경의 어려움 때문에 진로 탐색이 제한된다고 했는데, 다른 방식의 탐색 기회는 없을까요?",
+        "a": "복수전공 허용 확대 등으로 유연한 역량 계발 경로가 필요하다"
+      },
+      {
+        "q": "전공 외 분야 탐색 차단을 극복하려면 어떤 정책이 필요한가요?",
+        "a": "현장 실습·인턴십 제도화로 실질적인 직업 체험 기회 제공이 요구됨"
+      }
+    ]
+  },
+  {
+    "idea": "'AI 기반 맞춤형 진로 컨설팅 시스템' 구축을 통해 정보 비대칭성 문제의 기술적 해결책을 탐색해보는 것은 어떨까요?",
+    "evidence": [
+      {
+        "q": "제한된 정보로 전공 선택 오류가 발생한다는 문제의 구체적 해결 방안은?",
+        "a": "빅데이터 분석을 통한 개인별 성향·시장 수요 매칭 서비스 개발 필요"
+      }
+    ]
+  }
+];
+
 // ==================== Styled Components ====================
 
 const PageContainer = styled(Box)(({ theme }) => ({
@@ -254,7 +290,10 @@ function AdvancementPage() {
         if (response.status === 'completed' || response.status === 'processing_questions') {
           setReportData(response.data);
           
-          if (response.data?.advancement_ideas) {
+          // 🎬 [DEMO] 데모 리포트일 경우 하드코딩된 발전 아이디어 사용
+          if (reportId === DEMO_REPORT_ID) {
+            setIdeas(DEMO_ADVANCEMENT_IDEAS);
+          } else if (response.data?.advancement_ideas) {
             const parsed = typeof response.data.advancement_ideas === 'string'
               ? JSON.parse(response.data.advancement_ideas)
               : response.data.advancement_ideas;

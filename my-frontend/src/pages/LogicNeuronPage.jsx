@@ -329,10 +329,17 @@ const useBackendAnalysis = (reportId) => {
           feedback: "전공 선택 과정에서의 정보 부족이 개인에게 미치는 영향을 사회경제적 문제로 확장한 점이 인상적이에요!",
           judgment: "Creative",
           reason: "교육 시스템의 문제를 경제적 개념인 '정보 비대칭성'으로 해석해 새로운 관점을 제시했어요."
+        },
+        {
+          concepts: ["자기 효능감 저하", "전공 유연화"],
+          feedback: "자기 효능감 저하와 전공 유연화 정책 사이의 직접적 인과관계가 명확하지 않습니다. 전공 유연화가 어떤 메커니즘을 통해 학생들의 자기 효능감 저하로 이어지는지 구체적인 설명이 필요합니다.",
+          judgment: "Check",
+          reason: "두 개념 간의 논리적 연결 고리가 약하며, 중간 단계의 설명 없이 결론으로 비약하는 경향이 있습니다."
         }
       ],
       edges: [
         { source: "진로 불안", target: "정보 비대칭성", type: "questionable", weight: 0.33 },
+        { source: "자기 효능감 저하", target: "전공 유연화", type: "questionable", weight: 0.28 },
         { source: "진로 불안", target: "전공 유연화", type: "normal", weight: 0.36 }
       ],
       nodes: [
