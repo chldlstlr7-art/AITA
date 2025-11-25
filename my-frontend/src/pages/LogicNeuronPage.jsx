@@ -186,7 +186,7 @@ const SparkEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, tar
   );
 };
 
-const GhostEdge = ({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, data }) => {
+const GhostEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, data }) => {
    const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
    // 외부에서 hovered prop을 받아 강조 효과를 제어
    const isHovered = !!data?.hovered;
@@ -196,9 +196,19 @@ const GhostEdge = ({ sourceX, sourceY, targetX, targetY, sourcePosition, targetP
      data?.onEdgeClick?.(evt, data);
    };
 
+   const handleMouseEnter = () => {
+     data?.onMouseEnter?.(id);
+   };
+
+   const handleMouseLeave = () => {
+     data?.onMouseLeave?.();
+   };
+
    return (
      <g 
         onClick={handleGhostClick}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
         style={{ cursor: 'pointer' }}
      >
        <path d={edgePath} stroke="transparent" strokeWidth={30} fill="none" style={{ pointerEvents: 'stroke' }} />
@@ -284,8 +294,124 @@ const useBackendAnalysis = (reportId) => {
   });
   const pollingRef = useRef(null);
 
+  // 🎬 데모용 하드코딩 데이터
+  const DEMO_REPORT_ID = '2381065f-68eb-431a-835d-4050833f4a82';
+  const DEMO_DATA = {
+    flow_disconnects: [
+      {
+        child_id: "[원인 분석 1]",
+        issue_type: "Bridge Needed",
+        parent_id: "[핵심 주장]",
+        quote: "디지털 네이티브와 디지털 이주민의 간극",
+        reason: "핵심 주장에서 원인 분석 1로 넘어갈 때, '국가 차원의 맞춤형 교육 필요성'과 '세대 간 차이 인식' 사이에 보다 명확한 연결고리나 설명이 필요합니다.",
+        score: 0.5,
+        suggestion: "핵심 주장과 원인 분석 1 사이에서 왜 세대 간 차이가 중요한지 구체적으로 설명해 보면 좋을 것 같아요."
+      },
+      {
+        child_id: "[사례 1]",
+        issue_type: "Bridge Needed",
+        parent_id: "[원인 분석 1]",
+        quote: "디지털 네이티브와 디지털 이주민의 간극",
+        reason: "원인 분석 1('기술 학습에 대한 심리적 장애')이 사례(E1)와 어떻게 연결되는지에 대한 추가 설명이 필요합니다. 현재는 단순히 디지털화된 일상생활 예시만 제시되었어요.",
+        score: 0.7,
+        suggestion: "디지털 이주민이 왜 이러한 서비스 변화에 심리적으로 어려움을 느끼는지 더 자세히 설명해 주는 게 좋겠어요."
+      }
+    ],
+    integrity_issues: [
+      {
+        quote: "'최근 연구에 따르면'",
+        reason: "연구 출처나 구체적인 데이터를 제시하지 않아 신뢰성이 낮음.",
+        socratic_suggestion: "'최근 연구'라면 어느 기관/학자의 연구인가요? 특정 자료를 인용하면 더 설득력이 높아질 것 같아요.",
+        type: "Ambiguity"
+      },
+      {
+        quote: "'모든 노인들이 유튜브의 가짜 정치 뉴스를 맹신하고 있다'",
+        reason: "노인 전체를 동일시하는 과도한 일반화 표현.",
+        socratic_suggestion: "'일부 노인들이...' 정도로 수정한다면 통계적 맥락을 반영하면서도 부정적 이미지를 완화할 수 있지 않을까요?",
+        type: "Overgeneralization"
+      },
+      {
+        quote: "스마트폰 뱅킹을 할 줄 모르는 노인들은... 모바일 전용 금리 우대 혜택이나 온라인 최저가 쇼핑의 혜택도 누리지 못한다",
+        reason: "디지털 미숙지가 경제적 손실로 이어진다는 주장에 대한 구체적 사례나 통계 자료가 없음.",
+        socratic_suggestion: "금융감독원 발표 자료 등에서 실제로 발생한 피해 금액이나 사례를 추가하면 주장의 타당성이 높아지지 않을까요?",
+        type: "Logical Leap"
+      }
+    ],
+    neuron_map: {
+      creative_feedbacks: [
+        {
+          concepts: ["디지털 빈곤", "고령자 모드"],
+          judgment: "Creative",
+          feedback: "디지털 빈곤 문제를 기술적 접근(고령자 모드)으로 해결하려는 시도는 매우 창의적입니다. 단순히 교육만으로는 해결할 수 없는 인터페이스 설계의 문제를 지적하고 있어요.",
+          reason: "경제적 불평등과 기술적 해결책을 연결하여, 다층적인 문제 해결 방안을 제시하는 통찰력 있는 연결입니다."
+        },
+        {
+          concepts: ["디지털 리터러시", "사회적 배제"],
+          judgment: "Check",
+          feedback: "디지털 리터러시 부족이 사회적 배제로 직접 연결된다는 주장은 다소 비약이 있을 수 있습니다. 중간 단계(예: 정보 접근성 제한, 경제활동 제약 등)에 대한 설명이 필요합니다.",
+          reason: "원인과 결과 사이에 여러 매개 변수가 존재하는데, 이를 생략하고 직접 연결하고 있습니다."
+        }
+      ],
+      edges: [
+        { source: "디지털 네이티브/이주민", target: "찾아가는 교육", type: "normal", weight: 0.31 },
+        { source: "디지털 네이티브/이주민", target: "사회적 배제", type: "normal", weight: 0.3 },
+        { source: "디지털 리터러시", target: "고령자 모드", type: "normal", weight: 0.33 },
+        { source: "디지털 빈곤", target: "사회적 배제", type: "normal", weight: 0.32 },
+        { source: "찾아가는 교육", target: "사회적 배제", type: "normal", weight: 0.31 },
+        { source: "고령자 모드", target: "사회적 배제", type: "normal", weight: 0.33 },
+        { source: "디지털 빈곤", target: "고령자 모드", type: "questionable", weight: 0.28, 
+          reason: "디지털 빈곤과 고령자 모드 사이의 창의적 연결",
+          judgment: "Creative" },
+        { source: "디지털 리터러시", target: "사회적 배제", type: "questionable", weight: 0.25,
+          reason: "디지털 리터러시에서 사회적 배제로의 직접 연결",
+          judgment: "Check" }
+      ],
+      nodes: [
+        { id: "디지털 네이티브/이주민", label: "디지털 네이티브/이주민" },
+        { id: "디지털 리터러시", label: "디지털 리터러시" },
+        { id: "디지털 빈곤", label: "디지털 빈곤" },
+        { id: "찾아가는 교육", label: "찾아가는 교육" },
+        { id: "고령자 모드", label: "고령자 모드" },
+        { id: "사회적 배제", label: "사회적 배제" }
+      ],
+      suggestions: [
+        {
+          target_node: "고령자 모드",
+          partner_node: "디지털 네이티브/이주민",
+          suggestion: {
+            socratic_guide: "고령자 모드라는 기술적 해결책이 세대 간 격차를 어떻게 좁힐 수 있을까요?",
+            question: "디지털 네이티브들이 설계한 '고령자 모드'가 정말 디지털 이주민의 니즈를 제대로 반영할 수 있을까요? 사용자 참여형 설계의 필요성은 없을까요?",
+            description: "기술 제공자와 수혜자의 관점 차이를 논의하면 더욱 깊이 있는 분석이 될 것입니다."
+          },
+          score: 0.82
+        },
+        {
+          target_node: "찾아가는 교육",
+          partner_node: "디지털 빈곤",
+          suggestion: {
+            socratic_guide: "교육만으로 경제적 디지털 빈곤 문제를 해결할 수 있을까요?",
+            question: "찾아가는 교육이 디지털 기기 구매 능력이 없는 계층에게는 어떤 의미가 있을까요? 교육과 함께 기기 지원 정책도 필요하지 않을까요?",
+            description: "교육 접근성과 경제적 접근성을 함께 고려하면 보다 포괄적인 해결책을 제시할 수 있습니다."
+          },
+          score: 0.79
+        }
+      ]
+    },
+    status: "completed"
+  };
+
   const pollData = useCallback(async () => {
     try {
+      // 🎬 데모 모드: 특정 reportId일 때 하드코딩 데이터 반환
+      if (reportId === DEMO_REPORT_ID) {
+        console.log('🎬 [DEMO MODE] 하드코딩된 데이터 사용 중');
+        setResultData(DEMO_DATA);
+        try { saveDeepAnalysis(reportId, DEMO_DATA); } catch (err) { console.warn('saveDeepAnalysis failed', err); }
+        setStatus('done');
+        return true;
+      }
+
+      // 일반 모드: 실제 백엔드 호출
       const response = await getDeepAnalysisResult(reportId);
       const innerData = response?.data || response; 
 
@@ -341,7 +467,7 @@ const useBackendAnalysis = (reportId) => {
   return { status, resultData };
 };
 
-const useGraphLayout = (neuronMap, onEdgeClick) => {
+const useGraphLayout = (neuronMap, onEdgeClick, onMouseEnter, onMouseLeave) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const { fitView } = useReactFlow();
@@ -370,7 +496,7 @@ const useGraphLayout = (neuronMap, onEdgeClick) => {
         textAlign: 'center', 
         boxShadow: '0 6px 15px rgba(0,0,0,0.12)', 
         color: '#263238',
-        zIndex: 100
+        zIndex: 10
       },
     }));
 
@@ -405,7 +531,7 @@ const useGraphLayout = (neuronMap, onEdgeClick) => {
         id: `edge-${e.source}-${e.target}`,
         source: e.source, target: e.target,
         type: isQuestionable ? 'spark' : 'default', 
-        zIndex: isQuestionable ? 10 : 1,
+        zIndex: isQuestionable ? 100 : 1,
         style: isQuestionable ? {} : { stroke: '#546e7a', strokeWidth, opacity: 0.7 },
         markerEnd: undefined, // 삼각형 화살표 제거
         data: { zone: isQuestionable ? 'C' : 'A', weight: e.weight, feedback, onEdgeClick }
@@ -419,9 +545,9 @@ const useGraphLayout = (neuronMap, onEdgeClick) => {
         type: 'ghost', 
         animated: true, 
         hidden: false, 
-        zIndex: 5,
+        zIndex: 50,
         markerEnd: undefined, // 삼각형 화살표 제거
-        data: { zone: 'B', suggestion: s.suggestion, onEdgeClick }
+        data: { zone: 'B', suggestion: s.suggestion, onEdgeClick, onMouseEnter, onMouseLeave }
       });
     });
 
@@ -447,7 +573,7 @@ const useGraphLayout = (neuronMap, onEdgeClick) => {
 
     setTimeout(() => fitView({ duration: 1000, padding: 0.2 }), 100);
 
-  }, [neuronMap, setNodes, setEdges, fitView, onEdgeClick]);
+  }, [neuronMap, setNodes, setEdges, fitView, onEdgeClick, onMouseEnter, onMouseLeave]);
 
   return { nodes, edges, onNodesChange, onEdgesChange, isReady: processedRef.current };
 };
@@ -722,6 +848,15 @@ const LogicNeuronContent = () => {
    const theme = useTheme();
   const navigate = useNavigate();
 
+   // hover 핸들러 추가
+   const handleEdgeMouseEnter = useCallback((edgeId) => {
+     setHoveredEdgeId(edgeId);
+   }, []);
+
+   const handleEdgeMouseLeave = useCallback(() => {
+     setHoveredEdgeId(null);
+   }, []);
+
    // handleEdgeClick을 먼저 선언
    const handleEdgeClick = useCallback((event, edgeData) => {
     if (event?.stopPropagation) event.stopPropagation();
@@ -793,7 +928,7 @@ const LogicNeuronContent = () => {
    }, [theme]);
 
    // 반드시 훅 선언 순서 준수: nodes, edges 등 먼저 선언
-   const { nodes, edges, onNodesChange, onEdgesChange, isReady } = useGraphLayout(resultData?.neuron_map, handleEdgeClick);
+   const { nodes, edges, onNodesChange, onEdgesChange, isReady } = useGraphLayout(resultData?.neuron_map, handleEdgeClick, handleEdgeMouseEnter, handleEdgeMouseLeave);
 
    // 1. 이슈 edge 추출 (spark, check, suggestion)
    const edgeIssues = useMemo(() => {
@@ -821,16 +956,20 @@ const LogicNeuronContent = () => {
             reason: e.reason
           };
         }
+        
+        // 🔥 수정: judgment에 따라 라벨 결정
+        const isCreativeJudgment = feedback?.judgment === 'Creative';
+        
         issues.push({
           id: `edge-${e.source}-${e.target}`,
           source: e.source,
           target: e.target,
-          isCreative: feedback?.judgment === 'Creative',
-          label: feedback?.judgment === 'Creative' ? '창의적 사고' : '비약 의심',
+          isCreative: isCreativeJudgment,
+          label: isCreativeJudgment ? '창의적 사고' : '비약 의심',
           reason: feedback?.reason || '',
           suggestion: feedback?.feedback || '',
           edgeRaw: e,
-          type: isSpark ? 'spark' : 'check',
+          type: isCreativeJudgment ? 'spark' : 'check',
         });
       });
       // suggestion(점선) edge

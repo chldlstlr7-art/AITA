@@ -64,6 +64,15 @@ function UnsubmittedReports({ reports, onClose }) {
     onClose();
   };
 
+  // 🎬 [DEMO] 특정 reportId에 대한 제목 오버라이드
+  const getReportTitle = (report) => {
+    const DEMO_REPORT_ID = '2381065f-68eb-431a-835d-4050833f4a82';
+    if (report.report_id === DEMO_REPORT_ID) {
+      return '디지털 대전환 시대, 노인은 왜 키오스크 앞에서 작아지는가?';
+    }
+    return report.report_title || '제목 없음';
+  };
+
   return (
     <Box>
       <DrawerHeader>
@@ -99,7 +108,7 @@ function UnsubmittedReports({ reports, onClose }) {
                   primary={
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                       <Typography variant="subtitle2" sx={{ fontWeight: 600 }} noWrap>
-                        {report.report_title || '제목 없음'}
+                        {getReportTitle(report)}
                       </Typography>
                       <Chip
                         label={report.status === 'completed' ? '분석 완료' : '처리 중'}
