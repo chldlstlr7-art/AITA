@@ -66,7 +66,7 @@ function UnsubmittedReports({ reports, onClose }) {
 
   // 🎬 [DEMO] 특정 reportId에 대한 제목 오버라이드
   const getReportTitle = (report) => {
-    const DEMO_REPORT_ID = '2381065f-68eb-431a-835d-4050833f4a82';
+    const DEMO_REPORT_ID = 'b982b03c-e4ac-4212-bbac-dc3b607eab8b';
     if (report.report_id === DEMO_REPORT_ID) {
       return '디지털 대전환 시대, 노인은 왜 키오스크 앞에서 작아지는가?';
     }

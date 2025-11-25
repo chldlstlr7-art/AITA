@@ -295,7 +295,7 @@ const useBackendAnalysis = (reportId) => {
   const pollingRef = useRef(null);
 
   // 🎬 데모용 하드코딩 데이터
-  const DEMO_REPORT_ID = '2381065f-68eb-431a-835d-4050833f4a82';
+  const DEMO_REPORT_ID = 'b982b03c-e4ac-4212-bbac-dc3b607eab8b';
   const DEMO_DATA = {
     flow_disconnects: [
       {
